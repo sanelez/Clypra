@@ -44,21 +44,27 @@ export function Waveform({ peaks, width, height, className }: WaveformProps) {
       // If no peaks data, render empty state
       if (!peaks || peaks.length === 0) return;
 
-      const barWidth = width / peaks.length;
       const centerY = height / 2;
 
       ctx.fillStyle = "#10b981"; // emerald-500
 
-      // CapCut-style block bars with 40% gap between bars
-      const gapRatio = 0.4;
-      const barDrawWidth = barWidth * (1 - gapRatio);
+      // CapCut-style thin waveform with high density
+      // Fixed: 1px bar width with 1px gap = 2px per bar (very dense like reference)
+      const pixelsPerBar = 2;
+      const totalBars = Math.ceil(width / pixelsPerBar);
+      const step = Math.max(1, Math.floor(peaks.length / totalBars));
 
-      for (let i = 0; i < peaks.length; i++) {
-        const barHeight = peaks[i] * centerY;
-        const x = i * barWidth + (barWidth * gapRatio) / 2;
+      for (let i = 0; i < totalBars; i++) {
+        // Sample from peaks array
+        const peakIndex = Math.min(i * step, peaks.length - 1);
+        const peakValue = peaks[peakIndex];
 
-        // Draw block-style bar with rounded top
-        ctx.fillRect(x, centerY - barHeight, Math.max(1, barDrawWidth), barHeight * 2);
+        // Thinner bars - only 1px wide
+        const barHeight = Math.max(2, peakValue * centerY * 0.85); // slightly scaled down
+        const x = i * pixelsPerBar;
+
+        // Draw thin vertical line
+        ctx.fillRect(x, centerY - barHeight, 1, barHeight * 2);
       }
     });
 
