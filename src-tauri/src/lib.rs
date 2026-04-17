@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use tauri::Manager;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
@@ -447,13 +448,16 @@ async fn extract_filmstrip_frames(
     // Add hardware acceleration args before -i
     ffmpeg_args.extend(hwaccel_args.iter().cloned());
     
+    // Create filter string with proper lifetime
+    let filter_str = format!(
+        "select='{}',scale={}:force_original_aspect_ratio=decrease,pad={}:(ow-iw)/2:(oh-ih)/2:black,setpts=N/FRAME_RATE/TB",
+        select_expr, scale_str, scale_str
+    );
+    
     // Continue with input and filter args
     ffmpeg_args.extend([
         "-i", &input_path,
-        "-vf", &format!(
-            "select='{}',scale={}:force_original_aspect_ratio=decrease,pad={}:(ow-iw)/2:(oh-ih)/2:black,setpts=N/FRAME_RATE/TB",
-            select_expr, scale_str, scale_str
-        ),
+        "-vf", &filter_str,
         "-vsync", "vfr",
         &output_pattern,
     ]);
@@ -613,6 +617,9 @@ fn get_frame_cache_size(app_handle: tauri::AppHandle) -> Result<f64, String> {
     
     Ok(total_size as f64 / (1024.0 * 1024.0)) // Convert to MB
 }
+
+#[cfg(test)]
+mod lib_test;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
