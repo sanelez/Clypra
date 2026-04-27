@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::path::PathBuf;
+    use crate::{
+        TempDirGuard, get_hwaccel_args, check_ffmpeg_available,
+        extract_frame_at_time, extract_filmstrip_frames, trim_export, audio_waveform_peaks
+    };
     use tokio::time::{timeout, Duration};
 
     // =========================================================================

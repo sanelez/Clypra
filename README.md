@@ -1,4 +1,4 @@
-# Kyro Editor
+# Clypra
 
 A modern video editor built with Tauri, React, and TypeScript featuring a CapCut-style timeline interface.
 

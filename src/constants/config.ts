@@ -15,9 +15,12 @@ export const VIDEO_CONFIG = {
     DEFAULT_BUCKETS: 512,
   },
   ZOOM: {
-    MIN_PX_PER_SEC: 16,
-    MAX_PX_PER_SEC: 320,
-    DEFAULT_PX_PER_SEC: 72,
+    // Discrete zoom levels (0-11) - indices into ZOOM_LEVELS
+    ZOOM_LEVEL_COUNT: 12,
+    DEFAULT_ZOOM_INDEX: 11, // Maximum zoom (5400px/s)
+    // Legacy: keep for reference, now use ZOOM_LEVELS from ../features/timeline/types/zoom
+    MIN_PX_PER_SEC: 15,
+    MAX_PX_PER_SEC: 5400,
   },
 };
 

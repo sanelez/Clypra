@@ -844,3 +844,5 @@ pub fn get_cache_stats() -> serde_json::Value {
         "total_frames": total_frames,
     })
 }
+
+// ============================================================================

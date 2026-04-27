@@ -1,20 +1,74 @@
-export type TimelineProps = {
-  duration: number;
-  playhead: number;
-  onSeek: (t: number) => void;
-  /** @deprecated Not used with store-based timeline */
-  trimStart?: number;
-  /** @deprecated Not used with store-based timeline */
-  trimEnd?: number;
-  /** @deprecated Not used with store-based timeline */
-  videoUrl?: string | null;
-  /** @deprecated Not used with store-based timeline */
-  sourcePath?: string | null;
-  /** @deprecated Not used with store-based timeline */
-  videoRef?: React.RefObject<HTMLVideoElement>;
-};
+export type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '21:9'
 
-export type FilmstripResult = {
-  stripUrl: string | null;
-  loading: boolean;
-};
+export interface VideoMetadata {
+  duration: number
+  width: number
+  height: number
+  fps: number
+  size: number
+}
+
+export interface Project {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+  aspectRatio: AspectRatio
+  canvasWidth: number
+  canvasHeight: number
+  frameRate: 24 | 30 | 60
+  duration: number
+}
+
+export type TrackType = 'video' | 'audio' | 'text'
+
+export interface Track {
+  id: string
+  type: TrackType
+  name: string
+  muted: boolean
+  locked: boolean
+  height: number
+}
+
+export interface MediaAsset {
+  id: string
+  name: string
+  path: string
+  type: 'video' | 'audio' | 'image'
+  duration: number
+  width?: number
+  height?: number
+  posterFrame?: string
+  size: number
+}
+
+export interface Clip {
+  id: string
+  trackId: string
+  mediaId: string
+  startTime: number
+  duration: number
+  trimIn: number
+  trimOut: number
+  x: number
+  y: number
+  width: number
+  height: number
+  opacity: number
+  rotation: number
+}
+
+export interface TextClip extends Clip {
+  text: string
+  fontSize: number
+  fontFamily: string
+  color: string
+  bold: boolean
+  italic: boolean
+}
+
+export type DragItem = {
+  type: 'MEDIA_ASSET'
+  asset: MediaAsset
+}

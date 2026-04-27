@@ -1,11 +1,14 @@
 use std::path::PathBuf;
-use tauri::Manager;
+use tauri::{Manager};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
-mod thumbnail_engine;
-use thumbnail_engine::{DensityLevel, Priority, init_thumbnail_engine, request_batch_thumbnails, generate_timestamp_grid, get_cache_stats, clear_video_thumbnail_cache};
+pub mod thumbnail_engine;
+use thumbnail_engine::{DensityLevel, Priority, init_thumbnail_engine, request_batch_thumbnails, request_thumbnail, generate_timestamp_grid, get_cache_stats, clear_video_thumbnail_cache};
+
+pub mod models;
+pub mod commands;
 
 /// Downsampled peak envelope of the first audio stream (for waveform UI). Returns ~`bucket_count`
 /// values in 0..1. If there is no audio, returns zeros.
@@ -217,7 +220,7 @@ async fn trim_export(
 
 /// RAII guard for temp directory cleanup
 /// Automatically removes directory when dropped, even on panic
-struct TempDirGuard(PathBuf);
+pub(crate) struct TempDirGuard(pub PathBuf);
 
 impl Drop for TempDirGuard {
     fn drop(&mut self) {
@@ -229,7 +232,7 @@ impl Drop for TempDirGuard {
 
 /// Get hardware acceleration arguments for FFmpeg based on platform
 /// Uses VideoToolbox on macOS, DXVA2/D3D11VA on Windows, VAAPI on Linux
-fn get_hwaccel_args() -> Vec<&'static str> {
+pub(crate) fn get_hwaccel_args() -> Vec<&'static str> {
     #[cfg(target_os = "macos")]
     {
         vec!["-hwaccel", "videotoolbox"]
@@ -250,7 +253,7 @@ fn get_hwaccel_args() -> Vec<&'static str> {
 }
 
 /// Check if FFmpeg is installed and available on PATH
-async fn check_ffmpeg_available() -> Result<(), String> {
+pub(crate) async fn check_ffmpeg_available() -> Result<(), String> {
     match Command::new("ffmpeg").arg("-version").output().await {
         Ok(output) if output.status.success() => Ok(()),
         Ok(_) => Err("FFmpeg found but returned error".into()),
@@ -271,17 +274,24 @@ async fn extract_frame_at_time(
     width: u32,
     height: u32,
 ) -> Result<String, String> {
-    // Check FFmpeg availability first
-    if let Err(e) = check_ffmpeg_available().await {
-        return Err(e);
+    // Validate inputs FIRST (before checking FFmpeg) for fast failure
+    if !time_secs.is_finite() {
+        return Err("Time must be a finite number".into());
     }
-
-    // Validate inputs
-    if !time_secs.is_finite() || time_secs < 0.0 {
-        return Err("Time must be a non-negative finite number".into());
+    if time_secs < 0.0 {
+        return Err("Time must be non-negative".into());
+    }
+    // Reject unreasonably large values (> 24 hours)
+    if time_secs > 86400.0 {
+        return Err("Time must be a finite number within reasonable range".into());
     }
     if width == 0 || height == 0 {
         return Err("Width and height must be positive".into());
+    }
+
+    // Check FFmpeg availability
+    if let Err(e) = check_ffmpeg_available().await {
+        return Err(e);
     }
 
     let time_str = format!("{:.6}", time_secs);
@@ -434,8 +444,8 @@ async fn extract_filmstrip_frames(
     }
 
     // Create temp directory for frames with RAII cleanup guard
-    let temp_dir = std::env::temp_dir().join("kyro_filmstrip").join(
-        &format!("{}_{}", 
+    let temp_dir = std::env::temp_dir().join("clypra_filmstrip").join(
+        &format!("{}_{}",
             input_path.replace(['/', '\\', ':'], "_"),
             std::process::id()
         )
@@ -636,6 +646,7 @@ fn get_frame_cache_size(app_handle: tauri::AppHandle) -> Result<f64, String> {
 /// Initialize the thumbnail engine with app cache directory
 #[tauri::command]
 async fn init_thumbnail_cache(app_handle: tauri::AppHandle) -> Result<(), String> {
+    // Initialize cache directory
     let cache_dir = app_handle
         .path()
         .app_cache_dir()
@@ -650,10 +661,15 @@ async fn get_thumbnails_for_range(
     visible_start: f64,
     visible_end: f64,
     px_per_sec: f64,
+    ruler_interval: f64,
+    thumbs_per_interval: u32,
 ) -> Result<Vec<(f64, String, f64)>, String> {
-    // Calculate density based on zoom
+    // Calculate time per thumbnail using the zoom level configuration
+    // time_per_thumb = ruler_interval / thumbs_per_interval
+    let time_per_thumb = ruler_interval / thumbs_per_interval as f64;
+
+    // Calculate density based on zoom (for cache organization)
     let density = DensityLevel::from_zoom(px_per_sec);
-    let time_per_thumb = 80.0 / px_per_sec;
 
     // Generate timestamp grid
     let timestamps = generate_timestamp_grid(visible_start, visible_end, time_per_thumb);
@@ -668,8 +684,8 @@ async fn get_thumbnails_for_range(
         timestamps.clone(),
         density,
         Priority::Critical,
-        80,
-        60,
+        160,  // Width: 160px as per spec (Requirement 15.1)
+        90,   // Height: 90px as per spec (Requirement 15.1)
     ).await;
 
     // Convert results to (time, data_url, x_position) tuples
@@ -709,6 +725,40 @@ async fn clear_thumbnail_cache(video_path: String) {
     clear_video_thumbnail_cache(&video_path).await;
 }
 
+/// Extract poster frame at 10% mark of clip duration
+/// 
+/// Requirements: 1.1, 1.2, 1.4
+/// Returns base64-encoded WebP data URL for immediate display
+#[tauri::command]
+async fn extract_poster_frame_command(
+    video_path: String,
+    duration: f64,
+) -> Result<String, String> {
+    // Calculate poster frame time (10% of duration, or 0.5s for short clips)
+    let poster_time = if duration < 1.0 {
+        0.5
+    } else {
+        duration * 0.1
+    };
+    
+    // Extract frame using existing thumbnail system
+    let poster_path = request_thumbnail(
+        &video_path,
+        poster_time,
+        DensityLevel::Medium,
+        Priority::Critical,
+        160,
+        90,
+    ).await?;
+    
+    // Read the cached frame and convert to data URL
+    let data = std::fs::read(&poster_path)
+        .map_err(|e| format!("Failed to read poster frame: {}", e))?;
+    
+    let base64_data = BASE64.encode(&data);
+    Ok(format!("data:image/webp;base64,{}", base64_data))
+}
+
 #[cfg(test)]
 mod lib_test;
 
@@ -732,6 +782,12 @@ pub fn run() {
             get_thumbnails_for_range,
             get_thumbnail_cache_stats,
             clear_thumbnail_cache,
+            extract_poster_frame_command,
+            commands::media::get_video_metadata,
+            commands::media::extract_poster_frame,
+            commands::project::save_project,
+            commands::project::load_project,
+            commands::project::get_recent_projects,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
