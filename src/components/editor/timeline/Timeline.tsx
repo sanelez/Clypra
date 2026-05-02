@@ -225,39 +225,39 @@ export const Timeline: React.FC = () => {
   }, [handleTauriFileDrop]);
 
   return (
-    <div className="h-80 flex flex-col">
+    <div className="h-80 flex flex-col select-none">
       <TimelineToolbar />
 
       <div className="flex-1 flex overflow-hidden">
         <TrackList />
 
         <div ref={containerRef} onScroll={handleScroll} className={`flex-1 overflow-x-auto overflow-y-auto scrollbar-thin px-1 relative transition-colors ${isDraggingOver ? "bg-cyan-500/10 ring-2 ring-cyan-500/50 ring-inset" : ""}`}>
-          {clips.length === 0 ? (
+          {clips.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="flex items-center gap-3 text-[#6b7280] pointer-events-none">
                 <FolderOpen className="w-5 h-5" />
                 <span className="text-sm">Drag material here and start to create</span>
               </div>
             </div>
-          ) : (
-            <div
-              style={{
-                width: `${contentWidth}px`,
-                minHeight: "100%",
-              }}
-              className="relative flex flex-col justify-end"
-            >
-              <TimelineRuler pixelsPerSecond={pixelsPerSecond} scrollLeft={scrollLeft} onSeek={seek} />
-
-              <div className="relative flex-1 flex flex-col justify-end min-h-0">
-                {tracks.map((track) => (
-                  <Track key={track.id} track={track} pixelsPerSecond={pixelsPerSecond} clips={clips} />
-                ))}
-
-                <Playhead pixelsPerSecond={pixelsPerSecond} duration={duration} />
-              </div>
-            </div>
           )}
+
+          <div
+            style={{
+              width: `${contentWidth}px`,
+              minHeight: "100%",
+            }}
+            className="relative flex flex-col justify-center"
+          >
+            <TimelineRuler pixelsPerSecond={pixelsPerSecond} scrollLeft={scrollLeft} onSeek={seek} />
+
+            <div className="relative flex-1 flex flex-col justify-center min-h-0">
+              {tracks.map((track) => (
+                <Track key={track.id} track={track} pixelsPerSecond={pixelsPerSecond} clips={clips} />
+              ))}
+
+              <Playhead pixelsPerSecond={pixelsPerSecond} duration={duration} />
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -29,13 +29,13 @@ export const TrackList: React.FC<TrackListProps> = ({ onEditTrack }) => {
         <span className="text-[11px] font-semibold tracking-wide text-[#88909a] uppercase">Track</span>
       </div>
 
-      <div className="flex-1 flex flex-col justify-end min-h-0">
+      <div className="flex-1 flex flex-col justify-center min-h-0">
         {tracks.map((track) => (
           <div key={track.id} className={`group border-b border-[#2b2f35] flex items-center gap-2 px-2 py-1 transition-colors ${selectedTrackId === track.id ? "bg-[#20252b]" : "hover:bg-[#1e2228]"}`} style={{ height: `${track.height}px` }} onClick={() => selectTrack(track.id)}>
             {editingId === track.id ? (
               <input autoFocus type="text" value={editingName} onChange={(e) => setEditingName(e.target.value)} onBlur={() => handleNameChange(track.id, editingName)} onKeyPress={(e) => e.key === "Enter" && handleNameChange(track.id, editingName)} className="flex-1 bg-surface-raised border border-accent rounded px-1 py-0.5 text-xs text-text-primary focus:outline-none" />
             ) : (
-              <div onDoubleClick={() => handleDoubleClick(track.id, track.name)} className="flex-1 text-[14px] font-medium text-[#d6d9de] truncate cursor-text hover:text-cyan-300">
+              <div onDoubleClick={() => handleDoubleClick(track.id, track.name)} className="flex-1 text-[14px] font-medium text-[#d6d9de] truncate hover:text-cyan-300">
                 {track.name}
               </div>
             )}

@@ -28,13 +28,13 @@ export const Playhead: React.FC<PlayheadProps> = ({ pixelsPerSecond, duration })
 
     const handleMouseUp = () => {
       setIsDragging(false);
-      document.body.style.cursor = ""; // Reset cursor
       document.body.style.userSelect = ""; // Re-enable text selection
+      document.body.classList.remove("cursor-lock-ew");
     };
 
     // Prevent text selection during drag
-    document.body.style.cursor = "ew-resize";
     document.body.style.userSelect = "none";
+    document.body.classList.add("cursor-lock-ew");
 
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
@@ -44,24 +44,33 @@ export const Playhead: React.FC<PlayheadProps> = ({ pixelsPerSecond, duration })
       window.removeEventListener("mouseup", handleMouseUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      document.body.classList.remove("cursor-lock-ew");
     };
   }, [isDragging, duration, pixelsPerSecond, seek]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault(); // Prevent text selection
+    e.preventDefault();
+    e.stopPropagation();
+    const parent = containerRef.current?.parentElement;
+    if (parent) {
+      const rect = parent.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const newTime = Math.max(0, Math.min(x / pixelsPerSecond, duration));
+      seek(newTime);
+    }
     setIsDragging(true);
   };
 
   return (
     <div
       ref={containerRef}
-      data-playhead
-      className="absolute z-80 inset-y-0 select-none"
+      data-playhead="true"
+      className={`absolute inset-y-0 select-none cursor-timeline-ew ${isDragging ? "cursor-timeline-ew-grabbing" : ""}`}
       style={{
         left: `${left}px`,
-        width: "8px", // Wider hit area
-        marginLeft: "-3px", // Center the visual line
-        cursor: "ew-resize", // Inline style for cursor
+        width: "8px",
+        marginLeft: "-3px",
+        zIndex: 100,
       }}
       onMouseDown={handleMouseDown}
     >

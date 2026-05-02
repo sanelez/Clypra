@@ -171,7 +171,7 @@ const MediaCard: React.FC<MediaCardProps> = ({ asset, isSelected, onClick, onCon
   }));
 
   return (
-    <div ref={drag} onClick={onClick} onContextMenu={onContextMenu} className={`group relative bg-surface-raised rounded cursor-pointer overflow-hidden transition-all ${isDragging ? "opacity-50" : ""} ${isSelected ? "ring-1 ring-accent" : ""}`}>
+    <div ref={drag} onClick={onClick} onContextMenu={onContextMenu} className={`group relative bg-surface-raised rounded overflow-hidden transition-all ${isDragging ? "opacity-50" : ""} ${isSelected ? "ring-1 ring-accent" : ""}`}>
       <div className="aspect-video bg-surface-raised flex items-center justify-center relative">
         {asset.posterFrame ? <img src={asset.posterFrame} alt={asset.name} className="w-full h-full object-cover" /> : <div className="w-8 h-8">{asset.type === "video" ? <Film className="w-full h-full text-text-muted" /> : asset.type === "audio" ? <Music className="w-full h-full text-text-muted" /> : <Image className="w-full h-full text-text-muted" />}</div>}
         {asset.duration > 0 && (
@@ -191,7 +191,7 @@ const MediaCard: React.FC<MediaCardProps> = ({ asset, isSelected, onClick, onCon
               e.stopPropagation();
               onAddToTimeline();
             }}
-            className="cursor-pointer hidden group-hover:flex bg-accent hover:bg-accent/90 w-5 h-5 rounded-full justify-center items-center absolute top-1 right-1 transition-colors"
+            className="hidden group-hover:flex bg-accent hover:bg-accent/90 w-5 h-5 rounded-full justify-center items-center absolute top-1 right-1 transition-colors"
           >
             <Plus size={14} className="text-white" />
           </button>

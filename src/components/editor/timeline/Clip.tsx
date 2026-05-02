@@ -51,14 +51,14 @@ export const Clip: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, s
     <div
       ref={drag}
       onClick={() => selectClip(clip.id)}
-      className={`absolute h-full cursor-grab active:cursor-grabbing rounded-sm overflow-hidden transition-colors border ${selected ? "border border-accent/60" : ""} ${isDragging ? "opacity-50" : ""} ${getClipColor()}`}
+      className={`absolute h-full rounded-sm overflow-hidden transition-colors border ${selected ? "border border-accent/60" : ""} ${isDragging ? "opacity-50" : ""} ${getClipColor()}`}
       style={{
         left: `${left}px`,
         width: `${width}px`,
       }}
     >
       {/* Left trim handle */}
-      <div className="absolute left-0 w-1 h-full bg-black/20 cursor-ew-resize hover:bg-cyan-300/40" onMouseDown={(e) => handleResizeStart(e, "left")} />
+      <div className="absolute left-0 w-1 h-full bg-black/20 hover:bg-cyan-300/40" onMouseDown={(e) => handleResizeStart(e, "left")} />
 
       {/* Clip content */}
       <div className="w-full h-full px-1 py-1 flex flex-col gap-1 overflow-hidden">
@@ -82,7 +82,7 @@ export const Clip: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, s
       </div>
 
       {/* Right trim handle */}
-      <div className="absolute right-0 w-1 h-full bg-black/20 cursor-ew-resize hover:bg-cyan-300/40" onMouseDown={(e) => handleResizeStart(e, "right")} />
+      <div className="absolute right-0 w-1 h-full bg-black/20 hover:bg-cyan-300/40" onMouseDown={(e) => handleResizeStart(e, "right")} />
     </div>
   );
 };
