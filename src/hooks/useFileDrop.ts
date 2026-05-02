@@ -45,13 +45,18 @@ export const useFileDrop = ({ onDrop, enabled = true }: UseFileDropOptions) => {
         }>("tauri://drag-drop", async (event) => {
           setIsDraggingOver(false);
 
-          if (!containerRef.current || isProcessingRef.current) return;
+          if (!containerRef.current || isProcessingRef.current) {
+            console.log("[useFileDrop] Drop ignored - already processing or no container");
+            return;
+          }
 
           const rect = containerRef.current.getBoundingClientRect();
           const { x, y } = event.payload.position;
 
           // Only process if dropped over this container
           const isOver = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+
+          console.log("[useFileDrop] Drop detected, isOver:", isOver, "position:", { x, y }, "rect:", rect);
 
           if (isOver) {
             console.log("[useFileDrop] Processing drop for container");
@@ -60,6 +65,7 @@ export const useFileDrop = ({ onDrop, enabled = true }: UseFileDropOptions) => {
               await onDrop(event.payload.paths);
             } finally {
               isProcessingRef.current = false;
+              console.log("[useFileDrop] Drop processing complete");
             }
           }
         });

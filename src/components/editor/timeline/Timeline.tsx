@@ -19,6 +19,7 @@ export const Timeline: React.FC = () => {
   const { currentTime, duration, seek, setDuration } = usePlayback();
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const isProcessingDropRef = useRef(false);
 
   const contentWidth = Math.max(1000, duration * pixelsPerSecond);
 
@@ -170,7 +171,12 @@ export const Timeline: React.FC = () => {
           paths: string[];
           position: { x: number; y: number };
         }>("tauri://drag-drop", async (event) => {
-          if (!containerRef.current) return;
+          setIsDraggingOver(false);
+
+          if (!containerRef.current || isProcessingDropRef.current) {
+            console.log("[Timeline] Drop ignored - already processing or no container");
+            return;
+          }
 
           const rect = containerRef.current.getBoundingClientRect();
           const { x, y } = event.payload.position;
@@ -178,11 +184,17 @@ export const Timeline: React.FC = () => {
           // Check if dropped over this container
           const isOver = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 
-          console.log("[Timeline] Drop detected, isOver:", isOver);
-          setIsDraggingOver(false);
+          console.log("[Timeline] Drop detected, isOver:", isOver, "position:", { x, y }, "rect:", rect);
 
           if (isOver) {
-            await handleTauriFileDrop(event.payload.paths);
+            isProcessingDropRef.current = true;
+            console.log("[Timeline] Processing drop...");
+            try {
+              await handleTauriFileDrop(event.payload.paths);
+            } finally {
+              isProcessingDropRef.current = false;
+              console.log("[Timeline] Drop processing complete");
+            }
           }
         });
 
