@@ -172,30 +172,29 @@ export function ClipFilmstrip({
   ])
 
   // ── Sampling (zoom-reactive, zero requests) ──────────────────────────────
-  // How many tiles fit at current zoom?
-  // Pick every Nth frame from the dense cache to fill the space.
+  // Tile count is ALWAYS driven by clip width / target tile size (~60px).
+  // Each tile slot maps to the nearest cached frame — frames repeat when
+  // there are fewer cached frames than tile slots. This keeps tiles at
+  // ~60px (consistent with ruler tick spacing) and fills the full clip.
   const visibleTiles = useMemo(() => {
     if (frameCache.size === 0) return []
 
-    // How many 60px tiles fit in the current clip width
-    const tileCount = Math.max(1, Math.ceil(clipWidthPx / TILE_WIDTH_PX))
-
-    // All cached timestamps sorted — filter out empty poster placeholders
+    // All cached timestamps sorted — filter out empty placeholders
     const allTimes = Array.from(frameCache.entries())
       .filter(([, src]) => src.length > 0)
       .map(([t]) => t)
       .sort((a, b) => a - b)
 
     if (allTimes.length === 0) return []
-    if (tileCount >= allTimes.length) {
-      // Zoomed in enough to show every extracted frame
-      return allTimes.map(t => ({ time: t, src: frameCache.get(t)! }))
-    }
 
-    // Sample evenly from the dense cache — no new requests.
-    // Pick tileCount frames spread evenly across allTimes.
-    const step = (allTimes.length - 1) / (tileCount - 1)
+    // Always compute tile count from clip width — never limited by cache size
+    const tileCount = Math.max(1, Math.ceil(clipWidthPx / TILE_WIDTH_PX))
+
+    // Map each tile slot to the nearest cached frame
     const sampled: { time: number; src: string }[] = []
+    const step = allTimes.length > 1
+      ? (allTimes.length - 1) / (tileCount - 1)
+      : 0
 
     for (let i = 0; i < tileCount; i++) {
       const idx = Math.min(Math.round(i * step), allTimes.length - 1)
@@ -208,7 +207,7 @@ export function ClipFilmstrip({
 
   // ── Render ───────────────────────────────────────────────────────────────
   if (isVideoSource && visibleTiles.length > 0) {
-    // Dynamic tile width: fill 100% of clip width
+    // Each tile = clipWidth / tileCount — always fills the full clip
     const tileWidthPx = clipWidthPx / visibleTiles.length
 
     return (

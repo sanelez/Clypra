@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import { usePlayback } from "../../../hooks/usePlayback";
 
 interface TimelineRulerProps {
@@ -7,121 +7,139 @@ interface TimelineRulerProps {
 }
 
 /**
- * TimelineRuler renders time markers aligned to the timeline content.
+ * CapCut-style timeline ruler.
  *
- * It sits inside the scrollable container, so markers are positioned absolutely
- * with `left = time × pixelsPerSecond`. The scroll container handles viewport offset.
+ * Design principles:
+ *   1. Labels never overlap — minimum ~80px between major labels
+ *   2. Clean hierarchy: major ticks (tall + label) → minor ticks (short, no label)
+ *   3. Labels use 00:00 format (zero-padded MM:SS)
+ *   4. Ticks hang from the top of the ruler
+ *   5. Smooth zoom transitions via a "nice number" interval table
  *
- * Marker density adapts to zoom:
- *   - Zoomed out (<30 px/s): every 10s
- *   - Normal (<80 px/s): every 5s
- *   - Closer (<200 px/s): every 1s
- *   - Close (<500 px/s): every 0.5s
- *   - Very close: frame-accurate (1/fps)
+ * Zoom range: 50–500 px/s
  */
+
+// ── Interval table ──────────────────────────────────────────────────────
+// [majorInterval in seconds, number of minor divisions between majors]
+// The ruler picks the first entry where majorInterval × pps ≥ MIN_LABEL_GAP_PX.
+const INTERVAL_TABLE: [number, number][] = [
+  [60, 6],   // 1min major, 10s minor
+  [30, 6],   // 30s major,  5s minor
+  [15, 5],   // 15s major,  3s minor
+  [10, 5],   // 10s major,  2s minor
+  [5, 5],   // 5s major,   1s minor
+  [3, 3],   // 3s major,   1s minor   ← CapCut uses this at ~27-50 pps
+  [2, 4],   // 2s major,   0.5s minor ← CapCut uses this at ~50-80 pps
+  [1, 5],   // 1s major,   0.2s minor (smallest — labels always whole seconds)
+];
+
+/** Minimum pixel gap between major (labelled) ticks */
+const MIN_LABEL_GAP_PX = 80;
+
 export const TimelineRuler: React.FC<TimelineRulerProps> = ({ pixelsPerSecond, scrollLeft }) => {
   const { frameRate } = usePlayback();
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewportWidth, setViewportWidth] = useState(1200);
 
-  // Measure the actual viewport width on mount and resize
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const measure = () => setViewportWidth(el.clientWidth || 1200);
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
-  const getMarkerInterval = useCallback((): number => {
-    if (pixelsPerSecond < 30) return 10;
-    if (pixelsPerSecond < 80) return 5;
-    if (pixelsPerSecond < 200) return 1;
-    if (pixelsPerSecond < 500) return 0.5;
-    return Math.max(1 / frameRate, 0.01); // frame-accurate at extreme zoom
-  }, [pixelsPerSecond, frameRate]);
+  // ── Pick best interval ─────────────────────────────────────────────────
+  let majorInterval = INTERVAL_TABLE[INTERVAL_TABLE.length - 1][0];
+  let minorDivisions = INTERVAL_TABLE[INTERVAL_TABLE.length - 1][1];
 
-  const markerInterval = getMarkerInterval();
-
-  // Major marker = every 4th marker (or every 1s when interval is sub-second)
-  const majorEvery = markerInterval >= 1 ? 4 : Math.round(1 / markerInterval);
-
-  // Compute visible range from actual viewport width (with padding)
-  const paddingPx = 100; // render a bit outside viewport for smooth scrolling
-  const startTime = Math.max(0, (scrollLeft - paddingPx) / pixelsPerSecond);
-  const visibleRange = (viewportWidth + paddingPx * 2) / pixelsPerSecond;
-  const endTime = startTime + visibleRange;
-
-  // Generate markers
-  const markers: number[] = [];
-  const firstMarker = Math.floor(startTime / markerInterval) * markerInterval;
-  for (let time = firstMarker; time <= endTime; time += markerInterval) {
-    // Avoid negative timestamps and float drift
-    const t = Math.round(time * 1000) / 1000;
-    if (t < 0) continue;
-    markers.push(t);
+  // Iterate smallest → largest: pick the smallest interval that still
+  // guarantees ≥ MIN_LABEL_GAP_PX between labels (no overlap).
+  for (let i = INTERVAL_TABLE.length - 1; i >= 0; i--) {
+    const [interval, divisions] = INTERVAL_TABLE[i];
+    if (interval * pixelsPerSecond >= MIN_LABEL_GAP_PX) {
+      majorInterval = interval;
+      minorDivisions = divisions;
+      break;
+    }
   }
 
-  /**
-   * Format time label with appropriate precision for the current zoom level.
-   * - At ≥1s intervals: show M:SS
-   * - At sub-second intervals: show M:SS.f or M:SS.ff
-   */
-  const formatTime = useCallback(
-    (seconds: number): string => {
-      const mins = Math.floor(seconds / 60);
-      const secs = seconds % 60;
+  const minorInterval = majorInterval / minorDivisions;
 
-      if (markerInterval >= 1) {
-        // Integer seconds
-        return `${mins}:${String(Math.floor(secs)).padStart(2, "0")}`;
-      }
+  // ── Visible time range ─────────────────────────────────────────────────
+  const padPx = 60;
+  const startTime = Math.max(0, (scrollLeft - padPx) / pixelsPerSecond);
+  const endTime = (scrollLeft + viewportWidth + padPx) / pixelsPerSecond;
 
-      if (markerInterval >= 0.1) {
-        // One decimal place: 0:03.5
-        const whole = Math.floor(secs);
-        const frac = Math.floor((secs - whole) * 10);
-        return `${mins}:${String(whole).padStart(2, "0")}.${frac}`;
-      }
+  // ── Generate ticks ─────────────────────────────────────────────────────
+  const ticks: { time: number; isMajor: boolean }[] = [];
+  const firstTick = Math.floor(startTime / minorInterval) * minorInterval;
 
-      // Two decimal places for frame-accurate zoom
-      const whole = Math.floor(secs);
-      const frac = Math.floor((secs - whole) * 100);
-      return `${mins}:${String(whole).padStart(2, "0")}.${String(frac).padStart(2, "0")}`;
-    },
-    [markerInterval]
-  );
+  for (let t = firstTick; t <= endTime; t += minorInterval) {
+    const time = Math.round(t * 10000) / 10000;
+    if (time < 0) continue;
 
+    const isMajor =
+      Math.abs(time % majorInterval) < minorInterval * 0.01 ||
+      Math.abs(time % majorInterval - majorInterval) < minorInterval * 0.01;
+
+    ticks.push({ time, isMajor });
+  }
+
+  // ── Format label (CapCut style: always 00:SS) ──────────────────────────
+  const formatLabel = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div
       ref={containerRef}
-      className="relative h-8 bg-[#171a1f] border-b border-[#2c2f34] select-none overflow-hidden"
+      className="relative h-6 select-none overflow-hidden"
+      style={{ background: "#1a1d23" }}
     >
-      {markers.map((time, i) => {
-        const markerIndex = Math.round(time / markerInterval);
-        const isMajor = markerIndex % majorEvery === 0;
-        // ✅ Round to avoid subpixel rendering issues
+      {ticks.map(({ time, isMajor }) => {
         const x = Math.round(time * pixelsPerSecond);
         return (
           <div
             key={time}
             style={{
               position: "absolute",
-              left: `${x}px`,
+              left: x,
               top: 0,
-              height: "100%",
-              userSelect: "none",
             }}
-            className="group"
           >
+            {/* Tick line — hangs from top */}
             <div
-              className={`w-px ${isMajor ? "h-4 bg-[#3c424c]" : "h-2 bg-[#333941]"} mt-0`}
+              style={{
+                width: 1,
+                height: isMajor ? 10 : 5,
+                backgroundColor: isMajor ? "#4a505c" : "#2c3039",
+              }}
             />
+            {/* Label — CapCut places it right after the tick */}
             {isMajor && (
-              <span className="absolute top-4 left-1 text-[10px] leading-none text-[#7f8894] whitespace-nowrap group-hover:text-[#d0d6de]">
-                {formatTime(time)}
+              <span
+                style={{
+                  position: "absolute",
+                  top: 3,
+                  left: 3,
+                  fontSize: 10,
+                  lineHeight: 1,
+                  color: "#5c6370",
+                  whiteSpace: "nowrap",
+                  pointerEvents: "none",
+                  userSelect: "none",
+                  fontFamily: "system-ui, -apple-system, sans-serif",
+                  fontVariantNumeric: "tabular-nums",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {formatLabel(time)}
               </span>
             )}
           </div>
