@@ -215,24 +215,22 @@ export const Playhead: React.FC<PlayheadProps> = ({ pixelsPerSecond, duration, c
     >
       {/* Visual line */}
       <div
-        className="absolute inset-y-0 left-1/2 -translate-x-1/2 pointer-events-auto"
+        className="absolute inset-y-0 left-1/2 -translate-x-1/2 pointer-events-auto bg-accent"
         style={{
           width: "2px",
-          backgroundColor: "#6c63ff",
           boxShadow: "0 0 0 1px rgba(0,0,0,0.25)",
         }}
       />
 
       {/* Circle handle at top */}
       <div
-        className="absolute rounded-full pointer-events-auto"
+        className="absolute rounded-full pointer-events-auto bg-accent"
         style={{
           left: "50%",
           transform: "translateX(-50%)",
           top: "2px",
           width: "10px",
           height: "10px",
-          backgroundColor: "#6c63ff",
           boxShadow: "0 0 0 1px rgba(0,0,0,0.35)",
         }}
       />

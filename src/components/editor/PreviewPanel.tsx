@@ -273,9 +273,16 @@ const ProgramPreview: React.FC = () => {
 
   return (
     <div className="flex-1 bg-bg flex flex-col min-h-0 rounded-tl-xl border-l border-t border-white/[0.03]">
-      <div className="flex-1 flex items-center justify-center p-4 md:p-6 overflow-hidden relative bg-[#06080a]">
+      {/* ── Header ─────────────────────────────────────────────────── */}
+      <div className="flex items-center px-4 h-10 shrink-0 gap-2">
+        <span className="text-[13px] font-semibold text-text-primary tracking-tight">Program Preview</span>
+        <span className="text-[13px] text-text-muted">— Timeline</span>
+      </div>
+
+      {/* ── Video Area ─────────────────────────────────────────────── */}
+      <div className="flex-1 flex items-center justify-center overflow-hidden bg-[#06080a] relative">
         <div className="absolute inset-0 checkerboard opacity-[0.15] pointer-events-none" />
-        <div ref={containerRef} className="w-full h-full flex items-center justify-center overflow-hidden relative z-10">
+        <div ref={containerRef} className="w-full h-full flex items-center justify-center p-4 md:p-6 relative z-10 overflow-hidden">
           <div 
             data-testid="program-preview-viewport" 
             className="relative flex shrink-0 items-center justify-center overflow-hidden rounded shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10" 
@@ -326,39 +333,83 @@ const ProgramPreview: React.FC = () => {
         </div>
       </div>
 
-      <div className="px-4 pb-4">
-        <div className="panel-shell panel-head p-3 flex items-center gap-3">
-          <Button variant="ghost" size="icon-sm" onClick={() => seek(Math.max(0, currentTime - step))} title="Previous frame">
-            <SkipBack className="w-4 h-4" />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => (isPlaying ? pause() : play())} title={isPlaying ? "Pause" : "Play"}>
-            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => seek(Math.min(duration, currentTime + step))} title="Next frame">
-            <SkipForward className="w-4 h-4" />
-          </Button>
+      {/* ── Scrub Bar (thin, edge-to-edge) ────────────────────────── */}
+      <div
+        className="h-[5px] w-full cursor-pointer group relative shrink-0"
+        onMouseDown={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const doSeek = (clientX: number) => {
+            const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            seek(ratio * duration);
+          };
+          doSeek(e.clientX);
+          const handleMove = (moveEvent: MouseEvent) => doSeek(moveEvent.clientX);
+          const handleUp = () => {
+            window.removeEventListener("mousemove", handleMove);
+            window.removeEventListener("mouseup", handleUp);
+          };
+          window.addEventListener("mousemove", handleMove);
+          window.addEventListener("mouseup", handleUp);
+        }}
+      >
+        <div className="absolute inset-0 bg-surface" />
+        <div className="absolute top-0 bottom-0 left-0 bg-accent" style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }} />
+        <div
+          className="absolute top-1/2 -translate-y-1/2 w-[10px] h-[10px] rounded-full bg-accent border-2 border-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+          style={{ left: `calc(${duration > 0 ? (currentTime / duration) * 100 : 0}% - 5px)` }}
+        />
+      </div>
 
-          <div className="text-xs text-text-primary min-w-[140px]">
-            {formatTime(currentTime)} / {formatTime(duration)}
-          </div>
+      {/* ── Bottom Controls ────────────────────────────────────────── */}
+      <div className="flex items-center h-10 px-3 shrink-0 relative">
+        {/* Timecodes */}
+        <div className="flex items-baseline gap-1 select-none w-[120px]" style={{ fontVariantNumeric: "tabular-nums" }}>
+          <span className="text-[12px] font-medium text-accent">{formatTime(currentTime)}</span>
+          <span className="text-[11px] text-text-muted/50">/</span>
+          <span className="text-[12px] text-text-muted">{formatTime(duration)}</span>
+        </div>
 
+        {/* Center play controls */}
+        <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1">
+          <button
+            onClick={() => seek(Math.max(0, currentTime - step))}
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/[0.06] transition-colors text-text-muted hover:text-text-primary"
+            title="Previous frame"
+          >
+            <SkipBack className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => (isPlaying ? pause() : play())}
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/[0.06] transition-colors text-text-primary mx-1"
+            title={isPlaying ? "Pause" : "Play"}
+          >
+            {isPlaying ? <Pause className="w-[18px] h-[18px]" /> : <Play className="w-[18px] h-[18px] ml-0.5" />}
+          </button>
+          <button
+            onClick={() => seek(Math.min(duration, currentTime + step))}
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/[0.06] transition-colors text-text-muted hover:text-text-primary"
+            title="Next frame"
+          >
+            <SkipForward className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Right side actions */}
+        <div className="ml-auto flex items-center gap-2">
+          {/* Aspect menu */}
           <div className="relative shrink-0" ref={aspectMenuRef}>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 gap-1 px-2 text-xs"
+            <button
               onClick={() => setAspectMenuOpen((o) => !o)}
-              aria-expanded={aspectMenuOpen}
-              aria-haspopup="listbox"
+              className="flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/[0.06] transition-colors"
               title="Preview aspect ratio"
+              aria-expanded={aspectMenuOpen}
             >
               <span className="max-w-[4.5rem] truncate">{PREVIEW_ASPECT_LABEL[previewAspectPreset]}</span>
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            </Button>
-
+              <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
+            </button>
             {aspectMenuOpen && (
               <div
-                className="absolute bottom-full left-0 z-50 mb-1 w-[220px] overflow-hidden rounded-lg border border-border bg-surface py-1 text-text-primary shadow-xl"
+                className="absolute bottom-full right-0 z-50 mb-1 w-[220px] overflow-hidden rounded-lg border border-border bg-surface py-1 text-text-primary shadow-xl"
                 role="listbox"
               >
                 <div className="px-1">
@@ -409,31 +460,32 @@ const ProgramPreview: React.FC = () => {
             )}
           </div>
 
-          <Button
-            variant="ghost"
-            size="icon-sm"
+          <button
             onClick={() => setPreviewScaleMode((m) => (m === "fit" ? "fill" : "fit"))}
+            className="w-6 h-6 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-white/[0.06] transition-colors"
             title={previewScaleMode === "fit" ? "Fill preview — scale to cover (crop edges)" : "Fit preview — show entire frame (letterbox)"}
-            aria-label={previewScaleMode === "fit" ? "Switch preview to fill" : "Switch preview to fit"}
           >
-            {previewScaleMode === "fit" ? <Expand className="w-4 h-4" /> : <Shrink className="w-4 h-4" />}
-          </Button>
+            {previewScaleMode === "fit" ? <Expand className="w-3.5 h-3.5" /> : <Shrink className="w-3.5 h-3.5" />}
+          </button>
 
-          <div
-            className="flex-1 h-2 rounded bg-surface-raised border border-border cursor-pointer"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const ratio = (e.clientX - rect.left) / Math.max(1, rect.width);
-              seek(Math.max(0, Math.min(duration, ratio * duration)));
-            }}
+          <div className="w-px h-4 bg-white/10 mx-1" />
+
+          <button
+            onClick={() => setIsMuted((m) => !m)}
+            className="w-6 h-6 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-white/[0.06] transition-colors"
+            title={isMuted ? "Unmute" : "Mute"}
           >
-            <div className="h-full rounded bg-accent" style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }} />
-          </div>
-
-          <Button variant="ghost" size="icon-sm" onClick={() => setIsMuted((m) => !m)} title={isMuted ? "Unmute" : "Mute"}>
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </Button>
-          <input type="range" min="0" max="100" value={volume} onChange={(e) => setVolume(Number(e.target.value))} className="w-20" />
+            {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+          </button>
+          
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={volume}
+            onChange={(e) => setVolume(Number(e.target.value))}
+            className="w-16 h-1 bg-surface-raised rounded-full appearance-none outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent cursor-pointer"
+          />
         </div>
       </div>
     </div>

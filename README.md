@@ -30,18 +30,20 @@ A modern, open-source video editor built with Tauri, React, and TypeScript featu
 
 ```
 src/
-├── components/          # Reusable UI components
-│   ├── ui/             # Generic UI (icons, buttons, etc.)
-│   └── video/          # Video-specific components
-├── features/           # Feature modules
-│   └── timeline/       # Timeline feature
-│       ├── components/ # Timeline UI components
-│       ├── hooks/      # Timeline hooks
-│       └── utils/      # Timeline utilities
-├── lib/                # Shared utilities
-├── types/              # TypeScript types
-├── constants/          # App constants
-└── App.tsx             # Main app component
+├── components/          # React components
+│   ├── editor/         # Core editor components (Timeline, Preview, etc.)
+│   ├── screens/        # Full-screen views (LaunchScreen)
+│   └── ui/             # Generic UI components (Modals, Icons, etc.)
+├── store/               # Zustand global state stores
+│   ├── timelineStore.ts# Timeline structure (tracks, clips)
+│   ├── playbackStore.ts# Playback sync and playhead state
+│   ├── projectStore.ts # Media assets and project settings
+│   └── ...             # uiStore, settingsStore, dragStateStore
+├── lib/                 # Shared utilities and FFmpeg logic
+├── hooks/               # Custom React hooks
+├── types/               # TypeScript type definitions
+├── constants/           # Global configuration
+└── App.tsx              # Main application entry
 ```
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed documentation.
@@ -140,20 +142,20 @@ _Coming soon - Add screenshots of your app in action_
 
 ## Architecture Highlights
 
-### Feature-Based Organization
+### Global State Management (Zustand)
 
-The codebase is organized by features rather than file types, making it easy to understand and maintain:
-
-- **Timeline Feature** - Self-contained module with components, hooks, and utilities
-- **Shared Libraries** - Common utilities used across features
-- **Type Safety** - Full TypeScript coverage with shared type definitions
+Clypra relies on a powerful and scalable state architecture using **Zustand**. State is split into logical domains to minimize unnecessary re-renders while ensuring high performance:
+- **`timelineStore`**: Manages complex timeline manipulations (clips, tracks).
+- **`playbackStore`**: Highly optimized store for frame-accurate playback and playhead sync.
+- **`projectStore`**: Manages media assets, project settings, and history.
+- **`uiStore`** & **`settingsStore`**: Handles application themes, view modes, and preferences.
 
 ### Clean Separation of Concerns
 
-- **Components** - Pure UI rendering
-- **Hooks** - Reusable stateful logic
-- **Utils** - Pure functions for data transformation
-- **Constants** - Configuration and theme values
+- **Components (`src/components`)** - Focused purely on declarative UI rendering. Core editor modules (Timeline, SourcePreview, PreviewPanel) are fully decoupled.
+- **State (`src/store`)** - Centralized business logic and actions.
+- **Utilities (`src/lib`)** - Pure functions for timeline math, FFmpeg process execution, and Tauri sidecar integration.
+- **Type Safety (`src/types`)** - Strict TypeScript models for the entire editing domain.
 
 ### Performance Optimizations
 

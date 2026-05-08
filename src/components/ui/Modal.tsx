@@ -27,7 +27,7 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, 
   const maxW = size === 'lg' ? 'max-w-[680px]' : 'max-w-xl'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-10000 flex items-center justify-center">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/70 backdrop-blur-[2px] animate-in fade-in duration-150"

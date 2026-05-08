@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type Theme = "dark" | "midnight" | "ocean" | "forest";
-export type FontFamily = "inter" | "system" | "mono" | "serif";
+export type FontFamily = "inter" | "system" | "mono" | "roboto" | "poppins" | "outfit";
 export type FrameRate = 24 | 30 | 60;
 
 interface SettingsStore {
@@ -224,14 +224,18 @@ const fontFamilies: Record<FontFamily, string> = {
   inter: '"Inter Variable", sans-serif',
   system: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   mono: '"JetBrains Mono", "Fira Code", Consolas, monospace',
-  serif: 'Georgia, "Times New Roman", serif',
+  roboto: '"Roboto", sans-serif',
+  poppins: '"Poppins", sans-serif',
+  outfit: '"Outfit", sans-serif',
 };
 
 export const FONT_META: Record<FontFamily, { name: string; stack: string }> = {
   inter: { name: "Inter", stack: fontFamilies.inter },
   system: { name: "System", stack: fontFamilies.system },
   mono: { name: "Mono", stack: fontFamilies.mono },
-  serif: { name: "Serif", stack: fontFamilies.serif },
+  roboto: { name: "Roboto", stack: fontFamilies.roboto },
+  poppins: { name: "Poppins", stack: fontFamilies.poppins },
+  outfit: { name: "Outfit", stack: fontFamilies.outfit },
 };
 
 export function applyTheme(theme: Theme) {
