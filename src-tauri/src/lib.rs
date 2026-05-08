@@ -131,7 +131,7 @@ async fn save_rgba_as_webp(
 }
 
 /// Extract a single frame using the native decoder (fast path)
-/// Returns base64-encoded WebP data URL
+/// Returns base64-encoded RGBA data URL for immediate display (no compression blocking)
 #[tauri::command]
 async fn decode_frame(
     video_path: String,
@@ -139,30 +139,29 @@ async fn decode_frame(
     width: u32,
     height: u32,
 ) -> Result<String, String> {
-    use image::codecs::webp::WebPEncoder;
-    
     // Get or create decoder (reused across calls)
     let decoder = get_decoder(&video_path).await?;
     
-    // Decode frame (3-15ms for subsequent frames)
+    // Decode frame (3-15ms for subsequent frames with sequential optimization)
     let rgba_bytes = {
         let mut decoder_guard = decoder.lock().await;
         decoder_guard.decode_frame(time_secs, width, height)?
     };
     
-    // Encode to WebP
-    let mut webp_data = Vec::new();
-    let encoder = WebPEncoder::new_lossless(&mut webp_data);
-    encoder.encode(&rgba_bytes, width, height, image::ExtendedColorType::Rgba8)
-        .map_err(|e| format!("WebP encoding failed: {}", e))?;
-    
-    // Return as base64 data URL
-    let base64_data = BASE64.encode(&webp_data);
-    Ok(format!("data:image/webp;base64,{}", base64_data))
+    // Return raw RGBA as base64 data URL (no compression - instant!)
+    // Format: data:image/rgba;base64,<base64_rgba>
+    let base64_data = BASE64.encode(&rgba_bytes);
+    Ok(format!("data:image/rgba;base64,{}", base64_data))
 }
 
 /// Extract multiple frames using the native decoder with streaming
 /// Uses tile-based atlas system for efficient storage (32 thumbnails per sprite sheet)
+/// 
+/// Performance architecture:
+/// - Immediate path: decode → RGBA → base64 → frontend (3-15ms, no compression)
+/// - Background path: RGBA → WebP atlas → disk (non-blocking persistence)
+/// 
+/// This ensures timeline scrubbing never blocks on image compression.
 #[tauri::command]
 async fn decode_frames_streaming(
     video_path: String,
@@ -179,7 +178,7 @@ async fn decode_frames_streaming(
     let video_id = format!("{:x}", md5::compute(&video_path));
     let resolution_tier = if width >= 160 { ResolutionTier::Tier2x } else { ResolutionTier::Tier1x };
     
-    eprintln!("[decode_frames_streaming] START video_id={} timestamps={} density={:?} size={}x{} (ATLAS MODE)", 
+    eprintln!("[decode_frames_streaming] START video_id={} timestamps={} density={:?} size={}x{} (ATLAS MODE + IMMEDIATE RGBA)", 
               video_id, timestamps.len(), density, width, height);
     
     // Get cache directory
@@ -236,7 +235,7 @@ async fn decode_frames_streaming(
         return Ok(());
     }
     
-    // Spawn extraction task - build atlases from missing frames
+    // Spawn extraction task - IMMEDIATE RGBA streaming + background atlas persistence
     let total_frames = timestamps.len();
     let handle = tokio::spawn(async move {
         let bg_start = std::time::Instant::now();
@@ -263,14 +262,38 @@ async fn decode_frames_streaming(
         for chunk in missing_times.chunks(THUMBNAILS_PER_ATLAS) {
             let chunk_start = std::time::Instant::now();
             
-            // Create atlas builder
+            // Create atlas builder for background persistence
             let mut atlas_builder = AtlasBuilder::new(width, height);
             let mut chunk_frames: Vec<(f64, Vec<u8>)> = Vec::new();
             
-            // Decode all frames in this chunk
+            // IMMEDIATE PATH: Decode and stream RGBA to frontend (no compression!)
             for &time in chunk {
+                let decode_start = std::time::Instant::now();
+                
                 match decoder.lock().await.decode_frame(time, width, height) {
                     Ok(rgba_bytes) => {
+                        let decode_time = decode_start.elapsed();
+                        
+                        // IMMEDIATE: Send raw RGBA as base64 to frontend (no WebP encoding!)
+                        let base64_data = BASE64.encode(&rgba_bytes);
+                        let rgba_data_url = format!("data:image/rgba;base64,{}", base64_data);
+                        
+                        let tile = ThumbnailTile::from_path(time, rgba_data_url, density);
+                        
+                        match on_tile.send(tile) {
+                            Ok(_) => {
+                                frames_sent += 1;
+                                if frames_sent <= 3 || frames_sent % 20 == 0 {
+                                    eprintln!("[STREAM] Sent RGBA tile #{}/{}: time={:.2}s decode={:?} (NO COMPRESSION)", 
+                                              frames_sent, total_frames, time, decode_time);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[STREAM] ✗ Failed to send tile #{}: {:?}", frames_sent + 1, e);
+                            }
+                        }
+                        
+                        // Save RGBA for background atlas persistence
                         chunk_frames.push((time, rgba_bytes));
                         frames_decoded += 1;
                     }
@@ -287,7 +310,10 @@ async fn decode_frames_streaming(
                 continue;
             }
             
-            // Allocate atlas locations and build atlas
+            // BACKGROUND PATH: Persist to WebP atlas (non-blocking for frontend)
+            let persist_start = std::time::Instant::now();
+            
+            // Allocate atlas locations
             let mut locations = Vec::new();
             {
                 let mut manager = atlas_manager.write().await;
@@ -304,43 +330,20 @@ async fn decode_frames_streaming(
                 }
             }
             
-            // Save atlas to disk
+            // Save atlas to disk (background persistence)
             if let Some((_, first_location)) = locations.first() {
                 if let Err(e) = atlas_builder.save(&first_location.atlas_path).await {
                     eprintln!("[decode_frames_streaming] Failed to save atlas: {}", e);
-                    continue;
+                } else {
+                    atlases_created += 1;
+                    let persist_time = persist_start.elapsed();
+                    eprintln!("[PERSIST] Created atlas #{} with {} thumbnails in {:?} (background, non-blocking)", 
+                              atlases_created, chunk_frames.len(), persist_time);
                 }
-                
-                atlases_created += 1;
-                eprintln!("[decode_frames_streaming] Created atlas #{} with {} thumbnails in {:?}", 
-                          atlases_created, chunk_frames.len(), chunk_start.elapsed());
             }
             
-            // Stream all tiles from this atlas to frontend
-            for (time, location) in locations {
-                let tile = ThumbnailTile::from_atlas(
-                    time,
-                    location.atlas_path.to_string_lossy().to_string(),
-                    density,
-                    location.col,
-                    location.row,
-                    width,
-                    height,
-                );
-                
-                match on_tile.send(tile) {
-                    Ok(_) => {
-                        frames_sent += 1;
-                        if frames_sent <= 3 || frames_sent % 20 == 0 {
-                            eprintln!("[STREAM] Sent atlas tile #{}/{}: time={:.2}s atlas={} pos=({},{})", 
-                                      frames_sent, total_frames, time, location.atlas_index, location.col, location.row);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[STREAM] ✗ Failed to send tile #{}: {:?}", frames_sent + 1, e);
-                    }
-                }
-            }
+            let chunk_time = chunk_start.elapsed();
+            eprintln!("[decode_frames_streaming] Chunk complete: {} frames in {:?}", chunk_frames.len(), chunk_time);
             
             // Yield between atlas batches
             tokio::task::yield_now().await;

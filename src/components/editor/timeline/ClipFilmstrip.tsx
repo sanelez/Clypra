@@ -127,8 +127,23 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
           .catch((err) => {
             console.error(`[ClipFilmstrip] Failed to extract atlas tile at ${tile.time}s:`, err);
           });
+      } else if (tile.path.startsWith("data:image/rgba;base64,")) {
+        // IMMEDIATE PATH: Raw RGBA data URL from backend (no compression!)
+        // Convert RGBA to displayable format using canvas
+        decodeRgbaDataUrl(tile.path, thumbW, thumbH)
+          .then((dataUrl) => {
+            const key = roundMs(tile.time);
+            setFrameCache((prev) => {
+              const next = new Map(prev);
+              next.set(key, dataUrl);
+              return next;
+            });
+          })
+          .catch((err) => {
+            console.error(`[ClipFilmstrip] Failed to decode RGBA tile at ${tile.time}s:`, err);
+          });
       } else {
-        // Legacy per-frame tile
+        // Legacy per-frame tile (WebP or file path)
         const src = tile.path.startsWith("data:") ? tile.path : convertFileSrc(tile.path);
         const key = roundMs(tile.time);
         setFrameCache((prev) => {
@@ -137,6 +152,46 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
           return next;
         });
       }
+    };
+
+    // Helper function to decode RGBA data URL to displayable format
+    // RGBA format: data:image/rgba;base64,<base64_rgba_bytes>
+    // This is the IMMEDIATE path - no compression blocking!
+    const decodeRgbaDataUrl = async (dataUrl: string, width: number, height: number): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        try {
+          // Extract base64 data
+          const base64Data = dataUrl.replace("data:image/rgba;base64,", "");
+
+          // Decode base64 to binary
+          const binaryString = atob(base64Data);
+          const bytes = new Uint8ClampedArray(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+
+          // Create ImageData from RGBA bytes
+          const imageData = new ImageData(bytes, width, height);
+
+          // Create canvas and draw ImageData
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+
+          if (!ctx) {
+            reject(new Error("Failed to get canvas context"));
+            return;
+          }
+
+          ctx.putImageData(imageData, 0, 0);
+
+          // Convert to data URL (browser handles compression efficiently)
+          resolve(canvas.toDataURL("image/webp", 0.9));
+        } catch (err) {
+          reject(err);
+        }
+      });
     };
 
     // Helper function to extract thumbnail from atlas
