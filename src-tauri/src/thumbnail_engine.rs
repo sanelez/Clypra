@@ -4,9 +4,11 @@
 //! - Three density levels: Low (5s), Medium (1s), High (0.2s)
 //! - Global time-grid sampling for consistent positioning
 //! - Priority-based async extraction (viewport first, then background)
+//! - Tile-based atlas system (32 thumbnails per sprite sheet)
 //! - WebP disk cache with LRU memory cache
 
 pub mod decoder;
+pub mod atlas;
 
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
