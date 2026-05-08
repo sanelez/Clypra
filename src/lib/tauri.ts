@@ -70,17 +70,3 @@ export function releaseVideoDecoder(videoPath: string): void {
     videoPath: normalizePathForTauriInvoke(videoPath),
   });
 }
-
-/**
- * Get video metadata using the native decoder (fast, no sidecar).
- */
-export async function getVideoMetadataFast(videoPath: string): Promise<{
-  duration: number;
-  width: number;
-  height: number;
-  path: string;
-}> {
-  return invoke("get_video_metadata_fast", {
-    videoPath: normalizePathForTauriInvoke(videoPath),
-  });
-}

@@ -27,10 +27,12 @@ export class GPUTextureCache {
   private vertexBuffer: WebGLBuffer | null = null;
   private positionLocation: number = -1;
   private texCoordLocation: number = -1;
-  private matrixLocation: WebGLUniformLocation | null = null;
   private textureLocation: WebGLUniformLocation | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
+    console.log("[GPUTextureCache] 🚀 Starting initialization...");
+    console.log("[GPUTextureCache] Canvas dimensions:", canvas.width, "x", canvas.height);
+
     const gl = canvas.getContext("webgl2", {
       alpha: true,
       antialias: false,
@@ -41,26 +43,54 @@ export class GPUTextureCache {
     });
 
     if (!gl) {
+      console.error("[GPUTextureCache] ❌ WebGL2 not supported!");
+      console.error("[GPUTextureCache] Browser info:", navigator.userAgent);
       throw new Error("WebGL2 not supported");
     }
+
+    console.log("[GPUTextureCache] ✅ WebGL2 context created");
+    console.log("[GPUTextureCache] WebGL version:", gl.getParameter(gl.VERSION));
+    console.log("[GPUTextureCache] GLSL version:", gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
+    console.log("[GPUTextureCache] Renderer:", gl.getParameter(gl.RENDERER));
 
     this.gl = gl;
     this.textures = new Map();
     this.textureMetadata = new Map();
 
+    // Set initial viewport (CRITICAL for rendering)
+    this.gl.viewport(0, 0, canvas.width, canvas.height);
+    console.log("[GPUTextureCache] Viewport set to:", canvas.width, "x", canvas.height);
+
     // Initialize shader program and buffers
-    this.initializeWebGL();
+    try {
+      console.log("[GPUTextureCache] Initializing WebGL shaders and buffers...");
+      this.initializeWebGL();
+      console.log("[GPUTextureCache] ✅ Initialization complete!");
+    } catch (err) {
+      console.error("[GPUTextureCache] ❌ Failed to initialize WebGL:", err);
+      throw err;
+    }
   }
 
   private initializeWebGL() {
+    console.log("[GPUTextureCache] Creating shader program...");
     this.program = this.createShaderProgram();
+    console.log("[GPUTextureCache] ✅ Shader program created");
+
+    console.log("[GPUTextureCache] Creating vertex buffer...");
     this.vertexBuffer = this.createVertexBuffer();
+    console.log("[GPUTextureCache] ✅ Vertex buffer created");
 
     // Get attribute and uniform locations
     this.positionLocation = this.gl.getAttribLocation(this.program, "a_position");
     this.texCoordLocation = this.gl.getAttribLocation(this.program, "a_texCoord");
-    this.matrixLocation = this.gl.getUniformLocation(this.program, "u_matrix");
     this.textureLocation = this.gl.getUniformLocation(this.program, "u_texture");
+
+    console.log("[GPUTextureCache] Attribute locations:", {
+      position: this.positionLocation,
+      texCoord: this.texCoordLocation,
+      texture: this.textureLocation !== null,
+    });
   }
 
   /**
@@ -121,6 +151,7 @@ export class GPUTextureCache {
 
   /**
    * Render texture to canvas (reuse, no upload)
+   * Simplified fullscreen rendering without matrix transforms
    */
   renderTexture(key: string, x: number, y: number, width: number, height: number) {
     const texture = this.textures.get(key);
@@ -139,6 +170,11 @@ export class GPUTextureCache {
       return;
     }
 
+    // Update viewport if canvas size changed
+    const canvasWidth = this.gl.canvas.width;
+    const canvasHeight = this.gl.canvas.height;
+    this.gl.viewport(0, 0, canvasWidth, canvasHeight);
+
     // Use shader program
     this.gl.useProgram(this.program);
 
@@ -156,14 +192,15 @@ export class GPUTextureCache {
     this.gl.enableVertexAttribArray(this.texCoordLocation);
     this.gl.vertexAttribPointer(this.texCoordLocation, 2, this.gl.FLOAT, false, 16, 8);
 
-    // Create transformation matrix (canvas coordinates to clip space)
-    const canvasWidth = this.gl.canvas.width;
-    const canvasHeight = this.gl.canvas.height;
-    const matrix = this.createTransformMatrix(x, y, width, height, canvasWidth, canvasHeight);
-    this.gl.uniformMatrix4fv(this.matrixLocation, false, matrix);
-
-    // Draw quad
+    // Draw fullscreen quad (no matrix transform needed)
     this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  /**
+   * Check if texture exists in cache
+   */
+  hasTexture(key: string): boolean {
+    return this.textures.has(key);
   }
 
   /**
@@ -194,11 +231,47 @@ export class GPUTextureCache {
     const memoryMB = this.getMemoryUsageMB();
     const totalUseCount = Array.from(this.textureMetadata.values()).reduce((sum, m) => sum + m.useCount, 0);
 
+    // Calculate average upload time
+    const now = Date.now();
+    const recentTextures = Array.from(this.textureMetadata.values()).filter((m) => now - m.uploadTime < 60000); // Last 60s
+    const avgUploadTime = recentTextures.length > 0 ? recentTextures.reduce((sum, m) => sum + (m.uploadTime - m.uploadTime), 0) / recentTextures.length : 0;
+
     return {
       textures,
       memoryMB: memoryMB.toFixed(2),
       totalUseCount,
       avgUseCount: textures > 0 ? (totalUseCount / textures).toFixed(1) : "0",
+      textureReuseRate: textures > 0 ? ((totalUseCount / textures - 1) * 100).toFixed(1) + "%" : "0%",
+    };
+  }
+
+  /**
+   * Get detailed performance metrics
+   */
+  getPerformanceMetrics() {
+    const stats = this.getStats();
+    const metadata = Array.from(this.textureMetadata.values());
+
+    // Calculate texture age distribution
+    const now = Date.now();
+    const ageDistribution = {
+      recent: metadata.filter((m) => now - m.lastUsed < 5000).length, // < 5s
+      medium: metadata.filter((m) => now - m.lastUsed >= 5000 && now - m.lastUsed < 30000).length, // 5-30s
+      old: metadata.filter((m) => now - m.lastUsed >= 30000).length, // > 30s
+    };
+
+    // Calculate use count distribution
+    const useCountDistribution = {
+      low: metadata.filter((m) => m.useCount < 2).length, // Used once
+      medium: metadata.filter((m) => m.useCount >= 2 && m.useCount < 10).length, // 2-9 times
+      high: metadata.filter((m) => m.useCount >= 10).length, // 10+ times
+    };
+
+    return {
+      ...stats,
+      ageDistribution,
+      useCountDistribution,
+      timestamp: now,
     };
   }
 
@@ -262,10 +335,9 @@ export class GPUTextureCache {
       in vec2 a_position;
       in vec2 a_texCoord;
       out vec2 v_texCoord;
-      uniform mat4 u_matrix;
       
       void main() {
-        gl_Position = u_matrix * vec4(a_position, 0.0, 1.0);
+        gl_Position = vec4(a_position, 0.0, 1.0);
         v_texCoord = a_texCoord;
       }
     `;
@@ -320,14 +392,15 @@ export class GPUTextureCache {
   }
 
   private createVertexBuffer(): WebGLBuffer {
-    // Quad vertices: position (x, y), texCoord (u, v)
+    // Fullscreen quad in clip space (-1 to 1)
+    // Format: position (x, y), texCoord (u, v)
     const vertices = new Float32Array([
       // Bottom-left
-      0, 0, 0, 1,
+      -1, -1, 0, 1,
       // Bottom-right
-      1, 0, 1, 1,
+      1, -1, 1, 1,
       // Top-left
-      0, 1, 0, 0,
+      -1, 1, 0, 0,
       // Top-right
       1, 1, 1, 0,
     ]);
@@ -341,16 +414,5 @@ export class GPUTextureCache {
     this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.STATIC_DRAW);
 
     return buffer;
-  }
-
-  private createTransformMatrix(x: number, y: number, width: number, height: number, canvasWidth: number, canvasHeight: number): Float32Array {
-    // Convert canvas coordinates to clip space (-1 to 1)
-    const scaleX = (2 * width) / canvasWidth;
-    const scaleY = (2 * height) / canvasHeight;
-    const translateX = (2 * x) / canvasWidth - 1;
-    const translateY = 1 - (2 * y) / canvasHeight - scaleY;
-
-    // Create transformation matrix (column-major order for WebGL)
-    return new Float32Array([scaleX, 0, 0, 0, 0, scaleY, 0, 0, 0, 0, 1, 0, translateX, translateY, 0, 1]);
   }
 }

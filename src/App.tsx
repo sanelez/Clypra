@@ -99,7 +99,8 @@ const App = () => {
         // Convert posterFrame paths using convertFileSrc
         const { convertFileSrc } = await import("@tauri-apps/api/core");
         const convertedAssets = fullProjectData.media_assets.map((asset: any) => {
-          if (asset.posterFrame && !asset.posterFrame.startsWith("http") && !asset.posterFrame.startsWith("asset://")) {
+          // Only convert file paths, not data URLs (base64), http URLs, or asset:// URLs
+          if (asset.posterFrame && !asset.posterFrame.startsWith("data:") && !asset.posterFrame.startsWith("http") && !asset.posterFrame.startsWith("asset://")) {
             // Re-convert the posterFrame path
             return {
               ...asset,

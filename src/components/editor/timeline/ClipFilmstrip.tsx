@@ -5,6 +5,9 @@ import { generateTimestampGrid } from "../../../lib/timelineUtils";
 import { cn } from "@/lib/utils";
 import { DensityLevel } from "../../../types";
 import type { Clip, MediaAsset, ThumbnailTile } from "../../../types";
+import { GPUTextureCache } from "@/lib/gpuTextureCache";
+import { globalGPUCache } from "@/lib/globalGPUCache";
+import { performanceMetrics } from "@/lib/performanceMetrics";
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|tiff?|heic|heif|avif)$/i;
 
@@ -51,6 +54,11 @@ function roundMs(t: number): number {
 /**
  * ClipFilmstrip renders a filmstrip of thumbnail tiles for a video clip.
  *
+ * GPU-Centric Architecture (Phase 1):
+ * - **GPU texture cache**: Upload RGBA to GPU once, reuse forever
+ * - **Zero re-upload**: Subsequent renders use cached GPU textures
+ * - **Fallback support**: Falls back to canvas if GPU unavailable
+ *
  * CapCut-style architecture:
  * - **Extract once on import**: Generates a dense 0.5s grid and invokes
  *   `decode_frames_streaming` exactly ONCE per clip (or when trim changes).
@@ -59,7 +67,17 @@ function roundMs(t: number): number {
  * - **Trim = re-extract**: Only trimIn/trimOut changes trigger a new extraction.
  */
 export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, stripHeightPx = 40, className }: ClipFilmstripProps) {
-  // ALL extracted frames — populated once on mount, never cleared on zoom
+  // GPU texture cache (Phase 1: WebGL)
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const gpuCacheRef = useRef<GPUTextureCache | null>(null);
+  const [useGPUCache, setUseGPUCache] = useState(false);
+  const [textureKeys, setTextureKeys] = useState<Map<number, string>>(new Map());
+  const componentId = useRef(`filmstrip-${clip.id}-${Math.random().toString(36).substr(2, 9)}`).current;
+
+  // Try to use global GPU cache first, fall back to local cache
+  const useGlobalCache = typeof window !== "undefined" && globalGPUCache.isInitialized();
+
+  // Legacy canvas-based cache (fallback)
   const [frameCache, setFrameCache] = useState<Map<number, string>>(new Map());
   const extractionKeyRef = useRef("");
   const channelRef = useRef<Channel<ThumbnailTile> | null>(null);
@@ -71,6 +89,45 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
 
   const resolutionTier = typeof window !== "undefined" && window.devicePixelRatio >= 1.5 ? "2x" : "1x";
   const [thumbW, thumbH] = resolutionTier === "2x" ? [120, 80] : [60, 40];
+
+  // ── Initialize GPU texture cache ────────────────────────────────────────
+  useEffect(() => {
+    // Try to use global GPU cache first
+    if (useGlobalCache) {
+      const globalCache = globalGPUCache.getCache();
+      if (globalCache) {
+        gpuCacheRef.current = globalCache;
+        setUseGPUCache(true);
+        console.log(`[ClipFilmstrip] Using global GPU cache for clip ${clip.id}`);
+        return;
+      }
+    }
+
+    // Fall back to local GPU cache
+    if (!canvasRef.current || gpuCacheRef.current) return;
+
+    try {
+      gpuCacheRef.current = new GPUTextureCache(canvasRef.current);
+      setUseGPUCache(true);
+      console.log(`[ClipFilmstrip] Local GPU texture cache initialized for clip ${clip.id}`);
+    } catch (err) {
+      console.warn(`[ClipFilmstrip] Failed to initialize GPU cache for clip ${clip.id}, falling back to canvas:`, err);
+      setUseGPUCache(false);
+    }
+
+    return () => {
+      // Only dispose local cache, not global cache
+      if (!useGlobalCache && gpuCacheRef.current) {
+        gpuCacheRef.current.dispose();
+        gpuCacheRef.current = null;
+      }
+
+      // Unregister from global cache
+      if (useGlobalCache) {
+        globalGPUCache.unregisterViewport(componentId);
+      }
+    };
+  }, [useGlobalCache, clip.id, componentId]);
 
   // ── Extract once on mount (not on zoom) ─────────────────────────────────
   useEffect(() => {
@@ -107,11 +164,53 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
     // Create channel with callback directly in constructor
     const channel = new Channel<ThumbnailTile>();
 
-    channel.onmessage = (tile) => {
+    channel.onmessage = async (tile) => {
       if (cancelled) return;
 
       receivedCountRef.current++;
 
+      // GPU-optimized path: Use decode_frame_gpu for raw RGBA bytes
+      if (useGPUCache && gpuCacheRef.current) {
+        try {
+          const decodeStart = performance.now();
+
+          // Request raw RGBA bytes (no base64 encoding!)
+          const rgbaBytes = await invoke<number[]>("decode_frame_gpu", {
+            videoPath,
+            timeSecs: tile.time,
+            width: thumbW,
+            height: thumbH,
+          });
+
+          const decodeTime = performance.now() - decodeStart;
+          const uploadStart = performance.now();
+
+          // Upload to GPU texture cache (once)
+          const textureKey = `${mediaAsset.path}:${tile.time}:${thumbW}x${thumbH}`;
+          gpuCacheRef.current.uploadTexture(textureKey, new Uint8Array(rgbaBytes), thumbW, thumbH);
+
+          const uploadTime = performance.now() - uploadStart;
+
+          // Track performance metrics
+          performanceMetrics.trackTextureUpload(uploadTime);
+          performanceMetrics.trackScrubLatency(decodeTime + uploadTime);
+
+          // Store texture key for rendering
+          const key = roundMs(tile.time);
+          setTextureKeys((prev) => {
+            const next = new Map(prev);
+            next.set(key, textureKey);
+            return next;
+          });
+
+          return;
+        } catch (err) {
+          console.error(`[ClipFilmstrip] GPU upload failed at ${tile.time}s, falling back to canvas:`, err);
+          // Fall through to canvas-based rendering
+        }
+      }
+
+      // Canvas-based fallback path
       // Handle atlas-based tiles
       if (tile.atlas_coords) {
         // Extract thumbnail from atlas sprite sheet
@@ -268,7 +367,71 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
 
     // NOTE: pixelsPerSecond is intentionally NOT in this dependency array.
     // Zoom changes must NOT trigger re-extraction.
-  }, [isVideoSource, mediaAsset.path, mediaAsset.duration, mediaAsset.posterFrame, clip.trimIn, clip.trimOut, thumbW, thumbH]);
+  }, [isVideoSource, mediaAsset.path, mediaAsset.duration, mediaAsset.posterFrame, clip.trimIn, clip.trimOut, thumbW, thumbH, useGPUCache]);
+
+  // ── GPU Rendering (reuse textures, no re-upload) ─────────────────────────
+  useEffect(() => {
+    if (!useGPUCache || !gpuCacheRef.current || !canvasRef.current || textureKeys.size === 0) return;
+
+    const canvas = canvasRef.current;
+    const cache = gpuCacheRef.current;
+
+    // Update canvas dimensions if needed
+    if (canvas.width !== clipWidthPx || canvas.height !== stripHeightPx) {
+      canvas.width = clipWidthPx;
+      canvas.height = stripHeightPx;
+    }
+
+    // Register viewport with global cache (if using global cache)
+    if (useGlobalCache) {
+      const viewportTextureKeys = new Set(textureKeys.values());
+      globalGPUCache.registerViewport(componentId, viewportTextureKeys, 10); // High priority for visible clips
+    }
+
+    const renderStart = performance.now();
+
+    const renderFrame = () => {
+      cache.clear();
+
+      // Calculate visible tiles
+      const tileCount = Math.max(1, Math.ceil(clipWidthPx / TILE_WIDTH_PX));
+
+      // Get all texture keys sorted by time
+      const sortedKeys = Array.from(textureKeys.entries()).sort((a, b) => a[0] - b[0]);
+
+      if (sortedKeys.length === 0) return;
+
+      // Sample textures for visible tiles
+      const tileWidthPx = clipWidthPx / tileCount;
+      const step = sortedKeys.length > 1 ? (sortedKeys.length - 1) / (tileCount - 1) : 0;
+
+      for (let i = 0; i < tileCount; i++) {
+        const idx = Math.min(Math.round(i * step), sortedKeys.length - 1);
+        const [, textureKey] = sortedKeys[idx];
+        const x = i * tileWidthPx;
+
+        // Render texture from GPU cache (instant, no upload!)
+        cache.renderTexture(textureKey, x, 0, tileWidthPx, stripHeightPx);
+      }
+    };
+
+    renderFrame();
+
+    const renderTime = performance.now() - renderStart;
+    performanceMetrics.trackTextureRender(renderTime);
+
+    // Update GPU memory usage in performance metrics
+    if (cache.getStats) {
+      const stats = cache.getStats();
+      performanceMetrics.updateGPUMemory(parseFloat(stats.memoryMB));
+    }
+
+    // Log GPU cache stats periodically
+    if (textureKeys.size > 0 && textureKeys.size % 20 === 0) {
+      const stats = cache.getStats();
+      console.log(`[ClipFilmstrip] GPU cache stats for clip ${clip.id}:`, stats);
+    }
+  }, [textureKeys, clipWidthPx, stripHeightPx, useGPUCache, useGlobalCache, componentId, clip.id]);
 
   // ── Sampling (zoom-reactive, zero requests) ──────────────────────────────
   // Tile count is ALWAYS driven by clip width / target tile size (~60px).
@@ -310,7 +473,32 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
 
   // ── Render ───────────────────────────────────────────────────────────────
   if (isVideoSource && visibleTiles.length > 0) {
-    // Each tile = clipWidth / tileCount — always fills the full clip
+    // GPU-accelerated rendering path
+    if (useGPUCache && textureKeys.size > 0) {
+      return (
+        <div
+          data-testid="clip-filmstrip-gpu"
+          className={cn("overflow-hidden rounded-[2px] border border-black/20 bg-[#0c2730]/40", className)}
+          style={{
+            height: stripHeightPx,
+            width: "100%",
+          }}
+        >
+          <canvas
+            ref={canvasRef}
+            width={clipWidthPx}
+            height={stripHeightPx}
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "block",
+            }}
+          />
+        </div>
+      );
+    }
+
+    // Canvas-based fallback rendering path
     const tileWidthPx = clipWidthPx / visibleTiles.length;
 
     return (

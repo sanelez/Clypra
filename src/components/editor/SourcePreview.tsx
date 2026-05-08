@@ -1,30 +1,42 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
-import { Play, Pause, Plus, X, Maximize2 } from "lucide-react";
+import { Play, Pause, Plus, X } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useUIStore } from "../../store/uiStore";
 import { useTimelineStore } from "../../store/timelineStore";
 import { useProjectStore } from "../../store/projectStore";
 import { createClipFromAsset } from "../../lib/timelineClip";
+import { GPUPreview } from "./GPUPreview";
+import { AudioWaveform } from "./AudioWaveform";
+
+// GPU preview is now the default for video playback
+const USE_GPU_PREVIEW = true;
 
 export const SourcePreview: React.FC = () => {
   const { sourceAsset, sourceInPoint, sourceOutPoint, exitSourceMode, markSourceIn, markSourceOut } = useUIStore();
   const { tracks, clips, addClip, addTrack } = useTimelineStore();
   const { project } = useProjectStore();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const scrubRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const [useGPU, setUseGPU] = useState(USE_GPU_PREVIEW && sourceAsset?.type === "video");
+  const [gpuFailed, setGpuFailed] = useState(false);
 
   // Reset when asset changes
   useEffect(() => {
     setCurrentTime(0);
     setIsPlaying(false);
-  }, [sourceAsset?.id]);
+    setUseGPU(USE_GPU_PREVIEW && sourceAsset?.type === "video");
+    setGpuFailed(false);
+  }, [sourceAsset?.id]); // Only depend on asset ID, not type
 
-  // Video event listeners
+  // Video event listeners (only for HTML5 video, not GPU preview)
   useEffect(() => {
+    if (useGPU) return; // Skip if using GPU preview
+
     const video = videoRef.current;
     if (!video) return;
 
@@ -43,7 +55,31 @@ export const SourcePreview: React.FC = () => {
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.removeEventListener("ended", handleEnded);
     };
-  }, [isScrubbing]);
+  }, [isScrubbing, useGPU]);
+
+  // Audio event listeners
+  useEffect(() => {
+    if (sourceAsset?.type !== "audio") return;
+
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleTimeUpdate = () => {
+      if (!isScrubbing) setCurrentTime(audio.currentTime);
+    };
+    const handleLoadedMetadata = () => setDuration(audio.duration);
+    const handleEnded = () => setIsPlaying(false);
+
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audio.addEventListener("ended", handleEnded);
+
+    return () => {
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.removeEventListener("ended", handleEnded);
+    };
+  }, [isScrubbing, sourceAsset?.type]);
 
   // Scrubber drag handlers
   const seekToPosition = useCallback(
@@ -52,7 +88,11 @@ export const SourcePreview: React.FC = () => {
       const rect = scrubRef.current.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       const newTime = ratio * duration;
+
+      // Seek video or audio
       if (videoRef.current) videoRef.current.currentTime = newTime;
+      if (audioRef.current) audioRef.current.currentTime = newTime;
+
       setCurrentTime(newTime);
     },
     [duration],
@@ -73,14 +113,31 @@ export const SourcePreview: React.FC = () => {
   if (!sourceAsset) return null;
 
   const handlePlayPause = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (isPlaying) {
-      video.pause();
-      setIsPlaying(false);
+    if (useGPU) {
+      // GPU preview: just toggle state, GPUPreview handles playback
+      setIsPlaying(!isPlaying);
+    } else if (sourceAsset.type === "audio") {
+      // Audio: control audio element
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (isPlaying) {
+        audio.pause();
+        setIsPlaying(false);
+      } else {
+        audio.play();
+        setIsPlaying(true);
+      }
     } else {
-      video.play();
-      setIsPlaying(true);
+      // HTML5 video: control video element
+      const video = videoRef.current;
+      if (!video) return;
+      if (isPlaying) {
+        video.pause();
+        setIsPlaying(false);
+      } else {
+        video.play();
+        setIsPlaying(true);
+      }
     }
   };
 
@@ -135,11 +192,7 @@ export const SourcePreview: React.FC = () => {
           <span className="text-[13px] font-semibold text-text-primary tracking-tight">Previewing</span>
           <span className="text-[13px] text-text-muted">— {mediaLabel}</span>
         </div>
-        <button
-          onClick={exitSourceMode}
-          className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/[0.06] transition-colors text-text-muted hover:text-text-primary"
-          title="Close (Esc)"
-        >
+        <button onClick={exitSourceMode} className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/6 transition-colors text-text-muted hover:text-text-primary" title="Close (Esc)">
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -147,23 +200,37 @@ export const SourcePreview: React.FC = () => {
       {/* ── Video Area ─────────────────────────────────────────────── */}
       <div className="flex-1 flex items-center justify-center overflow-hidden bg-[#06080a] relative">
         <div className="absolute inset-0 checkerboard opacity-[0.15] pointer-events-none" />
-        <div className="w-full h-full flex items-center justify-center p-4 md:p-6 relative z-10">
+        <div className="w-full h-full flex items-center justify-center relative z-10">
           {sourceAsset.type === "video" ? (
-            <video
-              ref={videoRef}
-              src={sourcePath}
-              className="max-w-full max-h-full rounded shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 bg-black"
-              playsInline
-              preload="auto"
-            />
+            useGPU && !gpuFailed ? (
+              <GPUPreview
+                videoPath={sourceAsset.path}
+                currentTime={currentTime}
+                isPlaying={isPlaying}
+                width={sourceAsset.width || 1920}
+                height={sourceAsset.height || 1080}
+                duration={sourceAsset.duration}
+                frameRate={30}
+                onTimeUpdate={(time) => {
+                  setCurrentTime(time);
+                  // Stop playing when reaching end
+                  if (time >= duration && duration > 0) {
+                    setIsPlaying(false);
+                  }
+                }}
+                className="max-w-full max-h-full shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 bg-black"
+              />
+            ) : (
+              <video ref={videoRef} src={sourcePath} className="max-w-full max-h-full shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 bg-black" playsInline preload="auto" />
+            )
           ) : sourceAsset.type === "image" ? (
             <img src={sourcePath} alt={sourceAsset.name} className="max-w-full max-h-full rounded shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 bg-black object-contain" />
           ) : (
-            <div className="w-64 h-48 bg-surface-raised rounded-xl shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 flex items-center justify-center">
-              <div className="text-sm font-medium text-text-muted">Audio Preview</div>
-            </div>
+            <AudioWaveform audioElement={audioRef.current} isPlaying={isPlaying} coverImage={sourceAsset.coverArt} audioName={sourceAsset.name} className="w-full h-full" />
           )}
         </div>
+        {/* Hidden audio element for audio playback */}
+        {sourceAsset.type === "audio" && <audio ref={audioRef} src={sourcePath} preload="auto" style={{ display: "none" }} />}
       </div>
 
       {/* ── Scrub Bar (thin, edge-to-edge) ────────────────────────── */}
@@ -188,12 +255,9 @@ export const SourcePreview: React.FC = () => {
           />
         )}
         {/* Progress fill */}
-        <div className="absolute top-0 bottom-0 left-0 bg-accent" style={{ width: `${progressPct}%` }} />
+        <div className="absolute top-0 bottom-0 left-0 bg-accent transition-all duration-100 ease-linear" style={{ width: `${progressPct}%` }} />
         {/* Playhead dot */}
-        <div
-          className="absolute top-1/2 -translate-y-1/2 w-[10px] h-[10px] rounded-full bg-accent border-2 border-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-          style={{ left: `calc(${progressPct}% - 5px)` }}
-        />
+        <div className="absolute top-1/2 -translate-y-1/2 w-[10px] h-[10px] rounded-full bg-accent border-2 border-white shadow-md opacity-0 group-hover:opacity-100 transition-all duration-100 ease-linear pointer-events-none" style={{ left: `calc(${progressPct}% - 5px)` }} />
       </div>
 
       {/* ── Bottom Controls ────────────────────────────────────────── */}
@@ -207,37 +271,21 @@ export const SourcePreview: React.FC = () => {
 
         {/* Centered play button */}
         <div className="flex-1 flex justify-center">
-          <button
-            onClick={handlePlayPause}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/[0.06] transition-colors text-text-primary"
-            title={isPlaying ? "Pause" : "Play"}
-          >
+          <button onClick={handlePlayPause} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/6 transition-colors text-text-primary" title={isPlaying ? "Pause" : "Play"}>
             {isPlaying ? <Pause className="w-[18px] h-[18px]" /> : <Play className="w-[18px] h-[18px] ml-0.5" />}
           </button>
         </div>
 
         {/* Right-side actions */}
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => markSourceIn(currentTime)}
-            className="px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/[0.06] transition-colors"
-            title="Mark In (I)"
-          >
+          <button onClick={() => markSourceIn(currentTime)} className="px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors" title="Mark In (I)">
             IN
           </button>
-          <button
-            onClick={() => markSourceOut(currentTime)}
-            className="px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/[0.06] transition-colors"
-            title="Mark Out (O)"
-          >
+          <button onClick={() => markSourceOut(currentTime)} className="px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors" title="Mark Out (O)">
             OUT
           </button>
           <div className="w-px h-4 bg-white/10 mx-1" />
-          <button
-            onClick={handleAddToTimeline}
-            className="flex items-center gap-1 px-2.5 h-6 rounded bg-accent/90 hover:bg-accent text-white text-[10px] font-semibold transition-colors"
-            title="Add to Timeline"
-          >
+          <button onClick={handleAddToTimeline} className="flex items-center gap-1 px-2.5 h-6 rounded bg-accent/90 hover:bg-accent text-white text-[10px] font-semibold transition-colors" title="Add to Timeline">
             <Plus className="w-3 h-3" />
             Add
           </button>

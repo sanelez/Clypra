@@ -82,6 +82,7 @@ export interface MediaAsset {
   width?: number;
   height?: number;
   posterFrame?: string;
+  coverArt?: string; // Album artwork for audio files
   size: number;
 }
 

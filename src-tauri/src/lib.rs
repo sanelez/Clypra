@@ -574,20 +574,6 @@ fn release_video_decoder(video_path: String) {
     release_decoder(&video_path);
 }
 
-/// Get video metadata using the native decoder (fast, no sidecar)
-#[tauri::command]
-async fn get_video_metadata_fast(video_path: String) -> Result<serde_json::Value, String> {
-    let decoder = get_decoder(&video_path).await?;
-    let guard = decoder.lock().await;
-    
-    Ok(serde_json::json!({
-        "duration": guard.duration,
-        "width": guard.width,
-        "height": guard.height,
-        "path": video_path,
-    }))
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -610,6 +596,7 @@ pub fn run() {
             extract_poster_frame_command,
             commands::media::get_video_metadata,
             commands::media::extract_poster_frame,
+            commands::media::extract_audio_artwork,
             commands::project::save_project,
             commands::project::load_project,
             commands::project::get_recent_projects,
@@ -619,7 +606,6 @@ pub fn run() {
             decode_frame_gpu,
             decode_frames_streaming,
             release_video_decoder,
-            get_video_metadata_fast,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
