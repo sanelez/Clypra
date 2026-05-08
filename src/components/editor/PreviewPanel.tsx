@@ -239,8 +239,8 @@ const ProgramPreview: React.FC = () => {
 
   if (dimensions.width === 0 || dimensions.height === 0) {
     return (
-      <div className="flex-1 bg-transparent flex flex-col">
-        <div className="flex-1 flex items-center justify-center p-4">
+      <div className="flex-1 bg-bg flex flex-col min-h-0 rounded-tl-xl border-l border-t border-white/[0.03]">
+        <div className="flex-1 flex items-center justify-center p-4 md:p-6 overflow-hidden relative bg-[#06080a]">
           <div ref={containerRef} className="w-full h-full flex items-center justify-center">
             <div className="text-text-muted">Loading preview...</div>
           </div>
@@ -272,10 +272,15 @@ const ProgramPreview: React.FC = () => {
   const step = 1 / Math.max(1, frameRate);
 
   return (
-    <div className="flex-1 bg-transparent flex flex-col min-h-0">
-      <div className="flex-1 flex items-center justify-center p-2 overflow-hidden">
-        <div ref={containerRef} className="w-full h-full flex items-center justify-center overflow-hidden">
-          <div data-testid="program-preview-viewport" className="relative flex shrink-0 items-center justify-center overflow-hidden" style={{ width: vw, height: vh }}>
+    <div className="flex-1 bg-bg flex flex-col min-h-0 rounded-tl-xl border-l border-t border-white/[0.03]">
+      <div className="flex-1 flex items-center justify-center p-4 md:p-6 overflow-hidden relative bg-[#06080a]">
+        <div className="absolute inset-0 checkerboard opacity-[0.15] pointer-events-none" />
+        <div ref={containerRef} className="w-full h-full flex items-center justify-center overflow-hidden relative z-10">
+          <div 
+            data-testid="program-preview-viewport" 
+            className="relative flex shrink-0 items-center justify-center overflow-hidden rounded shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10" 
+            style={{ width: vw, height: vh }}
+          >
             <div data-testid="program-preview-canvas" className="relative shrink-0 bg-black" style={{ width: displayWidth, height: displayHeight }}>
             {scene.layers.length === 0 ? (
               <div className="absolute inset-0 flex items-center justify-center text-text-muted">Preview</div>

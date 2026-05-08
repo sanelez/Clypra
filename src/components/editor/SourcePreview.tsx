@@ -145,21 +145,22 @@ export const SourcePreview: React.FC = () => {
       </div>
 
       {/* ── Video Area ─────────────────────────────────────────────── */}
-      <div className="flex-1 flex items-center justify-center overflow-hidden bg-bg">
-        <div className="w-full h-full flex items-center justify-center p-1">
+      <div className="flex-1 flex items-center justify-center overflow-hidden bg-[#06080a] relative">
+        <div className="absolute inset-0 checkerboard opacity-[0.15] pointer-events-none" />
+        <div className="w-full h-full flex items-center justify-center p-4 md:p-6 relative z-10">
           {sourceAsset.type === "video" ? (
             <video
               ref={videoRef}
               src={sourcePath}
-              className="max-w-full max-h-full object-contain"
+              className="max-w-full max-h-full rounded shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 bg-black"
               playsInline
               preload="auto"
             />
           ) : sourceAsset.type === "image" ? (
-            <img src={sourcePath} alt={sourceAsset.name} className="max-w-full max-h-full object-contain" />
+            <img src={sourcePath} alt={sourceAsset.name} className="max-w-full max-h-full rounded shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 bg-black object-contain" />
           ) : (
-            <div className="w-64 h-48 bg-surface-raised rounded-lg flex items-center justify-center">
-              <div className="text-sm text-text-muted">Audio Preview</div>
+            <div className="w-64 h-48 bg-surface-raised rounded-xl shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 flex items-center justify-center">
+              <div className="text-sm font-medium text-text-muted">Audio Preview</div>
             </div>
           )}
         </div>
