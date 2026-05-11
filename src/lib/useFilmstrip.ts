@@ -10,12 +10,22 @@
  *   - Re-request on epoch change (triggers on zoom-tier-commit, scroll, trim)
  *   - Cancel in-flight requests on epoch change or unmount
  *   - Return sorted TransportArtifacts for RasterSurface to render
+ *   - **Own ImageBitmap lifecycle**: Close bitmaps when replaced or on cleanup
  *
  * Non-responsibilities (intentionally excluded):
  *   - Tile layout math (RasterSurface handles this)
  *   - Canvas drawing (RasterSurface handles this)
  *   - Zoom level → tier mapping (SRP via RenderRuntime handles this)
  *   - Epoch computation (RenderRuntime handles this)
+ *
+ * ImageBitmap Ownership Semantics:
+ *   - This hook OWNS all ImageBitmaps it receives from the transport layer
+ *   - Bitmaps are closed when:
+ *     1. Replaced by higher-tier artifacts for the same timestamp
+ *     2. Epoch changes (scroll, zoom, trim invalidation)
+ *     3. Component unmounts
+ *   - RasterSurface borrows bitmaps for rendering but does NOT own them
+ *   - Prevents GPU resource leaks from progressive tier upgrades (L0→L1→L2→L3)
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -23,12 +33,7 @@ import { useRenderEngineStore } from "../store/renderEngineStore";
 import { useRenderState } from "./renderEngine/hooks";
 import { SpatialTier, InteractionState } from "./renderEngine/types";
 import { requestProgressiveTiers, type TransportArtifact } from "./renderEngine/transport";
-import {
-  DEFAULT_FILMSTRIP_TILE_WIDTH_PX,
-  generateFilmstripSlotTimestamps,
-  getFilmstripTileWidthForTier,
-  getReadableFilmstripTier,
-} from "./filmstripLayout";
+import { DEFAULT_FILMSTRIP_TILE_WIDTH_PX, generateFilmstripSlotTimestamps, getFilmstripTileWidthForTier, getReadableFilmstripTier } from "./filmstripLayout";
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
@@ -76,6 +81,8 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
   const disposePrev = useCallback(() => {
     cancelRef.current?.();
     cancelRef.current = null;
+    // Note: bitmap cleanup happens in the effect cleanup, not here
+    // to avoid closing bitmaps that are still being rendered
   }, []);
 
   useEffect(() => {
@@ -103,23 +110,8 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
 
     const timestampsMs = timestampsSecs.map((t) => Math.round(t * 1000));
     const startTier = SpatialTier.L0;
-    const targetTier = getReadableFilmstripTier(
-      spatialTier,
-      tileWidthPx,
-      stripHeightPx,
-      window.devicePixelRatio || 1,
-    );
-    const requestKey = [
-      epochId,
-      trimIn,
-      trimOut,
-      duration,
-      clipWidthPx,
-      tileWidthPx,
-      stripHeightPx,
-      targetTier,
-      timestampsMs.join(","),
-    ].join("|");
+    const targetTier = getReadableFilmstripTier(spatialTier, tileWidthPx, stripHeightPx, window.devicePixelRatio || 1);
+    const requestKey = [epochId, trimIn, trimOut, duration, clipWidthPx, tileWidthPx, stripHeightPx, targetTier, timestampsMs.join(",")].join("|");
 
     if (requestKey === prevRequestKeyRef.current) return;
     prevRequestKeyRef.current = requestKey;
@@ -149,10 +141,15 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
         flushDirty = false;
 
         // For each timestamp, keep only the highest tier received so far
+        // CRITICAL: Close lower-tier bitmaps that are being replaced to prevent GPU leak
         const bestByTime = new Map<number, TransportArtifact>();
         for (const a of accumulated.values()) {
           const existing = bestByTime.get(a.timestampMs);
           if (!existing || a.spatialTier > existing.spatialTier) {
+            // Close the replaced bitmap if it's a different object
+            if (existing && existing.bitmap && existing.bitmap !== a.bitmap) {
+              existing.bitmap.close();
+            }
             bestByTime.set(a.timestampMs, a);
           }
         }
@@ -173,6 +170,11 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
       clipId,
       onArtifact: (artifact) => {
         const key = `${artifact.timestampMs}:${artifact.spatialTier}`;
+        // Close existing bitmap for this key if we're replacing it
+        const existing = accumulated.get(key);
+        if (existing && existing.bitmap && existing.bitmap !== artifact.bitmap) {
+          existing.bitmap.close();
+        }
         accumulated.set(key, artifact);
         flushDirty = true;
         scheduleFlush();
@@ -184,10 +186,15 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
           rafId = null;
         }
         // Synchronous final flush to guarantee nothing is dropped
+        // CRITICAL: Close lower-tier bitmaps that are being replaced
         const bestByTime = new Map<number, TransportArtifact>();
         for (const a of accumulated.values()) {
           const existing = bestByTime.get(a.timestampMs);
           if (!existing || a.spatialTier > existing.spatialTier) {
+            // Close the replaced bitmap if it's a different object
+            if (existing && existing.bitmap && existing.bitmap !== a.bitmap) {
+              existing.bitmap.close();
+            }
             bestByTime.set(a.timestampMs, a);
           }
         }
@@ -203,6 +210,13 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
         cancelAnimationFrame(rafId);
         rafId = null;
       }
+      // CRITICAL: Close all accumulated bitmaps on epoch change to prevent GPU leak
+      for (const artifact of accumulated.values()) {
+        if (artifact.bitmap) {
+          artifact.bitmap.close();
+        }
+      }
+      accumulated.clear();
       disposePrev();
     };
   }, [
@@ -224,8 +238,18 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
     disposePrev,
   ]);
 
-  // Unmount cleanup
-  useEffect(() => () => disposePrev(), [disposePrev]);
+  // Unmount cleanup - close all bitmaps to prevent GPU leak
+  useEffect(() => {
+    return () => {
+      disposePrev();
+      // Close all bitmaps in the current artifacts array
+      for (const artifact of artifacts) {
+        if (artifact.bitmap) {
+          artifact.bitmap.close();
+        }
+      }
+    };
+  }, [disposePrev, artifacts]);
 
   return {
     artifacts,
