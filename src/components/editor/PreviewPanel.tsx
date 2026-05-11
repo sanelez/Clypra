@@ -235,13 +235,28 @@ const ProgramPreview: React.FC = () => {
   // Scene evaluation (for UI and initial render)
   const scene = useMemo(() => evaluateSceneCached(clockState.time, clips, tracks, mediaAssets, project ?? null, epoch), [tracks, clips, mediaAssets, clockState.time, project, epoch]);
 
+  // Calculate display dimensions for canvas
+  const canvasWidth = project?.canvasWidth ?? 1920;
+  const canvasHeight = project?.canvasHeight ?? 1080;
+  const originalAspectR = resolveOriginalPreviewAspect(
+    scene.visualLayers.filter((l) => l.layerType === "media"),
+    mediaAssets,
+    canvasWidth,
+    canvasHeight,
+  );
+  const aspectR = previewAspectPreset === "original" ? originalAspectR : previewAspectWidthOverHeight(previewAspectPreset, canvasWidth, canvasHeight);
+  const { vw, vh } = previewViewportSize(dimensions.width, dimensions.height, aspectR);
+  const scaleFit = Math.min(vw / canvasWidth, vh / canvasHeight);
+  const scaleFill = Math.max(vw / canvasWidth, vh / canvasHeight);
+  const scale = previewScaleMode === "fit" ? scaleFit : scaleFill;
+  const displayWidth = canvasWidth * scale;
+  const displayHeight = canvasHeight * scale;
+
   // Canvas rendering - INDEPENDENT RAF LOOP (not tied to React state)
   useEffect(() => {
     if (!useCanvasPreview || !canvasRef.current || !project) return;
 
     const canvas = canvasRef.current;
-    const displayWidth = canvas.width;
-    const displayHeight = canvas.height;
 
     if (displayWidth === 0 || displayHeight === 0) return;
 
@@ -336,9 +351,7 @@ const ProgramPreview: React.FC = () => {
         cancelAnimationFrame(rafId);
       }
     };
-  }, [useCanvasPreview, clips, tracks, mediaAssets, project, epoch, clock]);
-
-
+  }, [useCanvasPreview, clips, tracks, mediaAssets, project, epoch, clock, displayWidth, displayHeight]);
 
   // Video sync - EVENT DRIVEN (only on state changes, not every frame)
   useEffect(() => {
@@ -427,11 +440,12 @@ const ProgramPreview: React.FC = () => {
           maxDriftRef.current = Math.max(maxDriftRef.current, drift);
 
           // Add DOM-level preservesPitch to prevent crackling on speed changes
-          if ('preservesPitch' in video) {
+          if ("preservesPitch" in video) {
             (video as any).preservesPitch = false;
           }
 
-          if (drift < 0.1) { // 100ms tolerance for natural jitter
+          if (drift < 0.1) {
+            // 100ms tolerance for natural jitter
             // <100ms: Ignore, perfect sync
             if (Math.abs(video.playbackRate - clockState.speed) > 0.01) {
               video.playbackRate = clockState.speed;
@@ -477,22 +491,6 @@ const ProgramPreview: React.FC = () => {
       </div>
     );
   }
-
-  const canvasWidth = project.canvasWidth;
-  const canvasHeight = project.canvasHeight;
-  const originalAspectR = resolveOriginalPreviewAspect(
-    scene.visualLayers.filter((l) => l.layerType === "media"),
-    mediaAssets,
-    canvasWidth,
-    canvasHeight,
-  );
-  const aspectR = previewAspectPreset === "original" ? originalAspectR : previewAspectWidthOverHeight(previewAspectPreset, canvasWidth, canvasHeight);
-  const { vw, vh } = previewViewportSize(dimensions.width, dimensions.height, aspectR);
-  const scaleFit = Math.min(vw / canvasWidth, vh / canvasHeight);
-  const scaleFill = Math.max(vw / canvasWidth, vh / canvasHeight);
-  const scale = previewScaleMode === "fit" ? scaleFit : scaleFill;
-  const displayWidth = canvasWidth * scale;
-  const displayHeight = canvasHeight * scale;
 
   const landscapePresets: PreviewAspectPreset[] = ["16:9", "4:3", "2.35:1", "2:1", "1.85:1"];
   const portraitPresets: PreviewAspectPreset[] = ["9:16", "3:4", "5.8-inch"];
