@@ -103,11 +103,28 @@ export class RasterSurface {
     const tileW = Math.round(targetTileW * dpr);
     const tileH = Math.round(stripHeightPx * dpr);
 
-    // Sample artifacts for each tile slot (nearest-neighbour in time index)
-    const step = artifacts.length > 1 ? (artifacts.length - 1) / (tileCount - 1) : 0;
+    // Map tiles to artifacts based on timestamp, not array index.
+    // This prevents blank gaps when artifacts.length < tileCount (heavy zoom).
+    const firstTimestamp = artifacts[0]?.timestampMs ?? 0;
+    const lastTimestamp = artifacts[artifacts.length - 1]?.timestampMs ?? 0;
+    const timeSpan = lastTimestamp - firstTimestamp;
 
     for (let i = 0; i < tileCount; i++) {
-      const idx = Math.min(Math.round(i * step), artifacts.length - 1);
+      // Find the artifact closest to this tile's timestamp position
+      const tileRatio = tileCount > 1 ? i / (tileCount - 1) : 0;
+      const targetTimestamp = firstTimestamp + timeSpan * tileRatio;
+
+      // Find closest artifact by timestamp
+      let idx = 0;
+      let minDiff = Infinity;
+      for (let j = 0; j < artifacts.length; j++) {
+        const diff = Math.abs(artifacts[j].timestampMs - targetTimestamp);
+        if (diff < minDiff) {
+          minDiff = diff;
+          idx = j;
+        }
+      }
+
       const art = artifacts[idx];
       const x = i * tileW;
 

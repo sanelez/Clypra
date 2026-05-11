@@ -214,13 +214,32 @@ export class WebGLRasterSurface {
     // slots. This avoids stretching low-resolution artifacts across the slot.
     const FLOATS_PER_VERTEX = 8;
     const VERTS_PER_TILE = 6;
-    const step = artifacts.length > 1 ? (artifacts.length - 1) / (tileCount - 1) : 0;
     const tileW = Math.round(targetTileW * dpr);
     const tileH = backingH;
     const rects: Array<{ pos: [number, number, number, number]; uv: [number, number, number, number] }> = [];
 
+    // Map tiles to artifacts based on timestamp, not array index.
+    // This prevents blank gaps when artifacts.length < tileCount (heavy zoom).
+    const firstTimestamp = artifacts[0]?.timestampMs ?? 0;
+    const lastTimestamp = artifacts[artifacts.length - 1]?.timestampMs ?? 0;
+    const timeSpan = lastTimestamp - firstTimestamp;
+
     for (let i = 0; i < tileCount; i++) {
-      const artIdx = Math.min(Math.round(i * step), artifacts.length - 1);
+      // Find the artifact closest to this tile's timestamp position
+      const tileRatio = tileCount > 1 ? i / (tileCount - 1) : 0;
+      const targetTimestamp = firstTimestamp + timeSpan * tileRatio;
+
+      // Binary search for closest artifact by timestamp
+      let artIdx = 0;
+      let minDiff = Infinity;
+      for (let j = 0; j < artifacts.length; j++) {
+        const diff = Math.abs(artifacts[j].timestampMs - targetTimestamp);
+        if (diff < minDiff) {
+          minDiff = diff;
+          artIdx = j;
+        }
+      }
+
       const cell = cells[artIdx];
       const art = artifacts[artIdx];
       const tileX = i * tileW;
