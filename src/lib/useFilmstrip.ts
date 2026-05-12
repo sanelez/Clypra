@@ -68,6 +68,13 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
 
   const runtime = useRenderEngineStore((s) => s.runtime);
   const renderState = useRenderState(clipId);
+
+  // Extract primitive values to avoid object reference issues in dependencies
+  const epochId = renderState.epochId;
+  const spatialTier = renderState.currentTier.spatialTier;
+  const interactionState = renderState.interactionState;
+  const isFallback = renderState.isFallback;
+
   const cancelRef = useRef<(() => void) | null>(null);
 
   // Sorted artifacts, keyed by timestamp+tier so we never duplicate
@@ -93,16 +100,16 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
 
   useEffect(() => {
     // Don't request frames if we're still in fallback state (waiting for real runtime state)
-    if (!enabled || !videoPath || !duration || !runtime || renderState.isFallback) return;
+    if (!enabled || !videoPath || !duration || !runtime || isFallback) return;
 
-    const { epochId, currentTier, interactionState } = renderState;
+    const { currentTier } = renderState;
 
     // Don't request during scrubbing — wait for Converging/Idle without
     // poisoning the request signature for the next stable state.
     if (interactionState === InteractionState.Scrubbing) return;
 
-    const { spatialTier } = currentTier;
-    const tileWidth = tileWidthPx ?? getFilmstripTileWidthForTier(spatialTier);
+    const { spatialTier: tierFromState } = currentTier;
+    const tileWidth = tileWidthPx ?? getFilmstripTileWidthForTier(tierFromState);
     const stripHeight = stripHeightPx ?? 40;
     const clipWidth = clipWidthPx ?? duration * DEFAULT_FILMSTRIP_TILE_WIDTH_PX;
     const timestampsSecs = generateFilmstripSlotTimestamps({
@@ -116,7 +123,7 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
 
     const timestampsMs = timestampsSecs.map((t) => Math.round(t * 1000));
     const startTier = SpatialTier.L0;
-    const targetTier = getReadableFilmstripTier(spatialTier, tileWidth, stripHeight, window.devicePixelRatio || 1);
+    const targetTier = getReadableFilmstripTier(tierFromState, tileWidth, stripHeight, window.devicePixelRatio || 1);
     const requestKey = [epochId, trimIn, trimOut, duration, clipWidth, tileWidth, stripHeight, targetTier, timestampsMs.join(",")].join("|");
 
     if (requestKey === prevRequestKeyRef.current) return;
@@ -264,10 +271,10 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
     tileWidthPx,
     stripHeightPx,
     // Re-run when epoch changes (covers zoom-tier, scroll, trim)
-    renderState.epochId,
-    renderState.currentTier.spatialTier,
-    renderState.interactionState,
-    renderState.isFallback,
+    epochId,
+    spatialTier,
+    interactionState,
+    isFallback,
     runtime,
     clipId,
     disposePrev,
@@ -300,8 +307,8 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
   return {
     artifacts,
     isLoading,
-    isFallback: renderState.isFallback || artifacts.length === 0,
-    interactionState: renderState.interactionState,
-    spatialTier: renderState.currentTier.spatialTier,
+    isFallback: isFallback || artifacts.length === 0,
+    interactionState: interactionState,
+    spatialTier: spatialTier,
   };
 }
