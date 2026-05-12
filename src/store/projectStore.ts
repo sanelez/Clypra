@@ -69,6 +69,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   loadProject: (project) => {
+    // Dispose previous project runtime before loading new one
+    import("../core/runtime/ProjectRuntimeManager").then(({ disposeProjectRuntime }) => {
+      disposeProjectRuntime().catch((err: Error) => console.error("[LoadProject] Runtime disposal failed:", err));
+    });
+
     // Clear existing state first
     set({ project, mediaAssets: [] });
 
@@ -162,6 +167,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   closeProject: () => {
+    // Dispose project runtime before closing
+    import("../core/runtime/ProjectRuntimeManager").then(({ disposeProjectRuntime }) => {
+      disposeProjectRuntime().catch((err: Error) => console.error("[CloseProject] Runtime disposal failed:", err));
+    });
+
     // Ensure any pending auto-save completes before closing
     if (autoSaveTimer) {
       clearTimeout(autoSaveTimer);
