@@ -64,7 +64,7 @@ export interface UseFilmstripResult {
 }
 
 export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
-  const { clipId, videoPath, trimIn, trimOut, duration, enabled = true } = opts;
+  const { clipId, videoPath, trimIn, trimOut, duration, enabled = true, clipWidthPx, tileWidthPx, stripHeightPx, posterFrame } = opts;
 
   const runtime = useRenderEngineStore((s) => s.runtime);
   const renderState = useRenderState(clipId);
@@ -102,22 +102,22 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
     if (interactionState === InteractionState.Scrubbing) return;
 
     const { spatialTier } = currentTier;
-    const tileWidthPx = opts.tileWidthPx ?? getFilmstripTileWidthForTier(spatialTier);
-    const stripHeightPx = opts.stripHeightPx ?? 40;
-    const clipWidthPx = opts.clipWidthPx ?? duration * DEFAULT_FILMSTRIP_TILE_WIDTH_PX;
+    const tileWidth = tileWidthPx ?? getFilmstripTileWidthForTier(spatialTier);
+    const stripHeight = stripHeightPx ?? 40;
+    const clipWidth = clipWidthPx ?? duration * DEFAULT_FILMSTRIP_TILE_WIDTH_PX;
     const timestampsSecs = generateFilmstripSlotTimestamps({
       trimIn,
       trimOut,
       duration,
-      clipWidthPx,
-      tileWidthPx,
+      clipWidthPx: clipWidth,
+      tileWidthPx: tileWidth,
     });
     if (timestampsSecs.length === 0) return;
 
     const timestampsMs = timestampsSecs.map((t) => Math.round(t * 1000));
     const startTier = SpatialTier.L0;
-    const targetTier = getReadableFilmstripTier(spatialTier, tileWidthPx, stripHeightPx, window.devicePixelRatio || 1);
-    const requestKey = [epochId, trimIn, trimOut, duration, clipWidthPx, tileWidthPx, stripHeightPx, targetTier, timestampsMs.join(",")].join("|");
+    const targetTier = getReadableFilmstripTier(spatialTier, tileWidth, stripHeight, window.devicePixelRatio || 1);
+    const requestKey = [epochId, trimIn, trimOut, duration, clipWidth, tileWidth, stripHeight, targetTier, timestampsMs.join(",")].join("|");
 
     if (requestKey === prevRequestKeyRef.current) return;
     prevRequestKeyRef.current = requestKey;
@@ -260,9 +260,9 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
     duration,
     trimIn,
     trimOut,
-    opts.clipWidthPx,
-    opts.tileWidthPx,
-    opts.stripHeightPx,
+    clipWidthPx,
+    tileWidthPx,
+    stripHeightPx,
     // Re-run when epoch changes (covers zoom-tier, scroll, trim)
     renderState.epochId,
     renderState.currentTier.spatialTier,
