@@ -1,4 +1,12 @@
-export type AspectRatio = "16:9" | "9:16" | "1:1" | "4:3" | "21:9";
+export type AspectRatio = "original" | "16:9" | "9:16" | "1:1" | "4:5";
+
+export const PREVIEW_ASPECT_LABEL: Record<AspectRatio, string> = {
+  original: "Original",
+  "16:9": "16:9 (YouTube)",
+  "9:16": "9:16 (Reels/Shorts)",
+  "1:1": "1:1 (Instagram)",
+  "4:5": "4:5 (Instagram)",
+};
 
 export enum DensityLevel {
   Low = "low",

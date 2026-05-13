@@ -7,6 +7,7 @@ import { useUIStore } from "../../store/uiStore";
 import { useTimelineStore } from "../../store/timelineStore";
 import { useHistoryStore } from "../../store/historyStore";
 import { exportFrameAndDownload } from "../../lib/exportFrame";
+import { useTauriFullscreen } from "@/hooks/useTauriFullscreen";
 
 // Lazy load ExportDialog (code splitting)
 const ExportDialog = lazy(() => import("../ui/ExportDialog").then((m) => ({ default: m.ExportDialog })));
@@ -19,6 +20,8 @@ export const TopBar: React.FC = () => {
   const { state: historyState } = useHistoryStore();
   const [isExportingFrame, setIsExportingFrame] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
+
+  const { isFullscreen } = useTauriFullscreen();
 
   const handleExportFrame = async () => {
     if (!project) return;
@@ -47,7 +50,7 @@ export const TopBar: React.FC = () => {
       {/* Native title bar area - content positioned in the title bar */}
       <div className="h-[37px] flex items-center justify-between px-3 md:px-4 gap-3 bg-transparent" data-tauri-drag-region style={{ WebkitAppRegion: "drag" } as React.CSSProperties}>
         {/* Left side - starts after traffic lights */}
-        <div className="flex items-center gap-3 pl-16" data-tauri-drag-region>
+        <div className={`flex items-center gap-3 ${isFullscreen ? "" : "pl-16"}`} data-tauri-drag-region>
           <Button variant="ghost" size="icon-sm" onClick={closeProject} title="Back to Home" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
             <Home className="w-4 h-4" />
           </Button>

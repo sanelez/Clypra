@@ -8,21 +8,43 @@ use std::fs;
 pub async fn get_video_metadata(path: String) -> Result<VideoMetadata, String> {
     match get_decoder(&path).await {
         Ok(decoder) => {
+            // let guard = decoder.lock().await;
+            
+            // let mut width = guard.width;
+            // let mut height = guard.height;
+            // let rotation = guard.rotation();
+            // let duration = guard.duration;
+            // let fps = guard.fps();
+            
+            // if rotation == 90 || rotation == 270 {
+            //     std::mem::swap(&mut width, &mut height);
+            // }
+            
+            // drop(guard);
+            
+            // let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+
+            // Ok(VideoMetadata {
+            //     duration,
+            //     width,
+            //     height,
+            //     fps,
+            //     size,
+            // })
+
             let guard = decoder.lock().await;
             
-            let mut width = guard.width;
-            let mut height = guard.height;
-            let rotation = guard.rotation();
+            // ✅ Use display_dimensions() which handles SAR + rotation
+            let (width, height) = guard.display_dimensions();
+            
             let duration = guard.duration;
             let fps = guard.fps();
-            
-            if rotation == 90 || rotation == 270 {
-                std::mem::swap(&mut width, &mut height);
-            }
             
             drop(guard);
             
             let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+
+            eprintln!("🦀 [get_video_metadata] Display dimensions: {}×{}", width, height);
 
             Ok(VideoMetadata {
                 duration,

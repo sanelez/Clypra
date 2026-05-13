@@ -70,8 +70,6 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
   const runtime = useRenderRuntime();
   const renderState = useRenderState(clipId);
 
-  console.log("[USEFILMSTRIP] Runtime exists:", !!runtime);
-
   // Extract primitive values to avoid object reference issues in dependencies
   const epochId = renderState.epochId;
   const spatialTier = renderState.currentTier.spatialTier;
@@ -98,7 +96,6 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
 
   // Clear previous bitmaps on unmount or re-request
   const disposePrev = useCallback(() => {
-    // console.log("[useFilmstrip] disposePrev called - cancelling previous request");
     cancelRef.current?.();
     cancelRef.current = null;
     // Note: bitmap cleanup happens in the effect cleanup, not here
@@ -132,27 +129,14 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
     const requestKey = [epochId, trimIn, trimOut, duration, clipWidth, tileWidth, stripHeight, targetTier, timestampsMs.join(",")].join("|");
     const requestId = generateId("req");
 
-    // console.log("[useFilmstrip] Request check", {
-    //   requestId,
-    //   epochId,
-    //   timestampsCount: timestampsMs.length,
-    //   timestamps: timestampsMs.slice(0, 5),
-    //   targetTier,
-    //   requestKey: requestKey.substring(0, 100), // Truncate for logging
-    //   prevKey: prevRequestKeyRef.current?.substring(0, 100),
-    //   keyChanged: requestKey !== prevRequestKeyRef.current,
-    // });
-
     // CRITICAL: Only re-request if the request signature actually changed
     // This prevents infinite loops during playback when interactionState changes
     if (requestKey === prevRequestKeyRef.current) {
-      // console.log("[useFilmstrip] Skipping duplicate request");
       return;
     }
 
     // Prevent concurrent requests
     if (isProcessingRef.current) {
-      // console.log("[useFilmstrip] Already processing, skipping");
       return;
     }
 
@@ -204,7 +188,6 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
           }
           const sorted = Array.from(bestByTime.values()).sort((a, b) => a.timestampMs - b.timestampMs);
 
-          // console.log("[useFilmstrip] scheduleFlush: setting", sorted.length, "artifacts");
           // Close previous epoch's bitmaps now that we have new ones ready
           // This prevents black gaps during the transition
           for (const prevArtifact of prevArtifactsRef.current) {
@@ -236,12 +219,10 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
         clipId,
         requestId,
         onArtifact: (artifact) => {
-          // console.log("[useFilmstrip] onArtifact received:", artifact.timestampMs, "tier:", artifact.spatialTier, "bitmap:", !!artifact.bitmap);
           const key = `${artifact.timestampMs}:${artifact.spatialTier}`;
           // Close existing bitmap for this key if we're replacing it
           const existing = accumulated.get(key);
           if (existing && existing.bitmap && existing.bitmap !== artifact.bitmap) {
-            // console.log("[useFilmstrip] Closing replaced bitmap for key:", key);
             existing.bitmap.close();
           }
           accumulated.set(key, artifact);
@@ -292,7 +273,6 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
     return () => {
       // Cancel the debounce timer if it hasn't fired yet
       clearTimeout(debounceTimer);
-      // console.log("[useFilmstrip] Effect cleanup - cancelling request");
       // Cancel pending RAF flush before cancelling requests
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
@@ -335,19 +315,16 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
   // Uses refs to avoid stale closures and running on every artifacts change
   useEffect(() => {
     return () => {
-      // console.log("[useFilmstrip] UNMOUNT cleanup - closing all bitmaps");
       disposePrev();
       // Close all bitmaps in the current artifacts ref
       for (const artifact of currentArtifactsRef.current) {
         if (artifact.bitmap) {
-          // console.log("[useFilmstrip] Closing artifact bitmap on unmount:", artifact.timestampMs);
           artifact.bitmap.close();
         }
       }
       // Also close any lingering previous epoch bitmaps
       for (const artifact of prevArtifactsRef.current) {
         if (artifact.bitmap && !currentArtifactsRef.current.some((a) => a.bitmap === artifact.bitmap)) {
-          // console.log("[useFilmstrip] Closing prevArtifact bitmap on unmount:", artifact.timestampMs);
           artifact.bitmap.close();
         }
       }

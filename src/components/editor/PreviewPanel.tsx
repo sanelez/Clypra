@@ -1,17 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Expand, Shrink, Volume2, VolumeX } from "lucide-react";
-import { usePlaybackClock, usePlaybackControls, getPlaybackClock } from "../../hooks/usePlaybackClock";
-import { useProjectStore } from "../../store/projectStore";
-import { useTimelineStore } from "../../store/timelineStore";
-import { useUIStore } from "../../store/uiStore";
-import { evaluateSceneCached } from "../../core/evaluation/evaluator";
-import { getFrameScheduler } from "../../core/scheduler/FrameScheduler";
-import { getActiveSessionOrNull } from "../../core/runtime/ProjectSession";
+import { usePlaybackClock, usePlaybackControls, getPlaybackClock } from "@/hooks/usePlaybackClock";
+import { useProjectStore } from "@/store/projectStore";
+import { useTimelineStore } from "@/store/timelineStore";
+import { useUIStore } from "@/store/uiStore";
+import { evaluateSceneCached } from "@/core/evaluation/evaluator";
+import { getFrameScheduler } from "@/core/scheduler/FrameScheduler";
+import { getActiveSessionOrNull } from "@/core/runtime/ProjectSession";
 import { SourcePreview } from "./SourcePreview";
 import { PreviewTransport } from "./PreviewTransport";
-import { GPUTextureCache } from "../../lib/gpuTextureCache";
-import { cn } from "../../lib/utils";
-import type { EvaluatedMediaLayer } from "../../core/evaluation/types";
+import { GPUTextureCache } from "@/lib/gpuTextureCache";
+import { cn } from "@/lib/utils";
+import type { EvaluatedMediaLayer } from "@/core/evaluation/types";
+import { AspectRatio, PREVIEW_ASPECT_LABEL } from "@/types";
+import { AspectMenuRow } from "../ui/AspectRatio";
 
 /** Format time in seconds to MM:SS or HH:MM:SS */
 function formatTime(seconds: number): string {
@@ -25,38 +27,25 @@ function formatTime(seconds: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
-/** Program preview “viewer” aspect (width / height). */
-type PreviewAspectPreset = "original" | "custom" | "16:9" | "4:3" | "2.35:1" | "2:1" | "1.85:1" | "9:16" | "3:4" | "5.8-inch" | "1:1";
-
-const PREVIEW_ASPECT_LABEL: Record<PreviewAspectPreset, string> = {
-  original: "Original",
-  custom: "Custom",
-  "16:9": "16:9",
-  "4:3": "4:3",
-  "2.35:1": "2.35:1",
-  "2:1": "2:1",
-  "1.85:1": "1.85:1",
-  "9:16": "9:16",
-  "3:4": "3:4",
-  "5.8-inch": "5.8-inch",
-  "1:1": "1:1",
-};
-
-const PREVIEW_ASPECT_RATIO: Partial<Record<PreviewAspectPreset, number>> = {
+const PREVIEW_ASPECT_RATIO: Record<AspectRatio, number | null> = {
+  original: null, // Uses project canvas
   "16:9": 16 / 9,
-  "4:3": 4 / 3,
-  "2.35:1": 2.35,
-  "2:1": 2,
-  "1.85:1": 1.85,
   "9:16": 9 / 16,
-  "3:4": 3 / 4,
-  "5.8-inch": 1170 / 2532,
   "1:1": 1,
+  "4:5": 4 / 5,
 };
 
-function previewAspectWidthOverHeight(preset: PreviewAspectPreset, canvasWidth: number, canvasHeight: number): number {
+// Canvas dimensions for each preset (based on common resolutions)
+const CANVAS_DIMENSIONS: Record<Exclude<AspectRatio, "original">, { width: number; height: number }> = {
+  "16:9": { width: 1920, height: 1080 },
+  "9:16": { width: 1080, height: 1920 },
+  "1:1": { width: 1080, height: 1080 },
+  "4:5": { width: 1080, height: 1350 },
+};
+
+function previewAspectWidthOverHeight(preset: AspectRatio, canvasWidth: number, canvasHeight: number): number {
   const ch = Math.max(1, canvasHeight);
-  if (preset === "original" || preset === "custom") {
+  if (preset === "original") {
     return canvasWidth / ch;
   }
   return PREVIEW_ASPECT_RATIO[preset] ?? canvasWidth / ch;
@@ -111,27 +100,6 @@ function PreviewAspectShapeIcon({ widthOverHeight }: { widthOverHeight: number }
   return <span className="inline-flex shrink-0 rounded-sm border border-border-soft bg-bg" style={{ width: w, height: h }} aria-hidden />;
 }
 
-function AspectMenuRow({ preset, selected, onSelect, icon, disabled }: { preset: PreviewAspectPreset; selected: PreviewAspectPreset; onSelect: (p: PreviewAspectPreset) => void; icon: React.ReactNode; disabled?: boolean }) {
-  const isSel = selected === preset;
-  return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={isSel}
-      disabled={disabled}
-      title={preset === "custom" ? "Custom size (coming soon)" : PREVIEW_ASPECT_LABEL[preset]}
-      className={cn("flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-text-primary hover:bg-surface-raised", isSel && "bg-surface-raised", disabled && "cursor-not-allowed opacity-45 hover:bg-transparent")}
-      onClick={() => {
-        if (!disabled) onSelect(preset);
-      }}
-    >
-      <span className="flex w-5 shrink-0 justify-center">{isSel ? <Check className="h-3.5 w-3.5 text-accent" /> : null}</span>
-      <span className="min-w-0 flex-1 truncate">{PREVIEW_ASPECT_LABEL[preset]}</span>
-      <span className="flex shrink-0 items-center justify-end text-text-muted">{icon}</span>
-    </button>
-  );
-}
-
 export const PreviewPanel: React.FC = () => {
   const { previewMode } = useUIStore();
 
@@ -151,6 +119,7 @@ const ProgramPreview: React.FC = () => {
   const clock = getPlaybackClock();
 
   const project = useProjectStore((s) => s.project);
+  const updateProject = useProjectStore((s) => s.updateProject);
   const mediaAssets = useProjectStore((s) => s.mediaAssets);
   const tracks = useTimelineStore((s) => s.tracks);
   const clips = useTimelineStore((s) => s.clips);
@@ -165,7 +134,7 @@ const ProgramPreview: React.FC = () => {
   const [previewVideoReadyTick, setPreviewVideoReadyTick] = useState(0);
   /** fit = letterbox full canvas; fill = zoom canvas to cover panel (crop edges). */
   const [previewScaleMode, setPreviewScaleMode] = useState<"fit" | "fill">("fit");
-  const [previewAspectPreset, setPreviewAspectPreset] = useState<PreviewAspectPreset>("original");
+  const [previewAspectPreset, setPreviewAspectPreset] = useState<AspectRatio>("original");
   const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
   const aspectMenuRef = useRef<HTMLDivElement>(null);
@@ -491,8 +460,6 @@ const ProgramPreview: React.FC = () => {
 
       const session = getActiveSessionOrNull();
 
-      console.log(session);
-
       if (session && session.state === "active") {
         const clipId = video.dataset.clipId;
         const mediaId = video.dataset.mediaId;
@@ -671,13 +638,22 @@ const ProgramPreview: React.FC = () => {
     );
   }
 
-  const landscapePresets: PreviewAspectPreset[] = ["16:9", "4:3", "2.35:1", "2:1", "1.85:1"];
-  const portraitPresets: PreviewAspectPreset[] = ["9:16", "3:4", "5.8-inch"];
-
-  const selectAspectPreset = (p: PreviewAspectPreset) => {
-    if (p === "custom") return;
+  const selectAspectPreset = (p: AspectRatio) => {
     setPreviewAspectPreset(p);
     setAspectMenuOpen(false);
+
+    // Update project canvas dimensions if not "original"
+    if (p !== "original" && project) {
+      const dims = CANVAS_DIMENSIONS[p];
+      updateProject({
+        canvasWidth: dims.width,
+        canvasHeight: dims.height,
+        aspectRatio: p,
+      });
+
+      // Optional: Show toast notification
+      // showToast(`Canvas resized to ${dims.width}×${dims.height} (${p})`);
+    }
   };
 
   // Derive UI values from clock state
@@ -687,8 +663,6 @@ const ProgramPreview: React.FC = () => {
   const playbackSpeed = clockState.speed;
   const frameRate = clockState.frameRate;
   const step = 1 / Math.max(1, frameRate);
-
-  // console.log(scene);
 
   return (
     <div className="flex-1 bg-bg flex flex-col min-h-0 rounded-tl-xl border-l border-t border-white/3">
@@ -938,28 +912,15 @@ const ProgramPreview: React.FC = () => {
                 <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
               </button>
               {aspectMenuOpen && (
-                <div className="absolute bottom-full right-0 z-50 mb-1 w-[220px] overflow-hidden rounded-lg border border-border bg-surface py-1 text-text-primary shadow-xl" role="listbox">
+                <div className="absolute bottom-full right-0 z-50 mb-1 w-[200px] overflow-hidden rounded-lg border border-border bg-surface py-1 text-text-primary shadow-xl" role="listbox">
                   <div className="px-1">
                     <AspectMenuRow preset="original" selected={previewAspectPreset} onSelect={selectAspectPreset} icon={<PreviewAspectShapeIcon widthOverHeight={canvasWidth / Math.max(1, canvasHeight)} />} />
-                    <AspectMenuRow preset="custom" selected={previewAspectPreset} onSelect={selectAspectPreset} disabled icon={<span className="w-[22px]" />} />
                   </div>
                   <div className="my-1 h-px bg-border" />
-                  <div className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Landscape</div>
                   <div className="px-1">
-                    {landscapePresets.map((p) => (
+                    {(["16:9", "9:16", "1:1", "4:5"] as const).map((p) => (
                       <AspectMenuRow key={p} preset={p} selected={previewAspectPreset} onSelect={selectAspectPreset} icon={<PreviewAspectShapeIcon widthOverHeight={PREVIEW_ASPECT_RATIO[p]!} />} />
                     ))}
-                  </div>
-                  <div className="my-1 h-px bg-border" />
-                  <div className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Portrait</div>
-                  <div className="px-1">
-                    {portraitPresets.map((p) => (
-                      <AspectMenuRow key={p} preset={p} selected={previewAspectPreset} onSelect={selectAspectPreset} icon={<PreviewAspectShapeIcon widthOverHeight={PREVIEW_ASPECT_RATIO[p]!} />} />
-                    ))}
-                  </div>
-                  <div className="my-1 h-px bg-border" />
-                  <div className="px-1">
-                    <AspectMenuRow preset="1:1" selected={previewAspectPreset} onSelect={selectAspectPreset} icon={<PreviewAspectShapeIcon widthOverHeight={1} />} />
                   </div>
                 </div>
               )}

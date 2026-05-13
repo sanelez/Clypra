@@ -97,8 +97,6 @@ export const Timeline: React.FC = () => {
   // ── RenderRuntime event wiring ──────────────────────────────────────────────
   const runtime = useRenderRuntime();
 
-  console.log("[TIMELINE] Runtime exists:", !!runtime);
-
   // Attach scroll/pointer listeners to the timeline scroll container
   useEffect(() => {
     const container = containerRef.current;
