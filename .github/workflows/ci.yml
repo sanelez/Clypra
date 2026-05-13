@@ -54,8 +54,11 @@ jobs:
             libavformat-dev \
             libavutil-dev \
             libavfilter-dev \
+            libavdevice-dev \
             libswscale-dev \
             libswresample-dev \
+            libpostproc-dev \
+            libclang-dev \
             pkg-config \
             libwebkit2gtk-4.1-dev \
             build-essential \
