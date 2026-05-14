@@ -228,7 +228,7 @@ fn test_fallback_chain_order() {
 
     // Insert frames directly into the DashMap (DensityCache::insert is async;
     // calling it without .await in a sync test drops the future before it runs)
-    let key = (time * 1000.0).round() as u64;
+    let key = (time * 1000.0_f64).round() as u64;
     if let Some(low_cache) = cache.levels.get(&DensityLevel::Low) {
         low_cache.frames.insert(key, CachedFrame::new(time, test_path_low.clone()));
     }
@@ -284,7 +284,7 @@ fn test_fallback_to_higher_density() {
     let test_path_ultra = PathBuf::from("/cache/ultra_5000.webp");
 
     // Insert directly into the DashMap (DensityCache::insert is async)
-    let key = (time * 1000.0).round() as u64;
+    let key = (time * 1000.0_f64).round() as u64;
     if let Some(high_cache) = cache.levels.get(&DensityLevel::High) {
         high_cache.frames.insert(key, CachedFrame::new(time, test_path_high.clone()));
     }
@@ -320,7 +320,7 @@ fn test_fallback_to_lower_density() {
     let test_path_medium = PathBuf::from("/cache/medium_5000.webp");
 
     // Insert directly into the DashMap (DensityCache::insert is async)
-    let key = (time * 1000.0).round() as u64;
+    let key = (time * 1000.0_f64).round() as u64;
     if let Some(low_cache) = cache.levels.get(&DensityLevel::Low) {
         low_cache.frames.insert(key, CachedFrame::new(time, test_path_low.clone()));
     }
@@ -355,7 +355,7 @@ fn test_fallback_order_ultra_to_low() {
     let test_path_low = PathBuf::from("/cache/low_5000.webp");
 
     // Insert directly into the DashMap (DensityCache::insert is async)
-    let key = (time * 1000.0).round() as u64;
+    let key = (time * 1000.0_f64).round() as u64;
     if let Some(low_cache) = cache.levels.get(&DensityLevel::Low) {
         low_cache.frames.insert(key, CachedFrame::new(time, test_path_low.clone()));
     }
