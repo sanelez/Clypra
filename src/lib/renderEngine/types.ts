@@ -85,36 +85,36 @@ export interface RenderTier {
  *   50 px/s as Stable/Slow provides one hysteresis bucket before R3 triggers.
  */
 export enum VelocityState {
-  Stable    = 0, // < 50 px/s    — normal rendering, all tiers eligible
-  Slow      = 1, // 50–100 px/s  — approaching R3 epoch rejection threshold
-  Fast      = 2, // 100–200 px/s — epoch rejection active (R3)
+  Stable = 0, // < 50 px/s    — normal rendering, all tiers eligible
+  Slow = 1, // 50–100 px/s  — approaching R3 epoch rejection threshold
+  Fast = 2, // 100–200 px/s — epoch rejection active (R3)
   Ballistic = 3, // > 200 px/s   — skip intermediate tiers (R13)
 }
 
 /** Velocity thresholds in px/s (derived from R3 and R13). */
 export const VELOCITY_THRESHOLDS = {
   STABLE_MAX: 50,
-  SLOW_MAX: 100,   // R3: epoch rejection above this
-  FAST_MAX: 200,   // R13: tier-skipping above this
+  SLOW_MAX: 100, // R3: epoch rejection above this
+  FAST_MAX: 200, // R13: tier-skipping above this
 } as const;
 
 /** Classify raw scroll velocity into a VelocityState bucket. */
 export function classifyVelocity(pxPerSec: number): VelocityState {
   const abs = Math.abs(pxPerSec);
   if (abs < VELOCITY_THRESHOLDS.STABLE_MAX) return VelocityState.Stable;
-  if (abs < VELOCITY_THRESHOLDS.SLOW_MAX)   return VelocityState.Slow;
-  if (abs < VELOCITY_THRESHOLDS.FAST_MAX)   return VelocityState.Fast;
+  if (abs < VELOCITY_THRESHOLDS.SLOW_MAX) return VelocityState.Slow;
+  if (abs < VELOCITY_THRESHOLDS.FAST_MAX) return VelocityState.Fast;
   return VelocityState.Ballistic;
 }
 
 // ─── Interaction State ────────────────────────────────────────────────────────
 
 export enum InteractionState {
-  Idle       = 'idle',
-  Zooming    = 'zooming',
-  Scrubbing  = 'scrubbing',
-  Scrolling  = 'scrolling',
-  Converging = 'converging',
+  Idle = "idle",
+  Zooming = "zooming",
+  Scrubbing = "scrubbing",
+  Scrolling = "scrolling",
+  Converging = "converging",
 }
 
 // ─── Renderer Mode ────────────────────────────────────────────────────────────
@@ -124,40 +124,40 @@ export enum InteractionState {
  * filtering, alpha handling, coordinate rounding, atlas bleed, color conversion.
  */
 export enum RendererMode {
-  Canvas2D = 'canvas2d',
-  WebGL    = 'webgl',
+  Canvas2D = "canvas2d",
+  WebGL = "webgl",
 }
 
 // ─── Quality Preset ───────────────────────────────────────────────────────────
 
 /** Quality preset determines which spatial tiers are eligible (R14). */
 export enum QualityPreset {
-  Low    = 'low',    // L0, L1
-  Medium = 'medium', // L0, L1, L2  (default)
-  High   = 'high',   // L0–L3
-  Ultra  = 'ultra',  // L0–L3 at 2× DPR
+  Low = "low", // L0, L1
+  Medium = "medium", // L0, L1, L2  (default)
+  High = "high", // L0–L3
+  Ultra = "ultra", // L0–L3 at 2× DPR
 }
 
 /** Eligible spatial tiers per quality preset. */
 export const QUALITY_PRESET_TIERS: Record<QualityPreset, readonly SpatialTier[]> = {
-  [QualityPreset.Low]:    [SpatialTier.L0, SpatialTier.L1],
+  [QualityPreset.Low]: [SpatialTier.L0, SpatialTier.L1],
   [QualityPreset.Medium]: [SpatialTier.L0, SpatialTier.L1, SpatialTier.L2],
-  [QualityPreset.High]:   [SpatialTier.L0, SpatialTier.L1, SpatialTier.L2, SpatialTier.L3],
-  [QualityPreset.Ultra]:  [SpatialTier.L0, SpatialTier.L1, SpatialTier.L2, SpatialTier.L3],
+  [QualityPreset.High]: [SpatialTier.L0, SpatialTier.L1, SpatialTier.L2, SpatialTier.L3],
+  [QualityPreset.Ultra]: [SpatialTier.L0, SpatialTier.L1, SpatialTier.L2, SpatialTier.L3],
 } as const;
 
 // ─── Responsiveness Mode ──────────────────────────────────────────────────────
 
 export enum ResponsivenessMode {
-  Strict   = 'strict',   // No approximation during interaction
-  Balanced = 'balanced', // 500ms max approximation (default)
-  Fluid    = 'fluid',    // 1000ms, prioritise 60 FPS
+  Strict = "strict", // No approximation during interaction
+  Balanced = "balanced", // 500ms max approximation (default)
+  Fluid = "fluid", // 1000ms, prioritise 60 FPS
 }
 
 // ─── Epoch ────────────────────────────────────────────────────────────────────
 
 /** Opaque SHA-256-like hash of 9 visual-determinism dimensions. */
-export type RenderEpochId = string & { readonly __brand: 'RenderEpochId' };
+export type RenderEpochId = string & { readonly __brand: "RenderEpochId" };
 
 /**
  * The 9 dimensions that form epoch identity.
@@ -186,15 +186,15 @@ export interface EpochDimensions {
  * SHA-256 of: videoSourceId, decodeParams, effectGraphVersion, speed, trimRange, fpsNormalization.
  * Changing any of these produces a new hash and new cache entries — no invalidation of other clips.
  */
-export type FrameContentHash = string & { readonly __brand: 'FrameContentHash' };
+export type FrameContentHash = string & { readonly __brand: "FrameContentHash" };
 
 /** Canonical timestamp: deterministic from adaptive sampling grid, ms-precision. */
 export type CanonicalFrameTimestamp = number;
 
 // ─── Render Artifact ─────────────────────────────────────────────────────────
 
-export type ArtifactSource = 'backend-frame-cache' | 'backend-tier-cache' | 'frontend-tier-cache';
-export type ArtifactResidency = 'gpu' | 'cpu' | 'disk';
+export type ArtifactSource = "backend-frame-cache" | "backend-tier-cache" | "frontend-tier-cache";
+export type ArtifactResidency = "gpu" | "cpu" | "disk";
 
 /**
  * Canonical backend→frontend transfer object (R6).
@@ -214,8 +214,8 @@ export interface RenderArtifact {
 
 export enum Priority {
   Critical = 0,
-  High     = 1,
-  Normal   = 2,
+  High = 1,
+  Normal = 2,
 }
 
 export interface RenderJob {
@@ -259,15 +259,15 @@ export const VIEWPORT_CANCEL_FACTOR = 3;
 // ─── Invalidation ─────────────────────────────────────────────────────────────
 
 export type InvalidationReason =
-  | 'tier-change-spatial'
-  | 'tier-change-temporal'
-  | 'clip-trim-modified'
-  | 'viewport-shift-major'   // >50% visible width
-  | 'cache-key-mismatch'
-  | 'clip-moved'
-  | 'clip-deleted'
-  | 'clip-modified'
-  | 'dpr-change';
+  | "tier-change-spatial"
+  | "tier-change-temporal"
+  | "clip-trim-modified"
+  | "viewport-shift-major" // >50% visible width
+  | "cache-key-mismatch"
+  | "clip-moved"
+  | "clip-deleted"
+  | "clip-modified"
+  | "dpr-change";
 
 // ─── SRP Config ───────────────────────────────────────────────────────────────
 
@@ -281,9 +281,9 @@ export type SrpConfig = Record<SpatialTier, TierBoundary>;
 /** Default SRP tier boundaries per spec R1. */
 export const DEFAULT_SRP_CONFIG: SrpConfig = {
   [SpatialTier.L0]: { min: 0.25, max: 0.5 },
-  [SpatialTier.L1]: { min: 0.5,  max: 1.0 },
-  [SpatialTier.L2]: { min: 1.0,  max: 2.0 },
-  [SpatialTier.L3]: { min: 2.0,  max: 4.0 },
+  [SpatialTier.L1]: { min: 0.5, max: 1.0 },
+  [SpatialTier.L2]: { min: 1.0, max: 2.0 },
+  [SpatialTier.L3]: { min: 2.0, max: 4.0 },
 } as const;
 
 // ─── ISM Output ───────────────────────────────────────────────────────────────

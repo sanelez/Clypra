@@ -16,12 +16,11 @@
 import { useEffect, useRef, useMemo } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
-import { InteractionState } from "../../../lib/renderEngine/types";
-import { createRasterSurface, type AnyRasterSurface } from "../../../lib/renderEngine/webglRasterSurface";
-import { useFilmstrip } from "../../../lib/useFilmstrip";
-import { getFilmstripTileWidthForTier } from "../../../lib/filmstripLayout";
-import { normalizePathForTauriInvoke } from "../../../lib/tauri";
-import type { Clip, MediaAsset } from "../../../types";
+import { createRasterSurface, type AnyRasterSurface } from "@/lib/renderEngine/webglRasterSurface";
+import { useFilmstrip } from "@/lib/useFilmstrip";
+import { getFilmstripTileWidthForTier } from "@/lib/filmstripLayout";
+import { normalizePathForTauriInvoke } from "@/lib/tauri";
+import type { Clip, MediaAsset } from "@/types";
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|tiff?|heic|heif|avif)$/i;
 
@@ -93,16 +92,12 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
     }
   }, [artifacts, clipWidthPx, stripHeightPx, tileWidthPx]);
 
-  // ── Dimming hint during ballistic scroll (ISM) ───────────────────────────
-  const isBallistic = interactionState === InteractionState.Scrolling;
-  const opacity = isBallistic ? 0.7 : 1;
-
   // ── Render ────────────────────────────────────────────────────────────────
 
   // Video filmstrip — canvas surface
   if (isVideoSource) {
     return (
-      <div data-testid="clip-filmstrip" className={cn("relative overflow-hidden rounded-[2px] border border-timeline-filmstrip-border bg-timeline-filmstrip-bg", className)} style={{ height: stripHeightPx, width: "100%", opacity, transition: "opacity 80ms linear" }}>
+      <div data-testid="clip-filmstrip" className={cn("relative overflow-hidden rounded-[2px] border border-timeline-filmstrip-border bg-timeline-filmstrip-bg", className)} style={{ height: stripHeightPx, width: "100%", opacity: 1, transition: "opacity 80ms linear" }}>
         <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />
         {/* Poster overlay while artifacts load — fades out once canvas has content */}
         {isFallback && mediaAsset.posterFrame && (
