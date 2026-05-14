@@ -522,6 +522,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-shell",
  "tokio",
+ "unicode-segmentation",
  "uuid",
  "walkdir",
  "web-time",

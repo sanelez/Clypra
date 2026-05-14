@@ -25,10 +25,11 @@
 
 import { create } from "zustand";
 import type { Project, MediaAsset } from "@/types";
+import { MAX_PROJECT_NAME_LENGTH } from "@/types";
 import { toRustProject } from "@/types/serialization";
 import { generateId } from "@/lib/id";
 import { useSettingsStore } from "./settingsStore";
-import { TIMELINE_PPS_PER_ZOOM, TIMELINE_ZOOM_DEFAULT } from "@/lib/timelineZoom";
+// import { TIMELINE_PPS_PER_ZOOM, TIMELINE_ZOOM_DEFAULT } from "@/lib/timelineZoom";
 
 interface ProjectStore {
   project: Project | null;
@@ -50,6 +51,29 @@ interface ProjectStore {
   closeProject: () => Promise<void> | void;
   scheduleAutoSave: () => void;
 }
+
+const graphemeSegmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
+
+const countGraphemes = (str: string): number => {
+  return Array.from(graphemeSegmenter.segment(str)).length;
+};
+
+const truncateGraphemes = (str: string, max: number): string => {
+  const segments = Array.from(graphemeSegmenter.segment(str));
+  return segments
+    .slice(0, max)
+    .map((s) => s.segment)
+    .join("");
+};
+
+const sanitizeProjectName = (name: string): string => {
+  const trimmed = name.trim();
+  if (countGraphemes(trimmed) === 0) return "Untitled Project";
+  if (countGraphemes(trimmed) > MAX_PROJECT_NAME_LENGTH) {
+    return truncateGraphemes(trimmed, MAX_PROJECT_NAME_LENGTH);
+  }
+  return trimmed;
+};
 
 const getAspectRatioDimensions = (ratio: string): { width: number; height: number } => {
   const map: Record<string, { width: number; height: number }> = {
@@ -82,10 +106,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   createProject: async (name, aspectRatio, frameRate) => {
+    const sanitizedName = sanitizeProjectName(name);
     const dims = getAspectRatioDimensions(aspectRatio);
     const project: Project = {
       id: generateId("project"),
-      name,
+      name: sanitizedName,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       aspectRatio: aspectRatio as any,
@@ -189,20 +214,21 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   renameProject: async (projectId, newName) => {
+    const sanitizedName = sanitizeProjectName(newName);
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("rename_project", { projectId, newName });
+      await invoke("rename_project", { projectId, newName: sanitizedName });
 
       // Update in recent projects list
       set((state) => ({
-        recentProjects: state.recentProjects.map((p) => (p.id === projectId ? { ...p, name: newName } : p)),
+        recentProjects: state.recentProjects.map((p) => (p.id === projectId ? { ...p, name: sanitizedName } : p)),
       }));
 
       // If this project is currently open, update it too
       const currentProject = get().project;
       if (currentProject && currentProject.id === projectId) {
         set((state) => ({
-          project: state.project ? { ...state.project, name: newName } : null,
+          project: state.project ? { ...state.project, name: sanitizedName } : null,
         }));
       }
 

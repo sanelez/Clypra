@@ -5,6 +5,7 @@ import { Modal } from "@/components/ui/Modal";
 import { useProjectStore } from "@/store/projectStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import type { AspectRatio, MediaAsset, Project } from "@/types";
+import { MAX_PROJECT_NAME_LENGTH } from "@/types";
 
 interface LaunchScreenProps {
   onProjectCreate: (name: string, aspectRatio: AspectRatio, frameRate: 24 | 30 | 60) => void;
@@ -17,6 +18,9 @@ const toPreviewSrc = (value?: string) => {
   if (!value) return undefined;
   return value;
 };
+
+const graphemeSegmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
+const countGraphemes = (str: string): number => Array.from(graphemeSegmenter.segment(str)).length;
 
 const getProjectThumbnail = (project: Project) => {
   const mediaAssets = project.mediaAssets ?? [];
@@ -222,7 +226,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
           </div>
 
           {recentProjects.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-white/[0.06] p-10 flex flex-col items-center justify-center text-center">
+            <div className="rounded-xl border border-dashed border-white/6 p-10 flex flex-col items-center justify-center text-center">
               <Film className="w-10 h-10 text-text-muted/30 mb-3" />
               <p className="text-sm text-text-muted">No recent projects</p>
               <p className="text-xs text-text-muted/60 mt-1">Create a new project to get started</p>
@@ -232,7 +236,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
               {recentProjects.map((project) => {
                 const thumbnail = getProjectThumbnail(project);
                 return (
-                  <button key={project.id} onClick={() => onProjectOpen(project)} className="group relative text-left rounded-xl border border-white/[0.04] bg-surface hover:bg-surface-raised transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.08] hover:shadow-lg hover:shadow-black/20 overflow-hidden">
+                  <button key={project.id} onClick={() => onProjectOpen(project)} className="group relative text-left rounded-xl border border-white/4 bg-surface hover:bg-surface-raised transition-all duration-200 hover:-translate-y-0.5 hover:border-white/8 hover:shadow-lg hover:shadow-black/20 overflow-hidden">
                     {/* Thumbnail area */}
                     <div className="h-[170px] bg-bg flex items-center justify-center relative overflow-hidden">
                       {thumbnail ? (
@@ -245,11 +249,11 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
                       ) : (
                         <ImageIcon className="w-7 h-7 text-text-muted/25 group-hover:text-accent/40 transition-colors" />
                       )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-bg/55 via-transparent to-bg/10" />
+                      <div className="absolute inset-0 bg-linear-to-t from-bg/55 via-transparent to-bg/10" />
                       {/* Accent glow on hover */}
-                      <div className="absolute inset-0 bg-accent/[0.03] opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <div className="absolute inset-0 bg-accent/3 opacity-0 group-hover:opacity-100 transition-opacity" />
                       {/* Aspect ratio badge */}
-                      <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-bg/75 backdrop-blur-sm text-text-muted border border-white/[0.06]">{project.aspectRatio}</span>
+                      <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-bg/75 backdrop-blur-sm text-text-muted border border-white/6">{project.aspectRatio}</span>
                     </div>
 
                     {/* Info */}
@@ -263,7 +267,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
 
                     {/* More options button */}
                     <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <div onClick={(e) => handleToggleMenu(e, project.id)} className="p-1.5 rounded-lg bg-bg/80 backdrop-blur-sm border border-white/[0.04] hover:bg-surface-raised hover:border-white/[0.08] cursor-pointer transition-colors" title="More options">
+                      <div onClick={(e) => handleToggleMenu(e, project.id)} className="p-1.5 rounded-lg bg-bg/80 backdrop-blur-sm border border-white/4 hover:bg-surface-raised hover:border-white/8 cursor-pointer transition-colors" title="More options">
                         <MoreHorizontal className="w-3.5 h-3.5 text-text-muted" />
                       </div>
 
@@ -292,22 +296,29 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
       {/* Rename Modal */}
       <Modal isOpen={!!projectToRename} onClose={() => setProjectToRename(null)} title="Rename Project">
         <div className="p-5 space-y-4">
-          <input
-            type="text"
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleConfirmRename();
-            }}
-            autoFocus
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
-            placeholder="Project name"
-          />
+          <div>
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleConfirmRename();
+              }}
+              autoFocus
+              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
+              placeholder="Project name"
+            />
+            <div className="flex justify-end mt-1">
+              <span className={`text-[10px] font-medium ${countGraphemes(renameValue) > MAX_PROJECT_NAME_LENGTH ? "text-danger" : "text-text-muted/60"}`}>
+                {countGraphemes(renameValue)}/{MAX_PROJECT_NAME_LENGTH}
+              </span>
+            </div>
+          </div>
           <div className="flex gap-3 justify-end pt-2">
             <Button variant="ghost" onClick={() => setProjectToRename(null)} disabled={isRenaming}>
               Cancel
             </Button>
-            <Button variant="default" onClick={handleConfirmRename} disabled={isRenaming || !renameValue.trim()}>
+            <Button variant="default" onClick={handleConfirmRename} disabled={isRenaming || !renameValue.trim() || countGraphemes(renameValue) > MAX_PROJECT_NAME_LENGTH}>
               {isRenaming ? "Renaming..." : "Rename"}
             </Button>
           </div>

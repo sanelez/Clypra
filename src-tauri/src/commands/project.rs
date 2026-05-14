@@ -2,6 +2,7 @@ use crate::models::Project;
 use tauri::Manager;
 use std::fs;
 use std::path::PathBuf;
+use unicode_segmentation::UnicodeSegmentation;
 
 fn get_projects_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let app_data = app
@@ -77,8 +78,17 @@ pub fn get_recent_projects(app: tauri::AppHandle) -> Result<Vec<String>, String>
     Ok(projects.into_iter().map(|(_, content)| content).collect())
 }
 
+const MAX_PROJECT_NAME_LENGTH: usize = 64;
+
 #[tauri::command]
 pub fn rename_project(app: tauri::AppHandle, project_id: String, new_name: String) -> Result<(), String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("Project name cannot be empty".to_string());
+    }
+    if trimmed.graphemes(true).count() > MAX_PROJECT_NAME_LENGTH {
+        return Err(format!("Project name exceeds {} characters", MAX_PROJECT_NAME_LENGTH));
+    }
     let projects_dir = get_projects_dir(&app)?;
     let file_path = projects_dir.join(format!("{}.json", project_id));
 
@@ -92,7 +102,7 @@ pub fn rename_project(app: tauri::AppHandle, project_id: String, new_name: Strin
     let mut project: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Invalid project JSON: {}", e))?;
 
-    project["name"] = serde_json::Value::String(new_name);
+    project["name"] = serde_json::Value::String(trimmed.to_string());
 
     let updated = serde_json::to_string(&project)
         .map_err(|e| format!("Failed to serialize project: {}", e))?;

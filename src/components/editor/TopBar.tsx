@@ -56,7 +56,9 @@ export const TopBar: React.FC = () => {
           </Button>
           <div className="w-px h-5 bg-border/50" />
           <Film className="w-4 h-4 text-accent-soft" />
-          <span className="text-xs font-semibold text-text-primary">{project?.name}</span>
+          <span className="text-xs font-semibold text-text-primary truncate max-w-[200px]" title={project?.name}>
+            {project?.name}
+          </span>
         </div>
 
         {/* Center - timecode */}
