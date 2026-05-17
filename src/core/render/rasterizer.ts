@@ -19,6 +19,43 @@ import type { EvaluatedScene, EvaluatedMediaLayer, EvaluatedTextLayer } from "..
 import { getResourceCache } from "../resources/ResourceCache";
 
 /**
+ * Global pool for OffscreenCanvas to prevent GC stalls during rendering/export.
+ */
+class OffscreenCanvasPool {
+  private canvases: OffscreenCanvas[] = [];
+  private maxPoolSize = 5;
+
+  acquire(width: number, height: number): OffscreenCanvas {
+    let canvas: OffscreenCanvas;
+    if (this.canvases.length > 0) {
+      canvas = this.canvases.pop()!;
+      // Only resize if necessary
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+    } else {
+      if (typeof OffscreenCanvas !== "undefined") {
+        canvas = new OffscreenCanvas(width, height);
+      } else {
+        canvas = document.createElement("canvas") as any as OffscreenCanvas;
+        canvas.width = width;
+        canvas.height = height;
+      }
+    }
+    return canvas;
+  }
+
+  release(canvas: OffscreenCanvas) {
+    if (this.canvases.length < this.maxPoolSize) {
+      this.canvases.push(canvas);
+    }
+  }
+}
+
+const canvasPool = new OffscreenCanvasPool();
+
+/**
  * Raster target configuration.
  * Defines the output framebuffer properties.
  */
@@ -63,6 +100,9 @@ export interface RasterFrame {
 
   /** Rasterization time in ms */
   rasterTimeMs: number;
+
+  /** Release the canvas back to the pool (if applicable) */
+  releaseCanvas?: () => void;
 }
 
 /**
@@ -81,12 +121,16 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
 
   const { width, height, pixelRatio = 1, colorSpace = "srgb", backgroundColor = "#000000" } = target;
 
-  // Create or reuse canvas
-  const outputCanvas = canvas || (typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(width * pixelRatio, height * pixelRatio) : document.createElement("canvas"));
+  const targetWidth = width * pixelRatio;
+  const targetHeight = height * pixelRatio;
 
-  if (!canvas) {
-    outputCanvas.width = width * pixelRatio;
-    outputCanvas.height = height * pixelRatio;
+  // Create or reuse canvas
+  const isPooledCanvas = !canvas;
+  const outputCanvas = canvas || canvasPool.acquire(targetWidth, targetHeight);
+
+  if (!isPooledCanvas && (outputCanvas.width !== targetWidth || outputCanvas.height !== targetHeight)) {
+    outputCanvas.width = targetWidth;
+    outputCanvas.height = targetHeight;
   }
 
   const ctx = outputCanvas.getContext("2d", {
@@ -132,6 +176,13 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
 
   const rasterTimeMs = performance.now() - startTime;
 
+  // We cannot immediately release the pooled canvas back to the pool because
+  // the caller needs it to extract ImageBitmap/ImageData. The caller must
+  // either close the bitmap or we should provide a release mechanism.
+  // Wait, if it's returning the canvas, we should let the caller handle it,
+  // or wrap it so it gets returned to the pool after extraction.
+  // Actually, we can just let it be GC'd if we don't pool it. But wait, we WANT to pool it.
+  // Let's add a releaseCanvas method to RasterFrame, or use a cleanup callback.
   return {
     canvas: outputCanvas,
     ctx,
@@ -140,6 +191,11 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
     scaleX: scale,
     scaleY: scale,
     rasterTimeMs,
+    releaseCanvas: () => {
+      if (isPooledCanvas && outputCanvas instanceof OffscreenCanvas) {
+        canvasPool.release(outputCanvas);
+      }
+    },
   };
 }
 
@@ -210,6 +266,12 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
 
     // Fallback: load on-demand (legacy path, should be avoided)
     if (!imageBitmap) {
+      if (layer.mediaType === "video") {
+        // Cannot decode video without video element
+        throw new Error(`Video frame extraction requires video element. Clip: ${layer.clipId}, Media: ${layer.mediaId}`);
+      }
+
+      // Only attempt for images
       const response = await fetch(layer.sourcePath);
       const blob = await response.blob();
       imageBitmap = await createImageBitmap(blob);
@@ -231,6 +293,20 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
     ctx.strokeStyle = "#ff4444";
     ctx.lineWidth = 2;
     ctx.strokeRect(-width / 2, -height / 2, width, height);
+
+    // Draw error text
+    ctx.save();
+    ctx.fillStyle = "#ff4444";
+    ctx.font = "14px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Video decode error", 0, -10);
+    ctx.font = "10px monospace";
+    ctx.fillStyle = "#ff8888";
+    ctx.fillText(layer.mediaType === "video" ? "Missing video element" : "Load failed", 0, 10);
+    ctx.restore();
+
+    console.error(`[Rasterizer] Failed to render media layer:`, error);
   }
 }
 

@@ -53,10 +53,8 @@ interface TimelineStore {
   _batchDepth: number;
   /** @internal Deferred epoch flag — do not read directly */
   _pendingEpochIncrement: boolean;
-  /** Begin a batch of mutations. Epoch increment is deferred until endBatch(). */
-  beginBatch: () => void;
-  /** End a batch. If any mutation requested an epoch increment, it fires now. */
-  endBatch: () => void;
+  /** Execute a batch of mutations safely. Epoch increment is deferred until the block completes. */
+  withBatch: (fn: () => void) => void;
   /** Increment epoch (for cache invalidation) */
   incrementEpoch: () => void;
   /** Hydrate timeline state from project load (atomic operation) */
@@ -118,18 +116,19 @@ export const useTimelineStore = create<TimelineStore>(
     _batchDepth: 0,
     _pendingEpochIncrement: false,
 
-    beginBatch: () => {
+    withBatch: (fn) => {
       set((state) => ({ _batchDepth: state._batchDepth + 1 }));
-    },
-
-    endBatch: () => {
-      set((state) => {
-        const newDepth = Math.max(0, state._batchDepth - 1);
-        if (newDepth === 0 && state._pendingEpochIncrement) {
-          return { _batchDepth: 0, _pendingEpochIncrement: false, epoch: state.epoch + 1 };
-        }
-        return { _batchDepth: newDepth };
-      });
+      try {
+        fn();
+      } finally {
+        set((state) => {
+          const newDepth = Math.max(0, state._batchDepth - 1);
+          if (newDepth === 0 && state._pendingEpochIncrement) {
+            return { _batchDepth: 0, _pendingEpochIncrement: false, epoch: state.epoch + 1 };
+          }
+          return { _batchDepth: newDepth };
+        });
+      }
     },
 
     incrementEpoch: () => {
@@ -368,16 +367,25 @@ export const useTimelineStore = create<TimelineStore>(
       // Ensure left is always the leftmost clip
       const [left, right] = clipA.startTime < clipB.startTime ? [clipA, clipB] : [clipB, clipA];
 
-      const newLeftStart = left.startTime; // left clip stays at same start
-      const newRightStart = left.startTime + right.duration; // right fills left's old spot
-      const newLeftEnd = newRightStart + left.duration;
+      const newLeftStart = left.startTime; // right clip takes left's old start
+      const newRightStart = left.startTime + right.duration; // left clip follows immediately after right
+      const newLeftEnd = newLeftStart + right.duration;
+      const newRightEnd = newRightStart + left.duration;
 
-      // Collision check: does the swapped left clip overlap anything after it?
-      const trackClips = state.clips.filter((c) => c.trackId === left.trackId && c.id !== left.id && c.id !== right.id).sort((a, b) => a.startTime - b.startTime);
+      // Collision check: do the swapped clips overlap any other clips?
+      const trackClips = state.clips.filter((c) => c.trackId === left.trackId && c.id !== left.id && c.id !== right.id);
 
-      const clipAfterRight = trackClips.find((c) => c.startTime >= right.startTime);
+      // Check if either swapped clip overlaps with other clips on the track
+      const collision = trackClips.some((c) => {
+        const cEnd = c.startTime + c.duration;
+        // Check if clip C overlaps with new left position (right clip moved to left)
+        const overlapsNewLeft = Math.max(newLeftStart, c.startTime) < Math.min(newLeftEnd, cEnd);
+        // Check if clip C overlaps with new right position (left clip moved to right)
+        const overlapsNewRight = Math.max(newRightStart, c.startTime) < Math.min(newRightEnd, cEnd);
+        return overlapsNewLeft || overlapsNewRight;
+      });
 
-      if (clipAfterRight && newLeftEnd > clipAfterRight.startTime) {
+      if (collision) {
         return { error: "Not enough space to swap — clips would overlap" };
       }
 

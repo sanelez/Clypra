@@ -93,9 +93,9 @@ export function makeDisplayPoint(x: number, y: number): DisplayPoint {
 export interface ViewportTransform {
   /** Zoom level (0.1 = 10%, 1.0 = 100%, 5.0 = 500%) */
   zoom: number;
-  /** Pan offset X in canvas space */
+  /** Pan offset X in screen pixels */
   panX: number;
-  /** Pan offset Y in canvas space */
+  /** Pan offset Y in screen pixels */
   panY: number;
 }
 
@@ -141,75 +141,76 @@ export interface ClipTransform {
  * Convert screen coordinates to canvas coordinates.
  * Used for: mouse clicks, drag operations, hit testing.
  *
+ * Pipeline: screen → remove offset → remove (baseScale × zoom) → canvas
+ *
  * @param screenX - X coordinate in screen space (pixels)
  * @param screenY - Y coordinate in screen space (pixels)
  * @param viewport - Current viewport transform
- * @param canvas - Canvas dimensions
- * @param displayScale - Scale factor from canvas to display (displayWidth / canvasWidth)
- * @param displayOffset - Offset of canvas in display space (for letterboxing)
+ * @param canvas - Canvas dimensions (unused in math, kept for API consistency)
+ * @param displayScale - Base scale factor (zoom-exclusive, from calculateDisplayTransform)
+ * @param displayOffset - Offset of canvas in display space (includes pan)
  * @returns Canvas coordinates
  */
 export function screenToCanvas(screenX: number, screenY: number, viewport: ViewportTransform, canvas: CanvasSpace, displayScale: number, displayOffset: { x: number; y: number }): CanvasPoint {
-  // Step 1: Screen → Display (remove letterbox offset)
-  const displayX = screenX - displayOffset.x;
-  const displayY = screenY - displayOffset.y;
+  // Step 1: Remove offset (includes letterbox centering + pan)
+  const relativeX = screenX - displayOffset.x;
+  const relativeY = screenY - displayOffset.y;
 
-  // Step 2: Display → Canvas (remove display scale)
-  const canvasX = displayX / displayScale;
-  const canvasY = displayY / displayScale;
+  // Step 2: Remove combined scale (baseScale × zoom)
+  const canvasX = relativeX / (displayScale * viewport.zoom);
+  const canvasY = relativeY / (displayScale * viewport.zoom);
 
-  // Step 3: Canvas → Viewport (apply viewport transform)
-  const viewportX = canvasX / viewport.zoom - viewport.panX;
-  const viewportY = canvasY / viewport.zoom - viewport.panY;
-
-  return makeCanvasPoint(viewportX, viewportY);
+  return makeCanvasPoint(canvasX, canvasY);
 }
 
 /**
  * Convert canvas coordinates to screen coordinates.
  * Used for: rendering, overlay positioning.
  *
+ * Pipeline: canvas → apply (baseScale × zoom) → add offset → screen
+ *
  * @param canvasX - X coordinate in canvas space
  * @param canvasY - Y coordinate in canvas space
  * @param viewport - Current viewport transform
- * @param canvas - Canvas dimensions
- * @param displayScale - Scale factor from canvas to display
- * @param displayOffset - Offset of canvas in display space
+ * @param canvas - Canvas dimensions (unused in math, kept for API consistency)
+ * @param displayScale - Base scale factor (zoom-exclusive, from calculateDisplayTransform)
+ * @param displayOffset - Offset of canvas in display space (includes pan)
  * @returns Screen coordinates
  */
 export function canvasToScreen(canvasX: number, canvasY: number, viewport: ViewportTransform, canvas: CanvasSpace, displayScale: number, displayOffset: { x: number; y: number }): ScreenPoint {
-  // Step 1: Canvas → Viewport (apply viewport transform)
-  const viewportX = (canvasX + viewport.panX) * viewport.zoom;
-  const viewportY = (canvasY + viewport.panY) * viewport.zoom;
+  // Step 1: Apply combined scale (baseScale × zoom)
+  const scaledX = canvasX * displayScale * viewport.zoom;
+  const scaledY = canvasY * displayScale * viewport.zoom;
 
-  // Step 2: Viewport → Display (apply display scale)
-  const displayX = viewportX * displayScale;
-  const displayY = viewportY * displayScale;
-
-  // Step 3: Display → Screen (add letterbox offset)
-  const screenX = displayX + displayOffset.x;
-  const screenY = displayY + displayOffset.y;
+  // Step 2: Add offset (includes letterbox centering + pan)
+  const screenX = scaledX + displayOffset.x;
+  const screenY = scaledY + displayOffset.y;
 
   return makeScreenPoint(screenX, screenY);
 }
 
 /**
  * Calculate display scale and offset for canvas.
- * Handles letterboxing and viewport zoom.
+ * Handles letterboxing. Viewport zoom is applied to display dimensions
+ * but NOT baked into the returned `scale`.
  *
- * IMPORTANT: The returned `scale` value incorporates viewport zoom.
- * It is the ratio: containerPixels / (canvasPixels × zoom).
- * This means coordinate conversion functions (screenToCanvas, canvasToScreen)
- * that also apply zoom will have the zoom factor cancel out — which is correct.
- * The zoom effect is expressed through displayWidth/displayHeight sizing,
- * NOT through the coordinate transform.
+ * ARCHITECTURE:
+ * - `scale` is the BASE fit ratio: containerPixels / canvasPixels.
+ *   It does NOT include viewport zoom.
+ * - `displayWidth/Height` = canvas × zoom × baseScale — the actual CSS size
+ *   of the preview element. Zooming in makes this larger than the container.
+ * - `screenToCanvas` and `canvasToScreen` receive this base `scale` and
+ *   apply viewport zoom separately, keeping coordinate math correct.
+ * - `offsetX/Y` center the (possibly zoomed-beyond-container) canvas.
+ *   When zoomed in, offsets can be negative (canvas overflows container).
+ *   Pan offsets are added to these for camera movement.
  *
  * @param canvas - Canvas dimensions
  * @param viewport - Current viewport transform
  * @param containerWidth - Container width in pixels
  * @param containerHeight - Container height in pixels
  * @param scaleMode - "fit" or "fill"
- * @returns Display scale (zoom-inclusive) and offset
+ * @returns Display scale (zoom-exclusive) and offset
  */
 export function calculateDisplayTransform(
   canvas: CanvasSpace,
@@ -218,36 +219,32 @@ export function calculateDisplayTransform(
   containerHeight: number,
   scaleMode: "fit" | "fill" = "fit",
 ): {
-  /** Composite scale factor (zoom-inclusive): containerPixels / (canvasPixels × zoom) */
+  /** Base scale factor (zoom-exclusive): how canvas maps to container at zoom=1 */
   scale: number;
-  /** Horizontal letterbox offset (container-relative) */
+  /** Horizontal offset (container-relative, includes pan) */
   offsetX: number;
-  /** Vertical letterbox offset (container-relative) */
+  /** Vertical offset (container-relative, includes pan) */
   offsetY: number;
-  /** Display width in CSS pixels */
+  /** Display width in CSS pixels (zoom-inclusive) */
   displayWidth: number;
-  /** Display height in CSS pixels */
+  /** Display height in CSS pixels (zoom-inclusive) */
   displayHeight: number;
 } {
-  // Apply viewport zoom to canvas dimensions
-  const zoomedCanvasWidth = canvas.width * viewport.zoom;
-  const zoomedCanvasHeight = canvas.height * viewport.zoom;
+  // Base scale: canvas → container WITHOUT viewport zoom
+  const scaleX = containerWidth / canvas.width;
+  const scaleY = containerHeight / canvas.height;
+  const baseScale = scaleMode === "fit" ? Math.min(scaleX, scaleY) : Math.max(scaleX, scaleY);
 
-  // Calculate scale to fit/fill container
-  const scaleX = containerWidth / zoomedCanvasWidth;
-  const scaleY = containerHeight / zoomedCanvasHeight;
-  const scale = scaleMode === "fit" ? Math.min(scaleX, scaleY) : Math.max(scaleX, scaleY);
+  // Display dimensions: canvas scaled to container, then zoom applied
+  const displayWidth = canvas.width * baseScale * viewport.zoom;
+  const displayHeight = canvas.height * baseScale * viewport.zoom;
 
-  // Calculate display dimensions
-  const displayWidth = zoomedCanvasWidth * scale;
-  const displayHeight = zoomedCanvasHeight * scale;
-
-  // Calculate letterbox offset (center canvas in container)
-  const offsetX = (containerWidth - displayWidth) / 2;
-  const offsetY = (containerHeight - displayHeight) / 2;
+  // Center in container + apply pan (pan is in screen pixels)
+  const offsetX = (containerWidth - displayWidth) / 2 + viewport.panX;
+  const offsetY = (containerHeight - displayHeight) / 2 + viewport.panY;
 
   return {
-    scale,
+    scale: baseScale,
     offsetX,
     offsetY,
     displayWidth,

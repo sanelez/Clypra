@@ -88,7 +88,7 @@ function resolveTrackAtClientY(container: HTMLElement, tracks: Array<{ id: strin
 }
 
 export const Timeline: React.FC = () => {
-  const { tracks, clips, pixelsPerSecond, scrollLeft, setScrollLeft, getTimelineEndTime, addClip, addTrack, insertTrackAt, insertClipAtIndex, updateClip, normalizeTrack, removeEmptyNonMainTracks, beginBatch, endBatch } = useTimelineStore();
+  const { tracks, clips, pixelsPerSecond, scrollLeft, setScrollLeft, getTimelineEndTime, addClip, addTrack, insertTrackAt, insertClipAtIndex, updateClip, normalizeTrack, removeEmptyNonMainTracks, withBatch } = useTimelineStore();
 
   const { mediaAssets, addMediaAsset } = useProjectStore();
   const { previewMode, exitSourceMode, clearSelection } = useUIStore();
@@ -199,16 +199,17 @@ export const Timeline: React.FC = () => {
       const originalLeftPx = Math.round(clip.startTime * pps);
 
       const otherClips = trackClips.filter((c) => c.id !== clipId);
-      beginBatch();
-      let currentTime = 0;
-      otherClips.forEach((c) => {
-        updateClip(c.id, { startTime: currentTime });
-        currentTime += c.duration;
-      });
+      let tailTime = 0;
+      withBatch(() => {
+        let currentTime = 0;
+        otherClips.forEach((c) => {
+          updateClip(c.id, { startTime: currentTime });
+          currentTime += c.duration;
+        });
 
-      const tailTime = currentTime;
-      updateClip(clipId, { startTime: tailTime });
-      endBatch();
+        tailTime = currentTime;
+        updateClip(clipId, { startTime: tailTime });
+      });
       const leftNewPx = Math.round(tailTime * pps);
       const visualLeftAnchorDelta = originalLeftPx - leftNewPx;
 
@@ -243,7 +244,7 @@ export const Timeline: React.FC = () => {
       dragStateRef.current = nextDragState;
       setDragState(nextDragState);
     },
-    [updateClip, beginBatch, endBatch],
+    [updateClip, withBatch],
   );
 
   const handleClipDragMove = useCallback((clipId: string, _deltaX: number, _deltaY: number, clientX: number, clientY: number) => {
@@ -371,19 +372,19 @@ export const Timeline: React.FC = () => {
 
       const sourceTrackIds = Array.from(new Set(Object.values(dragSnapshot.originalPlacements).map((p) => p.trackId)));
       const restoreDraggedToOriginal = () => {
-        beginBatch();
-        const affectedTracks = new Set<string>();
-        dragSnapshot.draggedClipIds.forEach((id) => {
-          const placement = dragSnapshot.originalPlacements[id];
-          if (!placement) return;
-          affectedTracks.add(placement.trackId);
-          updateClip(id, {
-            trackId: placement.trackId,
-            startTime: placement.startTime,
+        withBatch(() => {
+          const affectedTracks = new Set<string>();
+          dragSnapshot.draggedClipIds.forEach((id) => {
+            const placement = dragSnapshot.originalPlacements[id];
+            if (!placement) return;
+            affectedTracks.add(placement.trackId);
+            updateClip(id, {
+              trackId: placement.trackId,
+              startTime: placement.startTime,
+            });
           });
+          affectedTracks.forEach((trackId) => normalizeTrack(trackId));
         });
-        affectedTracks.forEach((trackId) => normalizeTrack(trackId));
-        endBatch();
       };
 
       const clip = useTimelineStore.getState().clips.find((c) => c.id === clipId);
@@ -441,19 +442,19 @@ export const Timeline: React.FC = () => {
             return placement ? -placement.startTime : 0;
           }),
         );
-        beginBatch();
-        const affectedTracks = new Set<string>();
-        dragSnapshot.draggedClipIds.forEach((id) => {
-          const placement = dragSnapshot.originalPlacements[id];
-          if (!placement) return;
-          affectedTracks.add(placement.trackId);
-          updateClip(id, {
-            startTime: Math.max(0, placement.startTime + normalizedDeltaTime),
-            trackId: placement.trackId,
+        withBatch(() => {
+          const affectedTracks = new Set<string>();
+          dragSnapshot.draggedClipIds.forEach((id) => {
+            const placement = dragSnapshot.originalPlacements[id];
+            if (!placement) return;
+            affectedTracks.add(placement.trackId);
+            updateClip(id, {
+              startTime: Math.max(0, placement.startTime + normalizedDeltaTime),
+              trackId: placement.trackId,
+            });
           });
+          affectedTracks.forEach((trackId) => normalizeTrack(trackId));
         });
-        affectedTracks.forEach((trackId) => normalizeTrack(trackId));
-        endBatch();
       }
       removeEmptyNonMainTracks(sourceTrackIds);
 
@@ -461,7 +462,7 @@ export const Timeline: React.FC = () => {
       setDragState(null);
       resumeAutoSave();
     },
-    [insertClipAtIndex, updateClip, insertTrackAt, normalizeTrack, removeEmptyNonMainTracks, beginBatch, endBatch],
+    [insertClipAtIndex, updateClip, insertTrackAt, normalizeTrack, removeEmptyNonMainTracks, withBatch],
   );
 
   // Handle ESC key to cancel drag
@@ -471,19 +472,19 @@ export const Timeline: React.FC = () => {
       const ds = dragStateRef.current;
       if (!ds) return;
 
-      beginBatch();
-      const affectedTracks = new Set<string>();
-      ds.draggedClipIds.forEach((id) => {
-        const placement = ds.originalPlacements[id];
-        if (!placement) return;
-        affectedTracks.add(placement.trackId);
-        updateClip(id, {
-          trackId: placement.trackId,
-          startTime: placement.startTime,
+      withBatch(() => {
+        const affectedTracks = new Set<string>();
+        ds.draggedClipIds.forEach((id) => {
+          const placement = ds.originalPlacements[id];
+          if (!placement) return;
+          affectedTracks.add(placement.trackId);
+          updateClip(id, {
+            trackId: placement.trackId,
+            startTime: placement.startTime,
+          });
         });
+        affectedTracks.forEach((trackId) => normalizeTrack(trackId));
       });
-      affectedTracks.forEach((trackId) => normalizeTrack(trackId));
-      endBatch();
 
       dragStateRef.current = null;
       setDragState(null);
@@ -492,7 +493,7 @@ export const Timeline: React.FC = () => {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [normalizeTrack, updateClip, beginBatch, endBatch]);
+  }, [normalizeTrack, updateClip, withBatch]);
 
   // Handle Delete/Backspace key to remove selected clips
   useEffect(() => {
@@ -515,21 +516,21 @@ export const Timeline: React.FC = () => {
 
       // Remove each selected clip (batched — single epoch increment)
       const store = useTimelineStore.getState();
-      const { removeClip, normalizeTrack, beginBatch: batchStart, endBatch: batchEnd } = store;
+      const { removeClip, normalizeTrack, withBatch } = store;
       const affectedTracks = new Set<string>();
 
-      batchStart();
-      selectedClipIds.forEach((clipId) => {
-        const clip = store.clips.find((c) => c.id === clipId);
-        if (clip) {
-          affectedTracks.add(clip.trackId);
-          removeClip(clipId);
-        }
-      });
+      withBatch(() => {
+        selectedClipIds.forEach((clipId) => {
+          const clip = store.clips.find((c) => c.id === clipId);
+          if (clip) {
+            affectedTracks.add(clip.trackId);
+            removeClip(clipId);
+          }
+        });
 
-      // Normalize affected tracks to close gaps
-      affectedTracks.forEach((trackId) => normalizeTrack(trackId));
-      batchEnd();
+        // Normalize affected tracks to close gaps
+        affectedTracks.forEach((trackId) => normalizeTrack(trackId));
+      });
 
       // Clear selection after deletion
       useUIStore.getState().clearSelection();

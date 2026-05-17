@@ -3,10 +3,13 @@ import { Settings } from "lucide-react";
 import { EmptyState } from "../ui/EmptyState";
 import { useUIStore } from "@/store/uiStore";
 import { useTimelineStore } from "@/store/timelineStore";
+import { useHistoryStore } from "@/store/historyStore";
+import { TransformClipCommand } from "@/core/history/commands/TransformCommand";
 
 export const PropertiesPanel: React.FC = () => {
   const { selectedClipIds } = useUIStore();
-  const { clips, updateClip } = useTimelineStore();
+  const { clips } = useTimelineStore();
+  const { execute } = useHistoryStore();
 
   const selectedClipId = selectedClipIds[0] ?? null;
   const selectedClip = clips.find((c) => c.id === selectedClipId);
@@ -24,7 +27,9 @@ export const PropertiesPanel: React.FC = () => {
   }
 
   const handleUpdate = (key: keyof typeof selectedClip, value: any) => {
-    updateClip(selectedClipId, { [key]: value });
+    const oldTransform = { [key]: selectedClip[key] };
+    const newTransform = { [key]: value };
+    execute(new TransformClipCommand(selectedClipId, oldTransform, newTransform));
   };
 
   return (

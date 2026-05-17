@@ -15,7 +15,7 @@
  * If users want to see source media aspect ratio, they should use Source Preview mode.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Check, ChevronDown, Expand, Shrink, Volume2, VolumeX } from "lucide-react";
 import { usePlaybackClock, usePlaybackControls, useTransportControls, getPlaybackClock } from "@/hooks/usePlaybackClock";
 import { useProjectStore } from "@/store/projectStore";
@@ -280,6 +280,47 @@ const ProgramPreview: React.FC = () => {
       return asset?.type === "video";
     });
   }, [clips, mediaAssets]);
+
+  // Create ref callback with proper cleanup for video elements
+  const createVideoRefCallback = useCallback((clipId: string, mediaId: string) => {
+    const key = `${clipId}-${mediaId}`;
+
+    return (el: HTMLVideoElement | null) => {
+      if (el) {
+        // Mount: register video element
+        videoRefs.current[key] = el;
+
+        // Set data attributes for sync loop
+        el.dataset.clipId = clipId;
+        el.dataset.mediaId = mediaId;
+
+        // Register with session
+        const session = getActiveSessionOrNull();
+        if (session) {
+          session.registerVideoElement(key, el);
+        }
+      } else {
+        // Unmount: cleanup immediately to prevent memory leak
+        const oldVideo = videoRefs.current[key];
+        if (oldVideo) {
+          // Unregister from session first
+          const session = getActiveSessionOrNull();
+          if (session) {
+            session.unregisterVideoElement(key);
+          }
+
+          // Release hardware decoder resources
+          // This is CRITICAL for preventing memory leaks
+          oldVideo.pause();
+          oldVideo.src = "";
+          oldVideo.load(); // Forces browser to release decoder
+
+          // Remove from local ref map
+          delete videoRefs.current[key];
+        }
+      }
+    };
+  }, []);
 
   // Audio element management - separate from scene time updates
   // Create/destroy audio elements for audio-only clips
@@ -937,17 +978,7 @@ const ProgramPreview: React.FC = () => {
                         key={`${clip.id}-${clip.mediaId}`}
                         data-media-id={clip.mediaId}
                         data-clip-id={clip.id}
-                        ref={(el) => {
-                          const key = `${clip.id}-${clip.mediaId}`;
-                          const session = getActiveSessionOrNull();
-                          if (el) {
-                            videoRefs.current[key] = el;
-                            session?.registerVideoElement(key, el);
-                          } else if (videoRefs.current[key]) {
-                            session?.unregisterVideoElement(key);
-                            delete videoRefs.current[key];
-                          }
-                        }}
+                        ref={createVideoRefCallback(clip.id, clip.mediaId)}
                         src={sourcePath}
                         muted={isMuted || volume === 0}
                         playsInline

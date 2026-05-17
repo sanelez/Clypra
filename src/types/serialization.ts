@@ -89,6 +89,8 @@ export interface RustClip {
   height: number;
   opacity: number;
   rotation: number;
+  aspectRatioLocked?: boolean;
+  sourceAspectRatio?: number;
 }
 
 // ============================================================================
@@ -180,6 +182,8 @@ export function fromRustClip(rust: RustClip): Clip {
     height: rust.height,
     opacity: rust.opacity,
     rotation: rust.rotation,
+    aspectRatioLocked: rust.aspectRatioLocked,
+    sourceAspectRatio: rust.sourceAspectRatio,
   };
 }
 
@@ -278,5 +282,7 @@ export function toRustClip(frontend: Clip): RustClip {
     height: frontend.height,
     opacity: frontend.opacity,
     rotation: frontend.rotation,
+    aspectRatioLocked: frontend.aspectRatioLocked,
+    sourceAspectRatio: frontend.sourceAspectRatio,
   };
 }

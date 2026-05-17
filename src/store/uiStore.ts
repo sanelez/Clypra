@@ -51,8 +51,8 @@ interface UIStore {
   // Preview viewport state (editor-only, NOT exported)
   previewViewport: {
     zoom: number; // 0.1 to 5.0 (10% to 500%)
-    panX: number; // Canvas space offset
-    panY: number; // Canvas space offset
+    panX: number; // Screen space offset (pixels)
+    panY: number; // Screen space offset (pixels)
   };
 
   selectClip: (clipId: string | null) => void;

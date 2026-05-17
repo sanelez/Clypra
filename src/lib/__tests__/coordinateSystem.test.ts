@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   screenToCanvas,
   canvasToScreen,
+  calculateDisplayTransform,
   hitTestClip,
   type ViewportTransform,
   type CanvasSpace,
@@ -22,21 +23,29 @@ describe("Coordinate System Math", () => {
       // Random viewport zoom and pan
       const viewport: ViewportTransform = {
         zoom: 0.1 + Math.random() * 4.9, // 0.1 to 5.0
-        panX: -5000 + Math.random() * 10000,
-        panY: -5000 + Math.random() * 10000,
+        panX: -500 + Math.random() * 1000,
+        panY: -500 + Math.random() * 1000,
       };
 
-      // Random display parameters (container bounds, letterbox offset, scale)
-      const displayScale = 0.05 + Math.random() * 2.0;
-      const displayOffset = {
-        x: -500 + Math.random() * 1000,
-        y: -500 + Math.random() * 1000,
-      };
+      // Random container size
+      const containerWidth = 200 + Math.random() * 1600;
+      const containerHeight = 200 + Math.random() * 1200;
+
+      // Use calculateDisplayTransform to produce consistent scale/offset
+      const { scale, offsetX, offsetY } = calculateDisplayTransform(
+        canvas,
+        viewport,
+        containerWidth,
+        containerHeight,
+        "fit"
+      );
+
+      const displayOffset = { x: offsetX, y: offsetY };
 
       // Random point in screen space
       const originalScreen = {
-        x: -10000 + Math.random() * 20000,
-        y: -10000 + Math.random() * 20000,
+        x: -1000 + Math.random() * 3000,
+        y: -1000 + Math.random() * 3000,
       };
 
       // Screen -> Canvas
@@ -44,8 +53,8 @@ describe("Coordinate System Math", () => {
         originalScreen.x,
         originalScreen.y,
         viewport,
-        canvas, // Not actually used by the math directly, but in signature
-        displayScale,
+        canvas,
+        scale,
         displayOffset
       );
 
@@ -55,7 +64,7 @@ describe("Coordinate System Math", () => {
         canvasPoint.y,
         viewport,
         canvas,
-        displayScale,
+        scale,
         displayOffset
       );
 
@@ -63,6 +72,67 @@ describe("Coordinate System Math", () => {
       expect(roundTripScreen.x).toBeCloseTo(originalScreen.x, 3);
       expect(roundTripScreen.y).toBeCloseTo(originalScreen.y, 3);
     }
+  });
+
+  it("should also round-trip starting from canvas space", () => {
+    const canvas: CanvasSpace = { width: 1920, height: 1080 };
+    const viewport: ViewportTransform = { zoom: 2.0, panX: 50, panY: -30 };
+    const { scale, offsetX, offsetY } = calculateDisplayTransform(
+      canvas, viewport, 800, 600, "fit"
+    );
+    const offset = { x: offsetX, y: offsetY };
+
+    // Canvas -> Screen -> Canvas
+    const originalCanvas = { x: 500, y: 300 };
+    const screen = canvasToScreen(originalCanvas.x, originalCanvas.y, viewport, canvas, scale, offset);
+    const roundTrip = screenToCanvas(screen.x, screen.y, viewport, canvas, scale, offset);
+
+    expect(roundTrip.x).toBeCloseTo(originalCanvas.x, 6);
+    expect(roundTrip.y).toBeCloseTo(originalCanvas.y, 6);
+  });
+
+  describe("calculateDisplayTransform", () => {
+    it("should produce zoom-dependent displayWidth", () => {
+      const canvas: CanvasSpace = { width: 1920, height: 1080 };
+
+      const result1 = calculateDisplayTransform(
+        canvas, { zoom: 1.0, panX: 0, panY: 0 }, 800, 600, "fit"
+      );
+      const result2 = calculateDisplayTransform(
+        canvas, { zoom: 2.0, panX: 0, panY: 0 }, 800, 600, "fit"
+      );
+
+      // At zoom=2, displayWidth should be 2x the zoom=1 width
+      expect(result2.displayWidth).toBeCloseTo(result1.displayWidth * 2, 6);
+      expect(result2.displayHeight).toBeCloseTo(result1.displayHeight * 2, 6);
+    });
+
+    it("should return same base scale regardless of zoom", () => {
+      const canvas: CanvasSpace = { width: 1920, height: 1080 };
+
+      const result1 = calculateDisplayTransform(
+        canvas, { zoom: 1.0, panX: 0, panY: 0 }, 800, 600, "fit"
+      );
+      const result2 = calculateDisplayTransform(
+        canvas, { zoom: 3.0, panX: 0, panY: 0 }, 800, 600, "fit"
+      );
+
+      // Base scale should be identical — zoom is NOT baked in
+      expect(result1.scale).toBeCloseTo(result2.scale, 10);
+    });
+
+    it("should incorporate pan into offset", () => {
+      const canvas: CanvasSpace = { width: 1920, height: 1080 };
+      const viewport: ViewportTransform = { zoom: 1.0, panX: 0, panY: 0 };
+      const viewportPanned: ViewportTransform = { zoom: 1.0, panX: 100, panY: 50 };
+
+      const base = calculateDisplayTransform(canvas, viewport, 800, 600, "fit");
+      const panned = calculateDisplayTransform(canvas, viewportPanned, 800, 600, "fit");
+
+      // Pan is screen-space — offset shifts by exactly the pan amount
+      expect(panned.offsetX - base.offsetX).toBeCloseTo(100, 6);
+      expect(panned.offsetY - base.offsetY).toBeCloseTo(50, 6);
+    });
   });
 
   describe("hitTestClip", () => {

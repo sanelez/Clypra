@@ -10,6 +10,7 @@
 
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { getFrameScheduler } from "../core/scheduler/FrameScheduler";
+import { VideoElementPool } from "../core/resources/VideoElementPool";
 import type { Clip, Track, MediaAsset, Project } from "../types";
 
 /**
@@ -135,6 +136,12 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
   const scheduler = getFrameScheduler();
   scheduler.updateTimeline(clips, tracks, assets, project, epoch);
 
+  // Create headless video element pool for export
+  const videoPool = new VideoElementPool({
+    maxConcurrent: 10,
+    debug: false,
+  });
+
   // Start FFmpeg export session
   const sessionId = await invoke<string>("start_video_export", {
     config: {
@@ -158,13 +165,42 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
     for (let i = 0; i < frameTimes.length; i++) {
       const time = frameTimes[i];
 
-      // Schedule frame render
+      // Pre-load and seek all video elements for this frame
+      const videoElements = new Map<string, HTMLVideoElement>();
+
+      // Find all video clips active at this time
+      for (const clip of clips) {
+        const asset = assets.find((a) => a.id === clip.mediaId);
+        if (asset?.type !== "video") continue;
+
+        // Check if clip is active at this time
+        const clipEnd = clip.startTime + clip.duration;
+        if (time < clip.startTime || time >= clipEnd) continue;
+
+        // Calculate source time (accounting for trim)
+        const clipLocalTime = time - clip.startTime;
+        const trimIn = clip.trimIn || 0;
+        const sourceTime = trimIn + clipLocalTime;
+
+        // Acquire video element at exact frame time
+        const key = `${clip.id}-${clip.mediaId}`;
+        try {
+          const video = await videoPool.acquire(asset.path, sourceTime);
+          videoElements.set(key, video);
+        } catch (error) {
+          console.warn(`Failed to acquire video for ${key}:`, error);
+          // Continue without this video - rasterizer will use fallback
+        }
+      }
+
+      // Schedule frame render with video elements
       const jobId = scheduler.schedule({
         time,
         resolution: { width, height },
         pixelRatio: 1,
-        outputFormat: "imagedata", // Use ImageData for raw RGBA
+        outputFormat: "imagedata",
         priority: "export",
+        videoElements,
       });
 
       // Wait for frame
@@ -210,6 +246,9 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
       });
       throw error;
     }
+  } finally {
+    // Always clean up video pool
+    videoPool.clear();
   }
 
   const totalTimeMs = Date.now() - startTimeMs;

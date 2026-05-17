@@ -67,6 +67,8 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
 
   const [isDragging, setIsDragging] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
+  /** Start angle (radians) for rotation drag — prevents initial snap */
+  const startAngleRef = useRef<number | undefined>(undefined);
 
   // Get the first selected clip (multi-select transform comes later)
   const selectedClip = clips.find((c) => c.id === selectedClipIds[0]);
@@ -85,9 +87,6 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
       // Convert screen coordinates to canvas coordinates using overlay-local mapping
       const canvasCoords = mouseToCanvas(e.clientX, e.clientY, rect, viewport, canvasWidth, canvasHeight, scale);
 
-      if (import.meta.env.DEV) {
-        console.log("[TransformOverlay] Click →", { screen: { x: e.clientX, y: e.clientY }, canvas: canvasCoords });
-      }
 
       // Find all clips at this position (reverse order = top to bottom)
       const clipsAtPoint = [...clips]
@@ -118,8 +117,13 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
       // Convert screen coordinates to canvas coordinates using overlay-local mapping
       const canvasCoords = mouseToCanvas(e.clientX, e.clientY, rect, viewport, canvasWidth, canvasHeight, scale);
 
-      if (import.meta.env.DEV) {
-        console.log("[TransformOverlay] Mouse DOWN", { handle, canvasCoords, clip: { x: selectedClip.x, y: selectedClip.y, w: selectedClip.width, h: selectedClip.height } });
+      // Capture start angle for rotation handle
+      if (handle === "rotate") {
+        const centerX = selectedClip.x + selectedClip.width / 2;
+        const centerY = selectedClip.y + selectedClip.height / 2;
+        startAngleRef.current = Math.atan2(canvasCoords.y - centerY, canvasCoords.x - centerX);
+      } else {
+        startAngleRef.current = undefined;
       }
 
       startTransform({
@@ -170,7 +174,7 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
         sourceAspectRatio: activeTransform.sourceAspectRatio,
       };
 
-      const newTransform = calculateTransform(startClip, activeTransform.handle, activeTransform.startMousePos, canvasCoords, constraints);
+      const newTransform = calculateTransform(startClip, activeTransform.handle, activeTransform.startMousePos, canvasCoords, constraints, startAngleRef.current);
 
       // Optimistic update (no history yet)
       updateClip(activeTransform.clipId, newTransform);
@@ -200,9 +204,6 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
       rotation: finalClip.rotation,
     };
 
-    if (import.meta.env.DEV) {
-      console.log("[TransformOverlay] Mouse UP", { handle: activeTransform.handle, oldTransform, newTransform });
-    }
 
     // Only create command if something actually changed
     const hasChanged = oldTransform.x !== newTransform.x || oldTransform.y !== newTransform.y || oldTransform.width !== newTransform.width || oldTransform.height !== newTransform.height || oldTransform.rotation !== newTransform.rotation;
@@ -251,10 +252,13 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
     );
   }
 
-  // Use canvasToScreen for proper coordinate conversion
-  const topLeft = canvasToScreen(selectedClip.x, selectedClip.y, viewport, { width: canvasWidth, height: canvasHeight }, scale, displayOffset);
+  // Use canvasToScreen for proper coordinate conversion.
+  // Pass zero offset because we're positioning within the overlay div itself
+  // (which is already placed at displayOffset by the parent layout).
+  const zeroOffset = { x: 0, y: 0 };
+  const topLeft = canvasToScreen(selectedClip.x, selectedClip.y, viewport, { width: canvasWidth, height: canvasHeight }, scale, zeroOffset);
 
-  const bottomRight = canvasToScreen(selectedClip.x + selectedClip.width, selectedClip.y + selectedClip.height, viewport, { width: canvasWidth, height: canvasHeight }, scale, displayOffset);
+  const bottomRight = canvasToScreen(selectedClip.x + selectedClip.width, selectedClip.y + selectedClip.height, viewport, { width: canvasWidth, height: canvasHeight }, scale, zeroOffset);
 
   const handleDisplayX = topLeft.x;
   const handleDisplayY = topLeft.y;

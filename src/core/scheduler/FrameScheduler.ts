@@ -431,39 +431,46 @@ export class FrameScheduler {
 
       let outputData: ImageBitmap | ImageData | Blob;
 
-      switch (job.request.outputFormat) {
-        case "imagebitmap":
-          if (rasterFrame.canvas instanceof OffscreenCanvas) {
-            outputData = await rasterFrame.canvas.transferToImageBitmap();
-          } else {
-            outputData = await createImageBitmap(rasterFrame.canvas);
-          }
-          break;
+      try {
+        switch (job.request.outputFormat) {
+          case "imagebitmap":
+            if (rasterFrame.canvas instanceof OffscreenCanvas) {
+              outputData = await rasterFrame.canvas.transferToImageBitmap();
+            } else {
+              outputData = await createImageBitmap(rasterFrame.canvas);
+            }
+            break;
 
-        case "imagedata":
-          outputData = rasterFrame.ctx.getImageData(0, 0, job.request.resolution.width, job.request.resolution.height);
-          break;
+          case "imagedata":
+            outputData = rasterFrame.ctx.getImageData(0, 0, job.request.resolution.width, job.request.resolution.height);
+            break;
 
-        case "blob":
-        default:
-          if (rasterFrame.canvas instanceof OffscreenCanvas) {
-            outputData = await rasterFrame.canvas.convertToBlob({
-              type: "image/png",
-              quality: job.request.quality,
-            });
-          } else {
-            outputData = await new Promise<Blob>((resolve, reject) => {
-              (rasterFrame.canvas as HTMLCanvasElement).toBlob(
-                (blob) => {
-                  if (blob) resolve(blob);
-                  else reject(new Error("Failed to create blob"));
-                },
-                "image/png",
-                job.request.quality,
-              );
-            });
-          }
-          break;
+          case "blob":
+          default:
+            if (rasterFrame.canvas instanceof OffscreenCanvas) {
+              outputData = await rasterFrame.canvas.convertToBlob({
+                type: "image/png",
+                quality: job.request.quality,
+              });
+            } else {
+              outputData = await new Promise<Blob>((resolve, reject) => {
+                (rasterFrame.canvas as HTMLCanvasElement).toBlob(
+                  (blob) => {
+                    if (blob) resolve(blob);
+                    else reject(new Error("Failed to create blob"));
+                  },
+                  "image/png",
+                  job.request.quality,
+                );
+              });
+            }
+            break;
+        }
+      } finally {
+        // Release canvas back to pool after output conversion
+        if (rasterFrame.releaseCanvas) {
+          rasterFrame.releaseCanvas();
+        }
       }
 
       // ✅ Check after async operations
