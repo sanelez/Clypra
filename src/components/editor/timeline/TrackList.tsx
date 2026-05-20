@@ -29,20 +29,21 @@ export const TrackList: React.FC<TrackListProps> = ({ onEditTrack }) => {
         ) : (
           tracks.map((track) => {
             const isEmpty = !trackHasClips(track.id);
+            const isSelected = selectedTrackId === track.id;
             return (
               <div
                 key={track.id}
-                className={`group border-b border-timeline-track-border flex items-center gap-2 px-2 py-1 transition-colors ${selectedTrackId === track.id ? "bg-timeline-track-selected" : "hover:bg-timeline-track-hover"} ${isEmpty ? "opacity-60" : ""} ${track.locked ? "bg-slate-900/30 ring-1 ring-inset ring-slate-500/40" : ""}`}
+                className={`group relative border-b border-timeline-track-border flex items-center gap-2 px-2 py-1 transition-colors ${isSelected ? "bg-timeline-track-selected ring-1 ring-inset ring-timeline-track-active" : "hover:bg-timeline-track-hover"} ${isEmpty ? "opacity-70" : ""} ${track.locked ? "bg-timeline-track-active/60" : ""}`}
                 style={{ height: `${track.height}px` }}
                 onClick={() => selectTrack(track.id)}
-                title={isEmpty ? `${track.name} (empty)` : track.name}
               >
+                <div className={`absolute left-0 top-0 h-full w-[2px] ${isSelected ? "bg-timeline-track-label" : "bg-transparent"}`} />
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     toggleTrackLock(track.id);
                   }}
-                  className={`p-1 rounded transition-colors ${track.locked ? "bg-timeline-button-hover text-white" : "hover:bg-timeline-button-hover text-timeline-button-icon"}`}
+                  className={`p-1 rounded transition-colors cursor-pointer hover:bg-timeline-button-hover ${track.locked ? "bg-timeline-button-hover text-timeline-track-name" : "text-timeline-button-icon"}`}
                   aria-label={track.locked ? "Unlock track" : "Lock track"}
                 >
                   {track.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
@@ -53,7 +54,7 @@ export const TrackList: React.FC<TrackListProps> = ({ onEditTrack }) => {
                     e.stopPropagation();
                     toggleTrackVisibility(track.id);
                   }}
-                  className={`p-1 rounded transition-colors ${track.visible ? "hover:bg-timeline-button-hover text-timeline-button-icon" : "bg-timeline-button-hover text-white"}`}
+                  className={`p-1 rounded transition-colors cursor-pointer hover:bg-timeline-button-hover ${track.visible ? "text-timeline-button-icon" : "bg-timeline-button-hover text-timeline-track-name"}`}
                   aria-label={track.visible ? "Hide track" : "Show track"}
                 >
                   {track.visible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
@@ -64,12 +65,11 @@ export const TrackList: React.FC<TrackListProps> = ({ onEditTrack }) => {
                     e.stopPropagation();
                     toggleTrackMute(track.id);
                   }}
-                  className={`p-1 rounded transition-colors ${track.muted ? "bg-timeline-button-hover text-white" : "hover:bg-timeline-button-hover text-timeline-button-icon"}`}
+                  className={`p-1 rounded transition-colors cursor-pointer hover:bg-timeline-button-hover ${track.muted ? "bg-timeline-button-hover text-timeline-track-name" : "text-timeline-button-icon"}`}
                   aria-label={track.muted ? "Unmute track" : "Mute track"}
                 >
                   {track.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
                 </button>
-
               </div>
             );
           })

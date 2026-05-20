@@ -9,6 +9,7 @@ import { TimelineWaveform } from "./TimelineWaveform";
 const DRAG_THRESHOLD_PX = 6;
 const RESIZE_TRACE = true;
 const MAX_STILL_CLIP_DURATION_SEC = 60 * 60; // 1 hour guardrail for stills
+const MIN_TRIM_DURATION_SEC = 1;
 const traceResize = (...args: unknown[]) => {
   if (!RESIZE_TRACE) return;
   console.log("[ClipResizeTrace]", ...args);
@@ -290,8 +291,8 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
         // STANDARD MODE: Normal trim (no ripple)
         if (isResizing === "left") {
           // Resize from left (trim in)
-          const minDuration = 0.1;
-          const isStill = mediaAsset?.type === "image";
+          const minDuration = MIN_TRIM_DURATION_SEC;
+          const isStill = !mediaAsset || mediaAsset.type === "image";
           const maxMediaTime = isStill ? MAX_STILL_CLIP_DURATION_SEC : (mediaAsset?.duration ?? resizeStart.trimOut);
           const maxTrimIn = Math.min(maxMediaTime, resizeStart.trimOut - 0.001);
 
@@ -322,8 +323,8 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
           });
         } else {
           // Resize from right (trim out)
-          const minDuration = 0.1;
-          const isStill = mediaAsset?.type === "image";
+          const minDuration = MIN_TRIM_DURATION_SEC;
+          const isStill = !mediaAsset || mediaAsset.type === "image";
           const maxMediaTime = isStill ? MAX_STILL_CLIP_DURATION_SEC : (mediaAsset?.duration ?? resizeStart.trimOut);
           const maxDurationByMedia = Math.max(minDuration, maxMediaTime - resizeStart.trimIn);
           const maxDurationByNextClip = Number.isFinite(nextClipStart) ? Math.max(minDuration, nextClipStart - resizeStart.startTime) : Number.POSITIVE_INFINITY;

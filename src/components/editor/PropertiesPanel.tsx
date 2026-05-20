@@ -134,11 +134,17 @@ export const PropertiesPanel: React.FC = () => {
 
         {/* Clip Section */}
         <div>
-          <h4 className="text-sm font-semibold text-text-primary mb-3">Clip</h4>
+          <div className="mb-3">
+            <h4 className="text-sm font-semibold text-text-primary">Clip</h4>
+            <p className="text-[11px] text-text-muted mt-1">Some controls below are not fully functional yet.</p>
+          </div>
           <div className="space-y-2">
             <div>
-              <label className="text-xs text-text-muted block mb-1">Speed</label>
-              <select defaultValue="1x" className="w-full bg-surface-raised border border-border rounded px-2 py-1 text-xs text-text-primary">
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-text-muted block">Speed</label>
+                <span className="text-[10px] px-1.5 py-0.5 rounded border border-border text-text-muted">Not fully functional</span>
+              </div>
+              <select defaultValue="1x" disabled className="w-full bg-surface-raised border border-border rounded px-2 py-1 text-xs text-text-primary opacity-60 cursor-not-allowed">
                 <option value="0.25x">0.25x</option>
                 <option value="0.5x">0.5x</option>
                 <option value="1x">1x</option>
@@ -148,12 +154,18 @@ export const PropertiesPanel: React.FC = () => {
             </div>
 
             <div>
-              <label className="text-xs text-text-muted block mb-1">Trim In (s)</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-text-muted block">Trim In (s)</label>
+                <span className="text-[10px] text-text-muted">Basic mode</span>
+              </div>
               <input type="number" value={selectedClip.trimIn.toFixed(2)} onChange={(e) => handleUpdate("trimIn", Number(e.target.value))} className="w-full bg-surface-raised border border-border rounded px-2 py-1 text-xs text-text-primary" />
             </div>
 
             <div>
-              <label className="text-xs text-text-muted block mb-1">Trim Out (s)</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-text-muted block">Trim Out (s)</label>
+                <span className="text-[10px] text-text-muted">Basic mode</span>
+              </div>
               <input type="number" value={selectedClip.trimOut.toFixed(2)} onChange={(e) => handleUpdate("trimOut", Number(e.target.value))} className="w-full bg-surface-raised border border-border rounded px-2 py-1 text-xs text-text-primary" />
             </div>
           </div>

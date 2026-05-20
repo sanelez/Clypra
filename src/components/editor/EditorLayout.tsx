@@ -60,21 +60,29 @@ export const EditorLayout: React.FC = () => {
 
       addClip(newClip);
     } else if (type === "text") {
-      // Handle text clips
-      const targetTrackType = "text";
+      // Text clips follow the same placement policy semantics:
+      // playhead-first, no overwrite, create track when occupied.
+      const sequenceEndTime = getTimelineEndTime();
+      const playheadTime = getPlaybackClock().time;
+      const startTime = Math.max(0, Math.min(playheadTime, Math.max(0, sequenceEndTime)));
+      const firstUnlockedTextTrack = tracks.find((track) => track.type === "text" && !track.locked);
+      let targetTrackId: string | null = firstUnlockedTextTrack?.id ?? null;
 
-      // Find or create text track
-      let targetTrack = tracks.find((track) => track.type === targetTrackType && !track.locked);
-
-      if (!targetTrack) {
-        addTrack(targetTrackType);
-        targetTrack = useTimelineStore.getState().tracks.find((t) => t.type === targetTrackType && !t.locked);
+      if (targetTrackId) {
+        const targetTrackClips = clips.filter((clip) => clip.trackId === targetTrackId);
+        const occupiedAtPlayhead = targetTrackClips.some((clip) => clip.startTime <= startTime && startTime < clip.startTime + clip.duration);
+        if (occupiedAtPlayhead) {
+          targetTrackId = null;
+        }
       }
 
-      if (!targetTrack) return;
+      if (!targetTrackId) {
+        const latestTracks = useTimelineStore.getState().tracks;
+        const insertIndex = getInsertIndexForNewTrack(latestTracks, "text");
+        targetTrackId = insertTrackAt("text", insertIndex);
+      }
 
-      // Get the end time of all existing clips
-      const endTime = getTimelineEndTime();
+      if (!targetTrackId) return;
 
       // Determine preset settings
       let presetConfig = {};
@@ -87,8 +95,8 @@ export const EditorLayout: React.FC = () => {
 
       // Create text clip
       const textClip = createTextClip({
-        trackId: targetTrack.id,
-        startTime: endTime,
+        trackId: targetTrackId,
+        startTime,
         duration: 5.0,
         text: item.name || "Text",
         canvasWidth: project?.canvasWidth || 1920,

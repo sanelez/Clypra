@@ -94,6 +94,7 @@ const trackHeights: Record<string, number> = {
   audio: 52,
   text: 56,
 };
+const MIN_TRIM_DURATION_SEC = 1;
 
 /** Where to insert a new row when dropping off-track: video/text at top; audio under first video (or append if no video). */
 export function getInsertIndexForNewTrack(tracks: Track[], trackType: "video" | "audio" | "text"): number {
@@ -446,7 +447,7 @@ export const useTimelineStore = create<TimelineStore>(
         mediaDurationBound = Math.max(mediaDurationBound, 60 * 60); // 1 hour guardrail
       }
 
-      const minDuration = 0.1;
+      const minDuration = MIN_TRIM_DURATION_SEC;
 
       // Calculate the new clip dimensions
       let newStartTime = clip.startTime;
@@ -464,8 +465,15 @@ export const useTimelineStore = create<TimelineStore>(
         const maxTrimIn = Math.min(mediaDurationBound, clip.trimOut - 0.001);
         const desiredStartTime = clip.startTime + deltaTime;
         const desiredDelta = desiredStartTime - clip.startTime;
+        const previousClipEnd = state.clips
+          .filter((c) => c.id !== clipId && c.trackId === clip.trackId)
+          .reduce((maxEnd, c) => {
+            const end = c.startTime + c.duration;
+            if (end <= clip.startTime + 1e-6) return Math.max(maxEnd, end);
+            return maxEnd;
+          }, 0);
 
-        const minDelta = -clip.startTime;
+        const minDelta = Math.max(-clip.startTime, previousClipEnd - clip.startTime);
         const maxDeltaByDuration = clip.duration - minDuration;
         const maxDeltaByMedia = maxTrimIn - clip.trimIn;
         const clampedDelta = Math.max(minDelta, Math.min(desiredDelta, maxDeltaByDuration, maxDeltaByMedia));
