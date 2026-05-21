@@ -165,7 +165,7 @@ npm run tauri build
 
 ## Screenshots
 
-_Coming soon - Add screenshots of your app in action_
+![Clypra Video Editor Interface](public/clypra.jpg)
 
 ## Architecture Highlights
 
@@ -221,8 +221,8 @@ npm run lint
 - [ ] Multi-track audio mixing
 - [ ] Video effects and filters
 - [ ] Transitions between clips
-- [ ] Text and title overlays
-- [ ] Export presets for different platforms
+- [x] Text and title overlays
+- [x] Export presets for different platforms
 - [ ] Keyboard shortcut customization
 - [ ] Plugin system
 
