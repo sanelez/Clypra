@@ -94,20 +94,26 @@ export const WebShowcase: React.FC = () => {
                   <span className="text-accent font-bold">✓</span> Supports both Apple Silicon & Intel processors.
                 </li>
                 <li className="flex gap-2">
-                  <span className="text-accent font-bold">✓</span> Direct DMG installer with Application drag-and-drop.
+                  <span className="text-accent font-bold">✓</span> Bypasses Gatekeeper via Homebrew Cask.
                 </li>
               </ul>
 
-              <div className="mt-auto pt-4 border-t border-white/[0.04]">
+              <div className="mt-auto pt-4 border-t border-white/[0.04] flex flex-col gap-2">
                 <a
-                  href="https://github.com/AIEraDev/clypra/releases/latest"
+                  href="https://github.com/AIEraDev/Clypra/releases/latest"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full h-11 rounded-xl bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.1] text-xs font-semibold text-white flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  Download for macOS
+                  Download DMG
                 </a>
+                <div className="p-2 rounded-lg bg-[#121214] border border-white/[0.04] flex flex-col gap-1 text-[10px] text-left">
+                  <span className="font-mono text-neutral-400 font-medium">Or install via Homebrew:</span>
+                  <code className="text-accent font-mono select-all break-all bg-white/5 p-1 rounded">
+                    brew install AIEraDev/tap/clypra
+                  </code>
+                </div>
               </div>
             </div>
 
@@ -191,9 +197,13 @@ export const WebShowcase: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="flex flex-col gap-2 text-left">
               <span className="text-[10px] font-semibold text-accent font-mono">01 / MACOS USER INSTALLATION</span>
-              <h5 className="font-bold text-white text-sm">Open with Control-Click</h5>
+              <h5 className="font-bold text-white text-sm">Homebrew or Control-Click</h5>
               <p className="text-xs text-text-muted leading-relaxed">
-                If macOS reports that the app is from an unidentified developer, simply drag Clypra to your **Applications** folder. Right-click (or Control-click) the Clypra icon, and select **Open** from the context menu. Click **Open** again in the warning dialog to authorize execution.
+                To bypass the Gatekeeper warning completely, install via our Homebrew Tap:
+                <code className="block my-1.5 p-1.5 bg-[#121214] border border-white/[0.04] rounded text-accent text-[10px] font-mono select-all">
+                  brew install AIEraDev/tap/clypra
+                </code>
+                Alternatively, drag the downloaded DMG to your **Applications** folder, Right-click (Control-click) the Clypra icon, and select **Open** to authorize execution.
               </p>
             </div>
 

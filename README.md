@@ -29,15 +29,27 @@ A modern, open-source video editor built with Tauri, React, and TypeScript featu
 - 🎨 **Modern UI** - Clean, intuitive interface with dark mode
 - 🔄 **Cross-Platform** - Works on macOS, Windows, and Linux
 
-## Download
+## Download & Installation
 
-| Platform                      | Download         |
-| ----------------------------- | ---------------- |
-| macOS (Apple Silicon + Intel) | [Coming Soon](#) |
-| Windows 10/11                 | [Coming Soon](#) |
-| Linux (AppImage)              | [Coming Soon](#) |
+### macOS (Apple Silicon & Intel)
+The recommended way to install Clypra on macOS is via **Homebrew Cask** to automatically bypass the Gatekeeper security warnings:
 
-**Current Status:** v0.1.0 in development. [See milestone →](https://github.com/AIEraDev/Clypra/milestone/1)
+```bash
+# Add the custom tap and install the cask
+brew install AIEraDev/tap/clypra
+```
+
+Alternatively, download the direct installer from the [Latest Releases](https://github.com/AIEraDev/Clypra/releases/latest):
+* **macOS Universal DMG**
+  *(If using the DMG, drag Clypra to your `/Applications` folder, then Right-click/Control-click the icon and select **Open** to authorize execution).*
+
+### Windows
+* **Windows x64 MSI Installer**: Download from the [Latest Releases](https://github.com/AIEraDev/Clypra/releases/latest)
+  *(If SmartScreen blocks execution, click **More Info** and select **Run Anyway**).*
+
+### Linux
+* **Linux x64 AppImage**: Download from the [Latest Releases](https://github.com/AIEraDev/Clypra/releases/latest)
+  *(Make the file executable using `chmod +x Clypra*.AppImage`, then run).*
 
 ## Project Structure
 
