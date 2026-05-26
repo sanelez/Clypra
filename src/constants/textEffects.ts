@@ -98,4 +98,16 @@ export const TEXT_EFFECTS: TextEffectPreset[] = [
     shadow: { color: "#FFFF00", blur: 6, offsetX: 0, offsetY: 0 },
     premium: true,
   },
+  {
+    id: "glow-yellow",
+    name: "Yellow Glow",
+    category: "Neon",
+    fontFamily: "Outfit Variable",
+    color: "#FFD700",
+    fontWeight: 900,
+    fontStyle: "normal",
+    stroke: { color: "#000000", width: 6 },
+    shadow: { color: "#FFFF00", blur: 15, offsetX: 0, offsetY: 0 },
+    premium: true,
+  },
 ];

@@ -155,76 +155,86 @@ export interface CalligraphyInkConfig {
 
 export interface GoldFoilStampConfig {
   enabled: boolean;
-  goldTone: string;       // base gold hex tone
-  foilContrast: number;   // contrast level for gradients
-  debossDepth: number;    // depth offset for debossed look
+  goldTone: string; // base gold hex tone
+  foilContrast: number; // contrast level for gradients
+  debossDepth: number; // depth offset for debossed look
   bevelHighlight: number; // bevel shine overlay strength
-  bgColor: string;        // background color of the canvas
-  paperTexture: number;   // probability/intensity of random paper grain dots
+  bgColor: string; // background color of the canvas
+  paperTexture: number; // probability/intensity of random paper grain dots
 }
 
 export interface ClassicInkConfig {
   enabled: boolean;
-  ivoryTone: string;       // default: "#fdfbf7"
-  midTone: string;         // default: "#dcd9ce"
-  darkTone: string;        // default: "#b0ada0"
-  strokeColor: string;     // default: "#53514a"
-  shadowColor: string;     // default: "rgba(28, 26, 23, 0.82)"
+  ivoryTone: string; // default: "#fdfbf7"
+  midTone: string; // default: "#dcd9ce"
+  darkTone: string; // default: "#b0ada0"
+  strokeColor: string; // default: "#53514a"
+  shadowColor: string; // default: "rgba(28, 26, 23, 0.82)"
   highlightIntensity: number; // default: 0.15
 }
 
 export interface ClassicEngravedConfig {
   enabled: boolean;
-  bronzeDark: string;           // "#5C3D2E" — dark warm-bronze gradient top
-  bronzeLight: string;          // "#8B6914" — warm-bronze gradient bottom
-  creamEdge: string;            // "#FAF0E6" — hairline pale-cream outer edge
-  innerShadowColor: string;     // "rgba(30,15,5,0.85)" — dark inner shadow (top-left)
-  innerHighlightColor: string;  // "rgba(255,248,230,0.6)" — bright inner highlight (bottom-right)
+  bronzeDark: string; // "#5C3D2E" — dark warm-bronze gradient top
+  bronzeLight: string; // "#8B6914" — warm-bronze gradient bottom
+  creamEdge: string; // "#FAF0E6" — hairline pale-cream outer edge
+  innerShadowColor: string; // "rgba(30,15,5,0.85)" — dark inner shadow (top-left)
+  innerHighlightColor: string; // "rgba(255,248,230,0.6)" — bright inner highlight (bottom-right)
 }
 
 export interface ClassicSerifGoldConfig {
   enabled: boolean;
-  champagneTop: string;    // "#F5E6C8"
-  richGold: string;        // "#DAA520"
-  deepAmber: string;       // "#B8860B"
-  baseBright: string;      // "#D4A843"
-  strokeColor: string;     // "#6B4226"
-  bevelDepth: number;      // 5
-  bevelDark: string;       // "#8B6914"
-  bevelLight: string;      // "#F5DEB3"
+  champagneTop: string; // "#F5E6C8"
+  richGold: string; // "#DAA520"
+  deepAmber: string; // "#B8860B"
+  baseBright: string; // "#D4A843"
+  strokeColor: string; // "#6B4226"
+  bevelDepth: number; // 5
+  bevelDark: string; // "#8B6914"
+  bevelLight: string; // "#F5DEB3"
   highlightIntensity: number; // 0.18
 }
 
 export interface ClassicStampConfig {
   enabled: boolean;
-  inkColor: string;        // "#8B1A1A" — deep red ink
+  inkColor: string; // "#8B1A1A" — deep red ink
   innerShadowColor: string; // "rgba(60,10,10,0.7)" — dark red inner shadow
-  roughness: number;       // 0.0–1.0, controls stroke noise/irregularity
+  roughness: number; // 0.0–1.0, controls stroke noise/irregularity
   hardShadowOffset: number; // px, default 4
 }
 
 export interface ClassicNeonSignConfig {
   enabled: boolean;
-  coreColor: string;       // "#FFFAF0" — warm white core stroke
-  coreWidth: number;       // 3 px
-  glowTight: string;       // "#FFFFFF"
-  glowTightBlur: number;   // 8 px
-  glowMid: string;         // "#FFB347"
-  glowMidBlur: number;     // 30 px
-  glowWide: string;        // "#CC4400"
-  glowWideBlur: number;    // 80 px
+  coreColor: string; // "#FFFAF0" — warm white core stroke
+  coreWidth: number; // 3 px
+  glowTight: string; // "#FFFFFF"
+  glowTightBlur: number; // 8 px
+  glowMid: string; // "#FFB347"
+  glowMidBlur: number; // 30 px
+  glowWide: string; // "#CC4400"
+  glowWideBlur: number; // 80 px
   reflectionOpacity: number; // 0.20
-  reflectionFade: number;  // px fade length
+  reflectionFade: number; // px fade length
 }
 
 export interface NeonYellowOutlineConfig {
   enabled: boolean;
-  glowColor: string;       // "#FFFF00"
-  glowTightBlur: number;   // 4 px
-  glowWideBlur: number;    // 10 px
-  strokeColor: string;     // "#000000"
-  strokeWidth: number;     // 5.5 px
-  fillColor: string;       // "#FFFFFF"
+  glowColor: string; // "#FFFF00"
+  glowTightBlur: number; // 4 px
+  glowWideBlur: number; // 10 px
+  strokeColor: string; // "#000000"
+  strokeWidth: number; // 5.5 px
+  fillColor: string; // "#FFFFFF"
+}
+
+export interface glowYellowSparklesConfig {
+  enabled: boolean;
+  count: number; // number of sparkles
+  minSize: number; // minimum sparkle size in px
+  maxSize: number; // maximum sparkle size in px
+  color: string; // sparkle color
+  opacity: number; // 0-1
+  spread: number; // multiplier for how far sparkles spread from text
 }
 
 export interface TextEffectDefinition {
@@ -261,6 +271,7 @@ export interface TextEffectDefinition {
   classicNeonSign?: ClassicNeonSignConfig;
   neonYellowOutline?: NeonYellowOutlineConfig;
   floorReflection?: FloorReflectionConfig;
+  sparkles?: glowYellowSparklesConfig;
 }
 
 export type EffectCategory = "classic" | "metallic" | "neon" | "gradient" | "retro" | "grunge" | "clean" | "glitch" | "organic" | "space" | "3d";

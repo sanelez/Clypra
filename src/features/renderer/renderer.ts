@@ -12,6 +12,7 @@ import { renderClassicSerifGold } from "./classicSerifGold";
 import { renderClassicStamp } from "./classicStamp";
 import { renderClassicNeonSign } from "./classicNeonSign";
 import { renderNeonYellowOutline } from "./neonYellowOutline";
+import { renderGlowYellowSparkles } from "./glowYellowSparkles";
 
 /**
  * Core Canvas 2D Text Effects Rendering Context Engine.
@@ -37,6 +38,11 @@ export const renderTextEffectToContext = (ctx: CanvasRenderingContext2D | Offscr
   // ==========================================
   if (effect.neonYellowOutline && effect.neonYellowOutline.enabled) {
     renderNeonYellowOutline(ctx, text, effect, fontSize, x, y, canvasWidth, canvasHeight, lines, lineHeightPx, textWidth, textHeight);
+    return;
+  }
+
+  if (effect.id === "glow-yellow" || (effect.sparkles && effect.sparkles.enabled)) {
+    renderGlowYellowSparkles(ctx, text, effect, fontSize, x, y, canvasWidth, canvasHeight, lines, lineHeightPx, textWidth, textHeight);
     return;
   }
 

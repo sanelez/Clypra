@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, describe, test, expect, vi } from "vitest";
 import { renderTextEffect, renderTextEffectToDataURL } from "./renderer";
 import { TextEffectDefinition } from "./types";
-import { goldFoilStamp, classicInk, neonYellowOutline } from "./definitions";
+import { goldFoilStamp, classicInk, neonYellowOutline, glowYellowSparkles } from "./definitions";
 
 const moltenGold3d: TextEffectDefinition = {
   id: "molten-gold-3d",
@@ -218,6 +218,16 @@ describe("Clypra Text Effects Engine & Presets", () => {
 
     expect(() => {
       renderTextEffect(canvas, "TEXT", classicInk, 48);
+    }).not.toThrow();
+  });
+
+  test("Yellow Glow Sparkles rendering runs cleanly without throwing errors", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 800;
+    canvas.height = 400;
+
+    expect(() => {
+      renderTextEffect(canvas, "SPARKLE", glowYellowSparkles, 44);
     }).not.toThrow();
   });
 });

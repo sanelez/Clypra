@@ -1,19 +1,38 @@
 import { TextEffectDefinition } from "./types";
 
-export const glowYellow: TextEffectDefinition = {
+export const glowYellowSparkles: TextEffectDefinition = {
   id: "glow-yellow",
   name: "Yellow Glow",
   category: "neon",
-  description: "High-contrast classic yellow glow effect with white inner core and a thick protective black outline.",
-  tags: ["neon", "yellow", "glow", "clean"],
+  description: "High-contrast classic yellow glow effect with gold gradient and sparkle particles.",
+  tags: ["neon", "yellow", "glow", "clean", "sparkle"],
   font: { family: "Outfit", weight: 900, style: "normal", letterSpacing: 2, lineHeight: 1 },
-  fills: [{ type: "solid", color: "#FFFFFF" }],
+  fills: [
+    {
+      type: "linear",
+      angle: 90,
+      stops: [
+        { color: "#8B7500", position: 0 },
+        { color: "#FFD700", position: 0.5 },
+        { color: "#FFFF99", position: 1 },
+      ],
+    },
+  ],
   strokes: [{ color: "#000000", width: 6, position: "outside", opacity: 1 }],
   shadows: [
     { type: "glow", color: "#FFFF00", blur: 15, offsetX: 0, offsetY: 0, opacity: 1.0, spread: 2 },
     { type: "glow", color: "#FFFF00", blur: 35, offsetX: 0, offsetY: 0, opacity: 0.8, spread: 1 },
     { type: "glow", color: "#FFFF00", blur: 75, offsetX: 0, offsetY: 0, opacity: 0.4 },
   ],
+  sparkles: {
+    enabled: true,
+    count: 25,
+    minSize: 2,
+    maxSize: 6,
+    color: "#FFFFFF",
+    opacity: 0.9,
+    spread: 1.5,
+  },
 };
 
 export const newspaperOffset: TextEffectDefinition = {
@@ -225,8 +244,8 @@ export const neonYellowOutline: TextEffectDefinition = {
   neonYellowOutline: {
     enabled: true,
     glowColor: "#FFFF00",
-    glowTightBlur: 4,
-    glowWideBlur: 10,
+    glowTightBlur: 8,
+    glowWideBlur: 22,
     strokeColor: "#000000",
     strokeWidth: 5.5,
     fillColor: "#FFFFFF",
@@ -322,4 +341,4 @@ export const classicNeonSign: TextEffectDefinition = {
 };
 
 // export const allEffects: TextEffectDefinition[] = [glowYellow, newspaperOffset, frostedGlassEtch, burnedWoodPyrography, victorianOrnate, calligraphyInk, goldFoilStamp, classicInk, neonYellowOutline, classicEngraved, classicSerifGold, classicStamp, classicNeonSign];
-export const allEffects: TextEffectDefinition[] = [neonYellowOutline];
+export const allEffects: TextEffectDefinition[] = [neonYellowOutline, glowYellowSparkles];
