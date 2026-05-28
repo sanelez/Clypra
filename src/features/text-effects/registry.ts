@@ -299,3 +299,8 @@ register(CrimsonNeueSolidShadowDefinition, CrimsonNeueSolidShadowEngine);
 import { StarkContourEmptyStrokeEngine, StarkContourEmptyStrokeDefinition } from "./effects/StarkContourEmptyStroke";
 register(StarkContourEmptyStrokeDefinition, StarkContourEmptyStrokeEngine);
 
+import { InfraContourAestheticEngine, InfraContourAestheticDefinition } from "./effects/InfraContourAesthetic";
+register(InfraContourAestheticDefinition, InfraContourAestheticEngine);
+
+import { LumenBrimVividGradientEngine, LumenBrimVividGradientDefinition } from "./effects/LumenBrimVividGradient";
+register(LumenBrimVividGradientDefinition, LumenBrimVividGradientEngine);
