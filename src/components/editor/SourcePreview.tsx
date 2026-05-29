@@ -366,22 +366,29 @@ export const SourcePreview: React.FC = () => {
         {sourceAsset.type === "audio" && <audio ref={audioRef} src={sourcePath} preload="auto" style={{ display: "none" }} />}
       </div>
 
-      <PreviewTransport
-        currentTime={currentTime}
-        duration={duration}
-        isPlaying={isPlaying}
-        onPlayPause={handlePlayPause}
-        onSeek={handleSeek}
-        formatTime={formatTC}
-        inPoint={sourceInPoint}
-        outPoint={sourceOutPoint}
-        rightActions={
-          sourceAsset.type === "text" ? (
-            <button onClick={handleAddToTimeline} className="flex items-center gap-1 px-2.5 h-6 rounded text-[10px] font-semibold bg-green-600/90 hover:bg-green-600 text-white cursor-pointer transition-colors" title="Add text to timeline">
-              <Plus className="w-3 h-3" />
-              Add
-            </button>
-          ) : (
+      {sourceAsset.type === "text" ? (
+        <div className="flex items-center justify-between h-10 px-4 shrink-0 border-t border-border/30 bg-surface/30">
+          <span className="text-[11px] text-text-muted font-medium select-none">Procedural Style Preview</span>
+          <button
+            onClick={handleAddToTimeline}
+            className="flex items-center gap-1.5 px-3 h-7 rounded text-[11px] font-semibold bg-accent hover:bg-accent-soft active:scale-95 text-white cursor-pointer transition-all duration-150 shadow-sm"
+            title="Add text to timeline"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add to Timeline
+          </button>
+        </div>
+      ) : (
+        <PreviewTransport
+          currentTime={currentTime}
+          duration={duration}
+          isPlaying={isPlaying}
+          onPlayPause={handlePlayPause}
+          onSeek={handleSeek}
+          formatTime={formatTC}
+          inPoint={sourceInPoint}
+          outPoint={sourceOutPoint}
+          rightActions={
             <>
               <button onClick={handleMarkIn} className={`px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer ${sourceInPoint !== null && Math.abs(currentTime - sourceInPoint) < 0.1 ? "bg-accent text-white" : "text-text-muted hover:text-text-primary hover:bg-white/6"}`} title="Mark In (I)">
                 IN
@@ -396,14 +403,14 @@ export const SourcePreview: React.FC = () => {
                 </button>
               )}
               <div className="w-px h-4 bg-white/10 mx-1" />
-              <button onClick={handleAddToTimeline} disabled={!hasCompleteMarks} className={`flex items-center gap-1 px-2.5 h-6 rounded text-[10px] font-semibold transition-colors ${hasCompleteMarks ? "bg-green-600/90 hover:bg-green-600 text-white cursor-pointer" : "bg-text-muted/70 hover:bg-text-muted/90 text-white cursor-not-allowed"}`} title={hasCompleteMarks ? `Add ${markedDuration?.toFixed(2)}s to Timeline` : "Add to Track"}>
+              <button onClick={handleAddToTimeline} disabled={!hasCompleteMarks} className={`flex items-center gap-1 px-2.5 h-6 rounded text-[10px] font-semibold transition-all ${hasCompleteMarks ? "bg-accent hover:bg-accent-soft text-white cursor-pointer" : "bg-text-muted/70 hover:bg-text-muted/90 text-white cursor-not-allowed"}`} title={hasCompleteMarks ? `Add ${markedDuration?.toFixed(2)}s to Timeline` : "Add to Track"}>
                 <Plus className="w-3 h-3" />
                 Add
               </button>
             </>
-          )
-        }
-      />
+          }
+        />
+      )}
     </div>
   );
 };

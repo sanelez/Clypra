@@ -346,7 +346,11 @@ export const Timeline: React.FC = () => {
     }
 
     const targetTrack = liveTracks.find((t) => t.id === targetTrackId);
-    const isInvalidPosition = targetTrack?.locked || false;
+    const isTextClip = "text" in clip;
+    const isTrackTypeMismatch = targetTrack
+      ? (isTextClip ? targetTrack.type !== "text" : targetTrack.type === "text")
+      : false;
+    const isInvalidPosition = targetTrack?.locked || isTrackTypeMismatch || false;
     if (isInvalidPosition) {
       const next = {
         ...ds,
@@ -515,6 +519,15 @@ export const Timeline: React.FC = () => {
         });
       };
 
+      if (dragSnapshot.isInvalidPosition) {
+        restoreDraggedToOriginal();
+        dragStateRef.current = null;
+        setDragState(null);
+        clearQueuedDragMove();
+        resumeAutoSave();
+        return;
+      }
+
       const clip = useTimelineStore.getState().clips.find((c) => c.id === clipId);
       if (!clip) {
         dragStateRef.current = null;
@@ -529,8 +542,9 @@ export const Timeline: React.FC = () => {
 
       // Handle new track creation (ordered: video at top, audio after first video track)
       if (dragSnapshot.willCreateNewTrack && dragSnapshot.newTrackPosition) {
+        const isTextClip = "text" in clip;
         const mediaAsset = useProjectStore.getState().mediaAssets.find((a) => a.id === clip.mediaId);
-        const trackType = mediaAsset?.type === "audio" ? "audio" : "video";
+        const trackType = isTextClip ? "text" : (mediaAsset?.type === "audio" ? "audio" : "video");
 
         const store = useTimelineStore.getState();
         const insertIndex = getInsertIndexForNewTrack(store.tracks, trackType);

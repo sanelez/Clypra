@@ -35,17 +35,17 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
     () => ({
       accept: ["MEDIA_ASSET"],
       drop: (item: DragItem, monitor: any) => {
-        if (!track.locked) {
+        if (!track.locked && track.type !== "text") {
           handleDropOnTrack(item, monitor, track.id);
         }
       },
-      canDrop: () => !track.locked,
+      canDrop: () => !track.locked && track.type !== "text",
       collect: (monitor: any) => ({
         isOver: monitor.isOver(),
         canDrop: monitor.canDrop(),
       }),
     }),
-    [track.id, track.locked],
+    [track.id, track.locked, track.type],
   );
 
   // Get all clips for this track (stable array ref when clips + track.id unchanged — helps memoized children)
@@ -80,7 +80,7 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
         drop(node);
       }}
       data-track-id={track.id}
-      className={`relative border-b border-border transition-colors ${selectedTrackId === track.id ? "bg-timeline-track-active" : ""} ${isOver && canDrop ? "bg-accent/10" : ""} ${track.locked ? "bg-slate-900/45" : ""}`}
+      className={`relative transition-colors mb-1 bg-surface-raised/40 ${selectedTrackId === track.id ? "bg-timeline-track-active" : ""} ${isOver && canDrop ? "bg-accent/10" : ""} ${track.locked ? "bg-slate-900/45" : ""}`}
       style={{ height: `${track.height}px` }}
     >
       {/* Clips layer */}

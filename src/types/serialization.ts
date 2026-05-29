@@ -168,7 +168,8 @@ export function fromRustTrack(rust: RustTrack): Track {
  * @returns Frontend Clip (camelCase)
  */
 export function fromRustClip(rust: RustClip): Clip {
-  return {
+  // Base clip properties
+  const baseClip: Clip = {
     id: rust.id,
     trackId: rust.trackId,
     mediaId: rust.mediaId,
@@ -185,6 +186,10 @@ export function fromRustClip(rust: RustClip): Clip {
     aspectRatioLocked: rust.aspectRatioLocked,
     sourceAspectRatio: rust.sourceAspectRatio,
   };
+
+  // Preserve all additional properties (e.g., TextClip properties)
+  // This ensures text, fontFamily, fontSize, color, etc. are restored
+  return { ...baseClip, ...rust } as Clip;
 }
 
 // ============================================================================
@@ -268,7 +273,8 @@ export function toRustTrack(frontend: Track): RustTrack {
  * @returns Rust Clip (snake_case)
  */
 export function toRustClip(frontend: Clip): RustClip {
-  return {
+  // Base clip properties
+  const baseClip: RustClip = {
     id: frontend.id,
     trackId: frontend.trackId,
     mediaId: frontend.mediaId,
@@ -285,4 +291,8 @@ export function toRustClip(frontend: Clip): RustClip {
     aspectRatioLocked: frontend.aspectRatioLocked,
     sourceAspectRatio: frontend.sourceAspectRatio,
   };
+
+  // Preserve all additional properties (e.g., TextClip properties)
+  // Rust stores clips as Vec<serde_json::Value>, so it can handle any extra fields
+  return { ...baseClip, ...frontend } as RustClip;
 }

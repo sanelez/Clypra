@@ -92,7 +92,7 @@ interface TimelineStore {
 const trackHeights: Record<string, number> = {
   video: 68,
   audio: 52,
-  text: 56,
+  text: 30,
 };
 const MIN_TRIM_DURATION_SEC = 1;
 

@@ -398,15 +398,21 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
     };
   }, [isResizing, resizeStart, clip.id, pixelsPerSecond, updateClip, rippleTrimClip, mediaAsset]);
 
-  const getClipColor = () => {
-    if (mediaAsset?.type === "audio") return "bg-timeline-clip-audio border-timeline-clip-audio-border";
-    return "bg-accent";
-  };
-
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `00:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}:00`;
+  };
+
+  const isClipText = "text" in clip;
+  const isClipAudio = mediaAsset?.type === "audio";
+  const isClipVideo = mediaAsset?.type === "video";
+  const isClipImage = mediaAsset?.type === "image";
+
+  const getClipStyle = () => {
+    if (isClipText) return "bg-(--color-timeline-text-clip-bg) text-(--color-timeline-text-clip-text)";
+    if (mediaAsset?.type === "audio") return "bg-timeline-clip-audio border-timeline-clip-audio-border";
+    return "h-full bg-accent";
   };
 
   return (
@@ -428,7 +434,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
       onPointerCancel={handlePointerCancel}
       onPointerEnter={() => setIsHovered(true)}
       onPointerLeave={() => setIsHovered(false)}
-      className={`absolute h-full rounded-sm overflow-hidden border-2 ${selected ? "border-white" : ""} ${isResizing ? (resizeStart?.isRipple ? "ring-2 ring-yellow-500" : "ring-2 ring-cyan-500") : ""} ${locked ? "cursor-not-allowed" : isDragging ? (isInvalidPosition ? "cursor-not-allowed" : "cursor-grabbing") : "cursor-default"} ${getClipColor()} transition-none`}
+      className={`absolute rounded-sm h-full overflow-hidden border ${selected ? "border-white" : ""} ${isResizing ? (resizeStart?.isRipple ? "ring-2 ring-yellow-500" : "ring-2 ring-cyan-500") : ""} ${locked ? "cursor-not-allowed" : isDragging ? (isInvalidPosition ? "cursor-not-allowed" : "cursor-grabbing") : "cursor-default"} ${getClipStyle()} transition-none`}
       style={{
         left: `${displayLeft}px`,
         width: `${width}px`,
@@ -446,7 +452,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
       <div
         data-testid={`clip-${clip.id}-resize-left`}
         data-clip-resize-handle="true"
-        className={`absolute left-0 top-0 w-4 h-full z-30 ${showResizeHandles ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"} ${isResizing === "left" ? (resizeStart?.isRipple ? "bg-yellow-300/60" : "bg-cyan-300/60") : "bg-white/25 hover:bg-white/35"} transition-colors`}
+        className={`absolute left-0 top-0 w-3 h-full z-30 ${showResizeHandles ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"} ${isResizing === "left" ? (resizeStart?.isRipple ? "bg-yellow-300/60" : "bg-cyan-300/60") : "bg-white/25 hover:bg-white/35"} transition-colors`}
         style={{ touchAction: "none", cursor: "col-resize" }}
         onPointerDownCapture={(e) => {
           traceResize("left-handle pointerdown-capture", {
@@ -479,35 +485,41 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
         }}
         title={rippleEditEnabled ? "Ripple trim (ripple mode ON)" : "Hold Shift for ripple trim"}
       >
-        <div className="absolute left-[5px] top-1/2 h-5 w-[2px] -translate-y-1/2 rounded bg-white/90" />
+        <div className="absolute left-[5px] top-1/2 h-[70%] w-[2px] -translate-y-1/2 rounded bg-white/90" />
       </div>
 
       {/* Clip content */}
-      <div className="flex h-full min-h-0 w-full flex-col gap-1 overflow-hidden px-1 py-1">
-        <div className="flex shrink-0 items-center gap-3">
-          <div className="text-[9px] font-semibold tracking-[0.01em] text-timeline-clip-text truncate">{mediaAsset?.name || "Clip"}</div>
-          <div className="text-[9px] font-medium text-timeline-clip-duration shrink-0">{formatDuration(clip.duration)}</div>
+      {"text" in clip ? (
+        <div className="flex h-full w-full items-center px-3">
+          <div className="text-[12px] text-white/95 font-medium tracking-[0.01em] truncate max-w-full select-none pointer-events-none">{(clip as any).text || "Default text"}</div>
         </div>
-        {mediaAsset && (mediaAsset.type === "video" || mediaAsset.type === "image") ? (
-          <div className="flex min-h-0 w-full flex-1 items-center">
-            <ClipFilmstrip className="w-full shrink-0" clip={clip} mediaAsset={mediaAsset} clipWidthPx={width} pixelsPerSecond={pixelsPerSecond} stripHeightPx={40} viewportScrollLeft={0} viewportWidth={1920} />
+      ) : (
+        <div className="flex h-full min-h-0 w-full flex-col gap-1 overflow-hidden px-1 py-1">
+          <div className="flex shrink-0 items-center gap-3">
+            <div className="text-[9px] font-semibold tracking-[0.01em] text-timeline-clip-text truncate">{mediaAsset?.name || "Clip"}</div>
+            <div className="text-[9px] font-medium text-timeline-clip-duration shrink-0">{formatDuration(clip.duration)}</div>
           </div>
-        ) : mediaAsset?.type === "audio" ? (
-          <div className="flex min-h-0 w-full flex-1 items-center">
-            <TimelineWaveform audioPath={mediaAsset.path} clipWidthPx={width} duration={clip.duration} className="rounded-[2px]" />
-          </div>
-        ) : mediaAsset?.posterFrame ? (
-          <img src={mediaAsset.posterFrame} alt="" className="h-8 w-full rounded-[2px] border border-black/20 object-cover" draggable={false} />
-        ) : (
-          <div className="h-8 w-full rounded-[2px] bg-timeline-filmstrip-empty" />
-        )}
-      </div>
+          {mediaAsset && (mediaAsset.type === "video" || mediaAsset.type === "image") ? (
+            <div className="flex min-h-0 w-full flex-1 items-center">
+              <ClipFilmstrip className="w-full shrink-0" clip={clip} mediaAsset={mediaAsset} clipWidthPx={width} pixelsPerSecond={pixelsPerSecond} stripHeightPx={40} viewportScrollLeft={0} viewportWidth={1920} />
+            </div>
+          ) : mediaAsset?.type === "audio" ? (
+            <div className="flex min-h-0 w-full flex-1 items-center">
+              <TimelineWaveform audioPath={mediaAsset.path} clipWidthPx={width} duration={clip.duration} className="rounded-[2px]" />
+            </div>
+          ) : mediaAsset?.posterFrame ? (
+            <img src={mediaAsset.posterFrame} alt="" className="h-8 w-full rounded-[2px] border border-black/20 object-cover" draggable={false} />
+          ) : (
+            <div className="h-8 w-full rounded-[2px] bg-timeline-filmstrip-empty" />
+          )}
+        </div>
+      )}
 
       {/* Right trim handle */}
       <div
         data-testid={`clip-${clip.id}-resize-right`}
         data-clip-resize-handle="true"
-        className={`absolute right-0 top-0 w-4 h-full z-30 ${showResizeHandles ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"} ${isResizing === "right" ? (resizeStart?.isRipple ? "bg-yellow-300/60" : "bg-cyan-300/60") : "bg-white/25 hover:bg-white/35"} transition-colors`}
+        className={`absolute right-0 top-0 w-3 h-full z-30 ${showResizeHandles ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"} ${isResizing === "right" ? (resizeStart?.isRipple ? "bg-yellow-300/60" : "bg-cyan-300/60") : "bg-white/25 hover:bg-white/35"} transition-colors`}
         style={{ touchAction: "none", cursor: "col-resize" }}
         onPointerDownCapture={(e) => {
           traceResize("right-handle pointerdown-capture", {
@@ -540,7 +552,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
         }}
         title={rippleEditEnabled ? "Ripple trim (ripple mode ON)" : "Hold Shift for ripple trim"}
       >
-        <div className="absolute right-[5px] top-1/2 h-5 w-[2px] -translate-y-1/2 rounded bg-white/90" />
+        <div className="absolute right-[5px] top-1/2 h-[70%] w-[2px] -translate-y-1/2 rounded bg-white/90" />
       </div>
     </div>
   );

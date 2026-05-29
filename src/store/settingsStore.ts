@@ -123,6 +123,9 @@ const themes: Record<Exclude<Theme, "custom">, Record<string, string>> = {
     "--color-timeline-drop-indicator": "#3b82f6",
     "--color-timeline-drop-zone-text": "#6b7280",
     "--color-timeline-clip-invalid": "#ef4444",
+    "--color-timeline-text-clip-bg": "#9c4937",
+    "--color-timeline-text-clip-text": "#9C4A3723",
+
     // shadcn compat
     "--background": "#0f0f0f",
     "--foreground": "#f0f0f0",
@@ -189,6 +192,9 @@ const themes: Record<Exclude<Theme, "custom">, Record<string, string>> = {
     "--color-timeline-drop-indicator": "#5b8fff",
     "--color-timeline-drop-zone-text": "#5a6b8c",
     "--color-timeline-clip-invalid": "#ef4444",
+    "--color-timeline-text-clip-bg": "#9c4937",
+    "--color-timeline-text-clip-text": "#9C4A3723",
+
     "--background": "#0a0e1a",
     "--foreground": "#e8eef7",
     "--card": "#131829",
@@ -254,6 +260,9 @@ const themes: Record<Exclude<Theme, "custom">, Record<string, string>> = {
     "--color-timeline-drop-indicator": "#00d4ff",
     "--color-timeline-drop-zone-text": "#5a7a94",
     "--color-timeline-clip-invalid": "#ef4444",
+    "--color-timeline-text-clip-bg": "#9c4937",
+    "--color-timeline-text-clip-text": "#9C4A3723",
+
     "--background": "#0a1520",
     "--foreground": "#e0f2ff",
     "--card": "#0f1f2e",
@@ -319,6 +328,9 @@ const themes: Record<Exclude<Theme, "custom">, Record<string, string>> = {
     "--color-timeline-drop-indicator": "#4ade80",
     "--color-timeline-drop-zone-text": "#5a7a5f",
     "--color-timeline-clip-invalid": "#ef4444",
+    "--color-timeline-text-clip-bg": "#9c4937",
+    "--color-timeline-text-clip-text": "#9C4A3723",
+
     "--background": "#0d1410",
     "--foreground": "#e8f5e9",
     "--card": "#141d18",
