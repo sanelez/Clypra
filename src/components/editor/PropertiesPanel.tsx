@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Settings, Type, Layout, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Sparkles } from "lucide-react";
+import { Settings, Type, Layout, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Sparkles, Bookmark, Save, Trash2 } from "lucide-react";
 import { EmptyState } from "../ui/EmptyState";
+import { Button } from "@/components/ui/Button";
 import { useUIStore } from "@/store/uiStore";
 import { useTimelineStore } from "@/store/timelineStore";
 import { useProjectStore } from "@/store/projectStore";
@@ -11,6 +12,7 @@ import { allTextEffects } from "@/features/text-effects/registry";
 import type { TextEffectDefinition } from "@/features/text-effects/types/types";
 import type { TextClip } from "@/types";
 import { normalizeFontFamily } from "@/core/evaluation/evaluator";
+import { usePresetStore } from "@/store/presetStore";
 
 import { _buildConfig } from "@/features/text-effects/registry";
 
@@ -21,6 +23,8 @@ export const PropertiesPanel: React.FC = () => {
   const { execute } = useHistoryStore();
 
   const [activePropertyTab, setActivePropertyTab] = useState<"text" | "transform">("text");
+  const [newPresetName, setNewPresetName] = useState("");
+  const { presets, savePreset, deletePreset } = usePresetStore();
 
   const selectedClipId = selectedClipIds[0] ?? null;
   const selectedClip = clips.find((c) => c.id === selectedClipId);
@@ -55,6 +59,24 @@ export const PropertiesPanel: React.FC = () => {
       oldFields[key] = (selectedClip as any)[key];
     }
     execute(new TransformClipCommand(selectedClipId, oldFields, fields));
+  };
+
+  const handleApplyPreset = (preset: any) => {
+    handleUpdateMultiple({
+      fontFamily: preset.fontFamily,
+      fontSize: preset.fontSize,
+      fontWeight: preset.fontWeight || "normal",
+      fontStyle: preset.fontStyle || "normal",
+      color: preset.color,
+      align: preset.align || "center",
+      valign: preset.valign || "middle",
+      lineHeight: preset.lineHeight || 1.2,
+      letterSpacing: preset.letterSpacing || 0,
+      stroke: preset.stroke,
+      shadow: preset.shadow,
+      background: preset.background,
+      keyframes: preset.keyframes,
+    });
   };
 
   const handleApplyFit = (fitMode: ClipFitModeExtended) => {
@@ -142,7 +164,81 @@ export const PropertiesPanel: React.FC = () => {
             {/* Text Editor Box */}
             <div>
               <label className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-1.5 select-none">Text Content</label>
-              <textarea value={textClip.text || ""} onChange={(e) => handleUpdate("text", e.target.value)} rows={3} placeholder="Enter text here..." className="w-full bg-surface-raised border border-border/80 rounded-lg p-2.5 text-xs text-text-primary outline-none focus:border-accent resize-none selectable" />
+              <textarea value={textClip.text || ""} onChange={(e) => handleUpdate("text", e.target.value)} rows={3} placeholder={effectDefinition?.text || "CLYPRA"} className="w-full bg-surface-raised border border-border/80 rounded-lg p-2.5 text-xs text-text-primary outline-none focus:border-accent resize-none selectable" />
+            </div>
+
+            {/* Style Presets Library */}
+            <div>
+              <label className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-2 select-none">Style Presets</label>
+              
+              <div className="space-y-3 p-3 bg-surface-raised/20 border border-border/40 rounded-xl">
+                {/* Horizontal preset selection carousel */}
+                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                  {presets.map((preset) => (
+                    <div key={preset.id} className="relative shrink-0 group/preset">
+                      <button
+                        onClick={() => {
+                          handleApplyPreset(preset);
+                        }}
+                        className="px-3 py-2 bg-surface-raised hover:bg-surface-raised/80 border border-border/60 hover:border-accent rounded-lg text-xs font-semibold text-text-primary transition-all cursor-pointer whitespace-nowrap"
+                        style={{ fontFamily: preset.fontFamily, color: preset.color }}
+                      >
+                        {preset.name}
+                      </button>
+
+                      {preset.isCustom && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deletePreset(preset.id);
+                          }}
+                          className="absolute -top-1.5 -right-1.5 p-0.5 bg-destructive text-white rounded-full opacity-0 group-hover/preset:opacity-100 transition-opacity hover:bg-destructive/80 cursor-pointer"
+                        >
+                          <Trash2 className="w-2.5 h-2.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Save Current Style as Preset */}
+                <div className="flex items-center gap-2 pt-2 border-t border-border/30">
+                  <input
+                    type="text"
+                    value={newPresetName}
+                    onChange={(e) => setNewPresetName(e.target.value)}
+                    placeholder="Custom style name..."
+                    className="flex-1 min-w-0 bg-surface-raised border border-border/80 rounded px-2 py-1 text-xs text-text-primary outline-none focus:border-accent"
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="flex items-center gap-1 shrink-0"
+                    onClick={() => {
+                      if (!newPresetName.trim()) return;
+                      savePreset(newPresetName.trim(), {
+                        fontFamily: textClip.fontFamily,
+                        fontSize: textClip.fontSize,
+                        fontWeight: textClip.fontWeight,
+                        fontStyle: textClip.fontStyle,
+                        color: textClip.color,
+                        align: textClip.align,
+                        valign: textClip.valign,
+                        lineHeight: textClip.lineHeight,
+                        letterSpacing: textClip.letterSpacing,
+                        stroke: textClip.stroke,
+                        shadow: textClip.shadow,
+                        background: textClip.background,
+                        keyframes: (textClip as any).keyframes,
+                      });
+                      setNewPresetName("");
+                    }}
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Save
+                  </Button>
+                </div>
+              </div>
             </div>
 
             {/* Typography Options */}

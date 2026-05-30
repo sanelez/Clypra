@@ -213,7 +213,7 @@ export function _buildConfig(
   }
 
   // 2. Auto-forward unrecognized Top-Level keys (e.g. isGlitchEffect, decaySpeed)
-  const standardKeys = new Set(["id", "name", "category", "description", "tags", "font", "fills", "strokes", "shadows", "glows", "bevel", "panel"]);
+  const standardKeys = new Set(["id", "name", "category", "description", "tags", "font", "fills", "strokes", "shadows", "glows", "bevel", "panel", "text"]);
   for (const key of Object.keys(effect)) {
     if (!standardKeys.has(key)) {
       config[key] = (effect as any)[key];

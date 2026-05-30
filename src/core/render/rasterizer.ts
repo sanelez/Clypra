@@ -603,6 +603,12 @@ function mapBlendMode(blendMode: string): GlobalCompositeOperation {
     darken: "darken",
     lighten: "lighten",
     add: "lighter",
+    mask: "source-in",
+    "mask-inverted": "source-out",
+    "source-in": "source-in",
+    "source-out": "source-out",
+    "destination-in": "destination-in",
+    "destination-out": "destination-out",
   };
 
   return map[blendMode] || "source-over";

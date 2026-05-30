@@ -210,3 +210,108 @@ pub async fn extract_audio_artwork(path: String) -> Result<Option<String>, Strin
     eprintln!("[extract_audio_artwork] Extracted artwork ({} bytes)", output.stdout.len());
     Ok(Some(format!("data:{};base64,{}", mime_type, encoded)))
 }
+
+#[tauri::command]
+pub async fn extract_audio_track(path: String) -> Result<String, String> {
+    use std::process::Command;
+    use std::path::Path;
+    use std::fs;
+
+    eprintln!("🦀 [extract_audio_track] Extracting audio from: {}", path);
+
+    // Create a temporary directory inside the workspace if it doesn't exist
+    let temp_dir = Path::new("temp");
+    if !temp_dir.exists() {
+        fs::create_dir_all(temp_dir).map_err(|e| format!("Failed to create temp directory: {}", e))?;
+    }
+
+    // Generate a unique filename using MD5 of path
+    let hash = format!("{:x}", md5::compute(path.as_bytes()));
+    let output_filename = format!("{}.mp3", hash);
+    let output_path = temp_dir.join(output_filename);
+    let output_path_str = output_path.to_str().ok_or("Failed to convert output path to string")?.to_string();
+
+    // Call ffmpeg command to extract audio: ffmpeg -i <path> -vn -acodec libmp3lame -ac 1 -ar 16000 -y <output_path>
+    let output = Command::new("ffmpeg")
+        .args([
+            "-i", &path,
+            "-vn",
+            "-acodec", "libmp3lame",
+            "-ac", "1",
+            "-ar", "16000",
+            "-y",
+            &output_path_str,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to execute ffmpeg for audio extraction: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("FFmpeg audio extraction failed: {}", stderr));
+    }
+
+    // Get the absolute path of the output file
+    let abs_path = fs::canonicalize(output_path)
+        .map_err(|e| format!("Failed to resolve absolute path of extracted audio: {}", e))?;
+    
+    let abs_path_str = abs_path.to_str().ok_or("Failed to convert absolute path to string")?.to_string();
+    eprintln!("🦀 [extract_audio_track] Extracted audio saved to: {}", abs_path_str);
+
+    Ok(abs_path_str)
+}
+
+#[tauri::command]
+pub async fn transcribe_audio_local(audio_path: String) -> Result<String, String> {
+    use std::process::Command;
+    use std::fs;
+    use std::path::PathBuf;
+
+    eprintln!("🦀 [transcribe_audio_local] Transcribing: {}", audio_path);
+
+    // Resolve script path robustly to handle different current working directories in Tauri
+    let mut script_path = PathBuf::from("src/features/text-effects/transcribe.py");
+    if !script_path.exists() {
+        script_path = PathBuf::from("../src/features/text-effects/transcribe.py");
+    }
+    if !script_path.exists() {
+        let mut dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        for _ in 0..4 {
+            let test_path = dir.join("src/features/text-effects/transcribe.py");
+            if test_path.exists() {
+                script_path = test_path;
+                break;
+            }
+            if let Some(parent) = dir.parent() {
+                dir = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+    }
+
+    let script_path_str = script_path.to_str().ok_or("Failed to convert script path to string")?.to_string();
+    eprintln!("🦀 [transcribe_audio_local] Resolved script path: {}", script_path_str);
+
+    // Call uv command to run our python script: uv run <resolved_script_path> <audio_path>
+    let output = Command::new("uv")
+        .args([
+            "run",
+            &script_path_str,
+            &audio_path,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to execute uv transcription: {}", e))?;
+
+    // Delete the temporary audio file since transcription is completed (to prevent disk bloat)
+    if let Err(e) = fs::remove_file(&audio_path) {
+        eprintln!("⚠️ [transcribe_audio_local] Failed to clean up temporary audio file: {}", e);
+    }
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Whisper transcription failed: {}", stderr));
+    }
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout_str.trim().to_string())
+}

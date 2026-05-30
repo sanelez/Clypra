@@ -17,6 +17,8 @@ import { toCompositorClips } from "../timeline/adapter";
 import { getClipEndTime } from "@/lib/timelineClip";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { getEvaluationCache, computeClipVersion } from "./cache";
+import { evaluateProperty } from "./animation";
+
 
 /**
  * Evaluate the timeline at a specific time.
@@ -80,6 +82,15 @@ export function evaluateScene(time: number, clips: Clip[], tracks: Track[], asse
 
   for (let i = 0; i < sortedClips.length; i++) {
     const clip = sortedClips[i];
+    const offset = time - clip.startTime;
+    const kf = (clip as any).keyframes || {};
+
+    const evalX = kf.x !== undefined ? evaluateProperty(kf.x, offset, clip.duration) : clip.x;
+    const evalY = kf.y !== undefined ? evaluateProperty(kf.y, offset, clip.duration) : clip.y;
+    const evalW = kf.width !== undefined ? evaluateProperty(kf.width, offset, clip.duration) : clip.width;
+    const evalH = kf.height !== undefined ? evaluateProperty(kf.height, offset, clip.duration) : clip.height;
+    const evalRot = kf.rotation !== undefined ? evaluateProperty(kf.rotation, offset, clip.duration) : clip.rotation;
+    const evalOpacity = kf.opacity !== undefined ? evaluateProperty(kf.opacity, offset, clip.duration) : clip.opacity;
 
     // Check if this is a text clip
     const isTextClip = "text" in clip;
@@ -90,6 +101,11 @@ export function evaluateScene(time: number, clips: Clip[], tracks: Track[], asse
 
       // Evaluate transition state
       const transitionState = evaluateTransitionState(clip, time, sortedClips);
+
+      const evalFontSize = kf.fontSize !== undefined ? evaluateProperty(kf.fontSize, offset, clip.duration) : (textClip.fontSize || 48);
+      const evalColor = kf.color !== undefined ? evaluateProperty(kf.color, offset, clip.duration) : (textClip.color || "#ffffff");
+      const evalLetterSpacing = kf.letterSpacing !== undefined ? evaluateProperty(kf.letterSpacing, offset, clip.duration) : (textClip.letterSpacing || 0);
+      const evalLineHeight = kf.lineHeight !== undefined ? evaluateProperty(kf.lineHeight, offset, clip.duration) : (textClip.lineHeight || 1.2);
 
       const textLayer: EvaluatedTextLayer = {
         layerId: `${clip.id}-${time}`,
@@ -102,31 +118,31 @@ export function evaluateScene(time: number, clips: Clip[], tracks: Track[], asse
         clipDuration: clip.duration,
 
         // Transform
-        x: clip.x,
-        y: clip.y,
-        width: clip.width,
-        height: clip.height,
-        rotation: clip.rotation,
+        x: evalX,
+        y: evalY,
+        width: evalW,
+        height: evalH,
+        rotation: evalRot,
 
-        opacity: clip.opacity * (transitionState.opacity ?? 1.0),
+        opacity: evalOpacity * (transitionState.opacity ?? 1.0),
 
         // Transition
         inTransition: transitionState.inTransition,
         transitionType: transitionState.type,
         transitionProgress: transitionState.progress,
-        blendMode: "normal",
+        blendMode: (clip as any).blendMode || "normal",
 
         // Text content
         text: textClip.text || "Text",
         fontFamily: normalizeFontFamily(textClip.fontFamily || "Inter Variable"),
-        fontSize: textClip.fontSize || 48,
-        color: textClip.color || "#ffffff",
+        fontSize: evalFontSize,
+        color: evalColor,
         fontWeight: (textClip.fontWeight || "normal") as "normal" | "bold" | number,
         fontStyle: textClip.fontStyle || "normal",
         textAlign: textClip.align || "center",
         verticalAlign: textClip.valign || "middle",
-        lineHeight: textClip.lineHeight || 1.2,
-        letterSpacing: textClip.letterSpacing || 0,
+        lineHeight: evalLineHeight,
+        letterSpacing: evalLetterSpacing,
         stroke: textClip.stroke,
         shadow: textClip.shadow,
         background: textClip.background,
@@ -171,18 +187,18 @@ export function evaluateScene(time: number, clips: Clip[], tracks: Track[], asse
       sourceTime,
 
       // Transform
-      x: clip.x,
-      y: clip.y,
-      width: clip.width,
-      height: clip.height,
-      rotation: clip.rotation,
-      opacity: clip.opacity * (transitionState.opacity ?? 1.0),
+      x: evalX,
+      y: evalY,
+      width: evalW,
+      height: evalH,
+      rotation: evalRot,
+      opacity: evalOpacity * (transitionState.opacity ?? 1.0),
 
       // Transition
       inTransition: transitionState.inTransition,
       transitionType: transitionState.type,
       transitionProgress: transitionState.progress,
-      blendMode: "normal",
+      blendMode: (clip as any).blendMode || "normal",
     };
 
     visualLayers.push(mediaLayer);

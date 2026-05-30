@@ -28,6 +28,7 @@ import { getActiveSessionOrNull, subscribeToSessionChanges } from "@/core/runtim
 import { SourcePreview } from "./SourcePreview";
 import { PreviewTransport } from "./PreviewTransport";
 import { TransformOverlayMemoized as TransformOverlay } from "./transform/TransformOverlay";
+import { SafeOverlay } from "./viewport/SafeOverlay";
 import { useViewportKeyboardShortcuts, useViewportWheelZoom, useViewportPan } from "./ViewportControls";
 import { calculateDisplayTransform } from "@/lib/coordinateSystem";
 import { GPUTextureCache } from "@/lib/gpuTextureCache";
@@ -118,6 +119,7 @@ const ProgramPreview: React.FC = () => {
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [useCanvasPreview] = useState(true);
+  const [showSafeOverlay, setShowSafeOverlay] = useState(false);
   const [telemetryStats, setTelemetryStats] = useState<{
     avgEvaluationTimeMs: number;
     avgRasterTimeMs: number;
@@ -541,7 +543,10 @@ const ProgramPreview: React.FC = () => {
       <div className="flex items-center px-4 h-10 shrink-0 gap-2">
         <span className="text-[13px] font-semibold text-text-primary tracking-tight">Program Preview</span>
         <span className="text-[13px] text-text-muted">— Timeline</span>
-        <button onClick={() => setShowTelemetry((s) => !s)} className={cn("ml-auto px-2 h-6 rounded text-[10px] font-medium transition-colors", showTelemetry ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6")} title="Toggle render telemetry" aria-label="Toggle render telemetry">
+        <button onClick={() => setShowSafeOverlay((s) => !s)} className={cn("ml-auto px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer", showSafeOverlay ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6")} title="Toggle Title/Action Safe Zones" aria-label="Toggle Title/Action Safe Zones">
+          Safe Zones
+        </button>
+        <button onClick={() => setShowTelemetry((s) => !s)} className={cn("px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer", showTelemetry ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6")} title="Toggle render telemetry" aria-label="Toggle render telemetry">
           Stats
         </button>
       </div>
@@ -568,6 +573,9 @@ const ProgramPreview: React.FC = () => {
 
               {/* Transform overlay for selected clips */}
               <TransformOverlay canvasWidth={canvasWidth} canvasHeight={canvasHeight} scale={scale} viewport={previewViewport} displayOffset={{ x: offsetX, y: offsetY }} displayWidth={displayWidth} displayHeight={displayHeight} currentTime={currentTime} />
+
+              {/* Title & Action Safe Areas Overlay */}
+              <SafeOverlay visible={showSafeOverlay} displayWidth={displayWidth} displayHeight={displayHeight} displayOffset={{ x: offsetX, y: offsetY }} />
             </>
           </div>
         </div>

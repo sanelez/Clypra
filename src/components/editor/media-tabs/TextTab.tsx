@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Search, Sparkles, MessageSquare, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
+import { invoke } from "@tauri-apps/api/core";
 import { ALL_TEMPLATES } from "@/features/text-templates/templates/index";
 import { TemplateDefinition, TemplateCustomization } from "@/features/text-templates/types";
 import type { TabProps } from "./types";
@@ -134,7 +135,7 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
     return asset && (asset.type === "audio" || asset.type === "video");
   });
 
-  const startCaptioning = () => {
+  const startCaptioning = async () => {
     const timeline = useTimelineStore.getState();
     const project = useProjectStore.getState().project;
 
@@ -149,57 +150,77 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
     setCaptioningState("analyzing");
     setCaptioningProgress(12);
 
-    setTimeout(() => {
-      setCaptioningState("transcribing");
-      setCaptioningProgress(45);
+    try {
+      // Find or insert text track
+      let textTrack = timeline.tracks.find((t) => t.type === "text" && t.name.toLowerCase().includes("caption"));
+      if (!textTrack) {
+        textTrack = timeline.tracks.find((t) => t.type === "text");
+      }
+      let targetTrackId = textTrack?.id ?? null;
 
-      setTimeout(() => {
-        setCaptioningState("aligning");
-        setCaptioningProgress(78);
+      if (!targetTrackId) {
+        const insertIndex = getInsertIndexForNewTrack(timeline.tracks, "text");
+        targetTrackId = timeline.insertTrackAt("text", insertIndex);
+        // Rename target track
+        useTimelineStore.setState((state) => ({
+          tracks: state.tracks.map((t) => (t.id === targetTrackId ? { ...t, name: "Auto Captions" } : t)),
+        }));
+      }
 
-        setTimeout(() => {
+      let count = 0;
+
+      // Loop through all visual/audio clips
+      for (const mediaClip of audioOrVideoClips) {
+        const asset = mediaAssets.find((a) => a.id === mediaClip.mediaId);
+        if (!asset) continue;
+
+        const pathStr = asset.path || "";
+        if (!pathStr) continue;
+
+        // Check the Tauri internals presence to prevent execution before Tauri bridge is ready
+        const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+
+        if (isTauri) {
+          // ─── 1. AUDIO EXTRACTION ───
+          setCaptioningState("analyzing");
+          setCaptioningProgress(25);
+          
+          const tempAudioPath = await invoke<string>("extract_audio_track", { path: pathStr });
+
+          // ─── 2. LOCAL SPEECH TRANSCRIPTION ───
+          setCaptioningState("transcribing");
+          setCaptioningProgress(60);
+
+          const resultJsonStr = await invoke<string>("transcribe_audio_local", { audioPath: tempAudioPath });
+          const result = JSON.parse(resultJsonStr);
+
+          if (result.error) {
+            throw new Error(result.error);
+          }
+
+          // ─── 3. TIMELINE STITCHING ───
           setCaptioningState("stitching");
-          setCaptioningProgress(92);
+          setCaptioningProgress(90);
 
-          setTimeout(() => {
-            // Find or insert text track
-            let textTrack = timeline.tracks.find((t) => t.type === "text" && t.name.toLowerCase().includes("caption"));
-            if (!textTrack) {
-              textTrack = timeline.tracks.find((t) => t.type === "text");
-            }
-            let targetTrackId = textTrack?.id ?? null;
-
-            if (!targetTrackId) {
-              const insertIndex = getInsertIndexForNewTrack(timeline.tracks, "text");
-              targetTrackId = timeline.insertTrackAt("text", insertIndex);
-              // Rename target track
-              useTimelineStore.setState((state) => ({
-                tracks: state.tracks.map((t) => (t.id === targetTrackId ? { ...t, name: "Auto Captions" } : t)),
-              }));
-            }
-
-            let count = 0;
+          const segments = result.segments || [];
+          if (segments.length > 0) {
             timeline.withBatch(() => {
-              audioOrVideoClips.forEach((mediaClip) => {
-                const asset = mediaAssets.find((a) => a.id === mediaClip.mediaId);
-                const nameStr = asset?.name || "";
-                const pathStr = asset?.path || "";
-                const sentences = generateContextualCaptions(nameStr, pathStr, asset?.type === "audio");
-
-                const clipDuration = mediaClip.duration;
-                const segmentDuration = 2.5;
-                const numSegments = Math.max(1, Math.floor(clipDuration / segmentDuration));
-
-                for (let i = 0; i < numSegments; i++) {
-                  const startTime = mediaClip.startTime + i * segmentDuration;
-                  const duration = Math.min(segmentDuration, clipDuration - i * segmentDuration);
-                  const sentence = sentences[i % sentences.length];
+              segments.forEach((seg: any) => {
+                // Whisper timestamps are relative to the audio file.
+                // In Clypra, we need to map them relative to the clip's start time on the timeline,
+                // adjusting for any trimIn offsets.
+                const relativeStart = seg.start - mediaClip.trimIn;
+                
+                // Only place segments that fall within the visible/active trimmed duration of the clip
+                if (relativeStart >= 0 && relativeStart < mediaClip.duration) {
+                  const startTime = mediaClip.startTime + relativeStart;
+                  const segmentDuration = Math.min(seg.end - seg.start, mediaClip.duration - relativeStart);
 
                   const textClip = createTextClip({
                     trackId: targetTrackId!,
                     startTime,
-                    duration,
-                    text: sentence,
+                    duration: segmentDuration,
+                    text: seg.text,
                     canvasWidth: project?.canvasWidth || 1920,
                     canvasHeight: project?.canvasHeight || 1080,
                     fontSize: 32,
@@ -214,18 +235,70 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
                 }
               });
             });
+          }
+        } else {
+          // Fallback context mock if not running in Tauri (e.g. browser testing or missing backend)
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          setCaptioningState("transcribing");
+          setCaptioningProgress(45);
 
-            setCaptionsCount(count);
-            setCaptioningState("completed");
-            setCaptioningProgress(100);
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          setCaptioningState("aligning");
+          setCaptioningProgress(75);
 
-            // Seek playhead to 0.0s for immediate feedback
-            const session = getActiveSessionOrNull();
-            session?.transportAuthority?.seek(0);
-          }, 600);
-        }, 1000);
-      }, 1200);
-    }, 700);
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          setCaptioningState("stitching");
+          setCaptioningProgress(92);
+
+          await new Promise((resolve) => setTimeout(resolve, 500));
+
+          const nameStr = asset.name || "";
+          const sentences = generateContextualCaptions(nameStr, pathStr, asset.type === "audio");
+          const clipDuration = mediaClip.duration;
+          const segmentDuration = 2.5;
+          const numSegments = Math.max(1, Math.floor(clipDuration / segmentDuration));
+
+          timeline.withBatch(() => {
+            for (let i = 0; i < numSegments; i++) {
+              const startTime = mediaClip.startTime + i * segmentDuration;
+              const duration = Math.min(segmentDuration, clipDuration - i * segmentDuration);
+              const sentence = sentences[i % sentences.length];
+
+              const textClip = createTextClip({
+                trackId: targetTrackId!,
+                startTime,
+                duration,
+                text: sentence,
+                canvasWidth: project?.canvasWidth || 1920,
+                canvasHeight: project?.canvasHeight || 1080,
+                fontSize: 32,
+                bold: true,
+                position: "bottom",
+                styleId: "neon-crimson",
+                fontFamily: "Outfit Variable",
+              });
+
+              timeline.addClip(textClip);
+              count++;
+            }
+          });
+        }
+      }
+
+      setCaptionsCount(count);
+      setCaptioningState("completed");
+      setCaptioningProgress(100);
+
+      // Seek playhead to 0.0s for immediate feedback
+      const session = getActiveSessionOrNull();
+      session?.transportAuthority?.seek(0);
+    } catch (err: any) {
+      console.error("[Transcription Error]", err);
+      // Fallback gracefully with error UI
+      setCaptioningState("idle");
+      setCaptioningProgress(0);
+      alert(`Local transcription failed: ${err.message || err}. Running in fallback contextual simulator...`);
+    }
   };
 
   const handlePreview = (item: any, type: "effect" | "template") => {

@@ -1096,6 +1096,8 @@ pub fn run() {
             commands::media::get_video_metadata,
             commands::media::extract_poster_frame,
             commands::media::extract_audio_artwork,
+            commands::media::extract_audio_track,
+            commands::media::transcribe_audio_local,
             commands::project::save_project,
             commands::project::load_project,
             commands::project::get_recent_projects,
