@@ -19,27 +19,17 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import {
-  AlertCircle,
-  CheckCircle2,
-  Zap,
-  Sparkles,
-  Gem,
-  Film,
-  Clock,
-  Monitor,
-  HardDrive,
-  FolderOpen,
-  RotateCcw,
-  X,
-  Pencil,
-  Check,
-} from "lucide-react";
+import { AlertCircle, Film, Clock, Monitor, HardDrive, FolderOpen, RotateCcw, X, Pencil, Check } from "lucide-react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { useProjectStore } from "@/store/projectStore";
 import { useTimelineStore } from "@/store/timelineStore";
 import { MAX_PROJECT_NAME_LENGTH } from "@/types";
+
+// Import extracted components
+import { ProgressRing } from "./ProgressRing";
+import { SuccessCheck } from "./SuccessCheck";
+import { ExportPresetCard, ExportPreset, PresetConfig } from "./ExportPresetCard";
 
 // Lazy load video export functionality (code splitting)
 const exportVideoModule = () => import("@/lib/videoExport");
@@ -48,8 +38,6 @@ interface ExportDialogProps {
   isOpen: boolean;
   onClose: () => void;
 }
-
-type ExportPreset = "1080p-fast" | "1080p-quality" | "720p-fast" | "4k-quality" | "prores-422hq";
 
 type ExportPhase = "configure" | "exporting" | "complete" | "error";
 
@@ -68,24 +56,6 @@ interface ExportResult {
 }
 
 // ─── Preset Configuration ────────────────────────────────────────────────
-
-interface PresetConfig {
-  label: string;
-  shortLabel: string;
-  resolution: string;
-  codec: string;
-  codecLabel: string;
-  tier: "fast" | "quality" | "pro";
-  tierLabel: string;
-  width: number;
-  height: number;
-  codecValue: "h264" | "h265" | "prores";
-  preset: "ultrafast" | "fast" | "medium" | "slow" | "veryslow";
-  crf: number;
-  pixelFormat: "yuv420p" | "yuv444p" | "yuv422p10le";
-  /** Rough average bitrate in Mbps for file size estimation */
-  estimatedBitrateMbps: number;
-}
 
 const PRESET_CONFIGS: Record<ExportPreset, PresetConfig> = {
   "720p-fast": {
@@ -170,174 +140,7 @@ const PRESET_CONFIGS: Record<ExportPreset, PresetConfig> = {
   },
 };
 
-const PRESET_ORDER: ExportPreset[] = [
-  "720p-fast",
-  "1080p-fast",
-  "1080p-quality",
-  "4k-quality",
-  "prores-422hq",
-];
-
-// ─── Tier Icon Component ─────────────────────────────────────────────────
-
-function TierIcon({ tier, className }: { tier: "fast" | "quality" | "pro"; className?: string }) {
-  switch (tier) {
-    case "fast":
-      return <Zap className={className} />;
-    case "quality":
-      return <Sparkles className={className} />;
-    case "pro":
-      return <Gem className={className} />;
-  }
-}
-
-// ─── Circular Progress Ring ──────────────────────────────────────────────
-
-function ProgressRing({ progress, size = 160, strokeWidth = 6 }: { progress: number; size?: number; strokeWidth?: number }) {
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - progress * circumference;
-  const percentage = Math.round(progress * 100);
-
-  return (
-    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
-      {/* Background glow */}
-      <div
-        className="absolute inset-0 rounded-full opacity-20 blur-xl"
-        style={{ background: `conic-gradient(from 0deg, var(--color-accent) ${percentage}%, transparent ${percentage}%)` }}
-      />
-
-      <svg width={size} height={size} className="transform -rotate-90">
-        {/* Track */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={strokeWidth}
-          className="text-white/6"
-        />
-        {/* Progress arc */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="url(#progressGradient)"
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          className="transition-[stroke-dashoffset] duration-300 ease-out"
-        />
-        <defs>
-          <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="var(--color-accent)" />
-            <stop offset="100%" stopColor="var(--color-accent-soft)" />
-          </linearGradient>
-        </defs>
-      </svg>
-
-      {/* Center content */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-bold text-text-primary tabular-nums tracking-tight">
-          {percentage}
-        </span>
-        <span className="text-[11px] text-text-muted font-medium -mt-0.5">percent</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── Success Check Animation ─────────────────────────────────────────────
-
-function SuccessCheck({ size = 160 }: { size?: number }) {
-  return (
-    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
-      {/* Pulse ring */}
-      <div
-        className="absolute inset-0 rounded-full animate-ping opacity-10"
-        style={{ background: "var(--color-accent)" }}
-      />
-      <div
-        className="absolute inset-2 rounded-full opacity-8"
-        style={{ background: `radial-gradient(circle, color-mix(in srgb, var(--color-accent) 15%, transparent) 0%, transparent 70%)` }}
-      />
-
-      {/* Check circle */}
-      <div className="w-20 h-20 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, var(--color-accent), var(--color-accent-soft))" }}>
-        <CheckCircle2 className="w-10 h-10 text-white" />
-      </div>
-    </div>
-  );
-}
-
-// ─── Preset Card ─────────────────────────────────────────────────────────
-
-function PresetCard({
-  presetKey,
-  config,
-  selected,
-  disabled,
-  onSelect,
-}: {
-  presetKey: ExportPreset;
-  config: PresetConfig;
-  selected: boolean;
-  disabled: boolean;
-  onSelect: () => void;
-}) {
-  const tierColors = {
-    fast: "text-emerald-400",
-    quality: "text-amber-400",
-    pro: "text-violet-400",
-  };
-
-  return (
-    <button
-      onClick={onSelect}
-      disabled={disabled}
-      aria-pressed={selected}
-      className={`
-        group relative w-full text-left rounded-xl p-3 transition-all duration-200 outline-none
-        ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}
-        ${selected
-          ? "bg-accent/10 border border-accent/40 ring-1 ring-accent/20"
-          : "bg-white/[0.02] border border-white/6 hover:bg-white/[0.04] hover:border-white/10"
-        }
-      `}
-    >
-      {/* Selected indicator dot */}
-      {selected && (
-        <div className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-accent shadow-[0_0_6px_var(--color-accent)]" />
-      )}
-
-      {/* Resolution badge */}
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className={`text-[13px] font-bold tracking-tight ${selected ? "text-accent" : "text-text-primary"}`}>
-          {config.shortLabel}
-        </span>
-        <span className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md ${
-          selected ? "bg-accent/15 text-accent" : "bg-white/6 text-text-muted"
-        }`}>
-          {config.codecLabel}
-        </span>
-      </div>
-
-      {/* Tier label */}
-      <div className="flex items-center gap-1.5">
-        <TierIcon tier={config.tier} className={`w-3 h-3 ${tierColors[config.tier]}`} />
-        <span className={`text-[11px] font-medium ${tierColors[config.tier]}`}>
-          {config.tierLabel}
-        </span>
-        <span className="text-[10px] text-text-muted ml-auto">
-          {config.resolution}
-        </span>
-      </div>
-    </button>
-  );
-}
+const PRESET_ORDER: ExportPreset[] = ["720p-fast", "1080p-fast", "1080p-quality", "4k-quality", "prores-422hq"];
 
 // ─── Detail Row ──────────────────────────────────────────────────────────
 
@@ -425,8 +228,6 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
   }, [isOpen]);
 
   // ─── Sequence duration (actual authored content) ───────────────────
-  // project.duration is static metadata (often 0). The real duration
-  // is computed from timeline clips via getTimelineEndTime().
   const sequenceDuration = getTimelineEndTime();
 
   // ─── Estimated file size ───────────────────────────────────────────
@@ -570,42 +371,20 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
   }, []);
 
   // ─── Truncated path display ────────────────────────────────────────
-  const displayPath = outputPath
-    ? outputPath.length > 45
-      ? "…" + outputPath.slice(-42)
-      : outputPath
-    : "";
+  const displayPath = outputPath ? (outputPath.length > 45 ? "…" + outputPath.slice(-42) : outputPath) : "";
 
   // ─── Can export check ─────────────────────────────────────────────
   const canExport = ffmpegAvailable === true && outputPath.length > 0 && sequenceDuration > 0 && phase === "configure";
 
-  // ═══════════════════════════════════════════════════════════════════
-  // RENDER
-  // ═══════════════════════════════════════════════════════════════════
-
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={phase === "exporting" ? () => {} : onClose}
-      title="Export Video"
-      size="lg"
-    >
+    <Modal isOpen={isOpen} onClose={phase === "exporting" ? () => {} : onClose} title="Export Video" size="lg">
       <div className="flex min-h-[400px]">
         {/* ─── Left Sidebar: Preset Cards ─────────────────────────── */}
         <div className="w-[200px] shrink-0 border-r border-white/6 p-3 flex flex-col gap-2">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1 px-0.5">
-            Export Preset
-          </div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1 px-0.5">Export Preset</div>
 
           {PRESET_ORDER.map((key) => (
-            <PresetCard
-              key={key}
-              presetKey={key}
-              config={PRESET_CONFIGS[key]}
-              selected={preset === key}
-              disabled={phase === "exporting"}
-              onSelect={() => setPreset(key)}
-            />
+            <ExportPresetCard key={key} presetKey={key} config={PRESET_CONFIGS[key]} selected={preset === key} disabled={phase === "exporting"} onSelect={() => setPreset(key)} />
           ))}
 
           {/* FFmpeg status — bottom of sidebar */}
@@ -618,7 +397,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
             )}
             {ffmpegAvailable === true && (
               <div className="flex items-center gap-2 px-1">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_4px_theme(colors.emerald.500/50)]" />
+                <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_4px_--theme(--color-emerald-500/50)]" />
                 <span className="text-[10px] text-text-muted truncate" title={ffmpegVersion}>
                   {ffmpegVersion || "FFmpeg ready"}
                 </span>
@@ -629,9 +408,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
                 <div className="w-2 h-2 rounded-full bg-destructive mt-0.5 shrink-0" />
                 <div>
                   <span className="text-[10px] font-medium text-destructive block">FFmpeg missing</span>
-                  <span className="text-[9px] text-text-muted leading-tight block mt-0.5">
-                    Install FFmpeg and add to PATH
-                  </span>
+                  <span className="text-[9px] text-text-muted leading-tight block mt-0.5">Install FFmpeg and add to PATH</span>
                 </div>
               </div>
             )}
@@ -640,19 +417,15 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
 
         {/* ─── Right Panel ────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col min-w-0">
-
           {/* ═══ PHASE: Configure ═══ */}
           {phase === "configure" && (
             <>
               <div className="flex-1 p-5 space-y-5 overflow-y-auto">
-
                 {/* Project Summary */}
                 {project && (
                   <section>
-                    <h3 className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2.5">
-                      Project
-                    </h3>
-                    <div className="rounded-lg border border-white/6 bg-white/[0.02] p-3 space-y-0.5">
+                    <h3 className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2.5">Project</h3>
+                    <div className="rounded-lg border border-white/6 bg-white/2 p-3 space-y-0.5">
                       <div className="flex items-center justify-between py-1.5 min-h-[32px]">
                         <div className="flex items-center gap-2 text-text-muted">
                           <Film className="w-3.5 h-3.5" />
@@ -672,22 +445,12 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
                               autoFocus
                               disabled={isRenaming}
                               maxLength={MAX_PROJECT_NAME_LENGTH}
-                              className="w-full max-w-[180px] px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[12px] text-text-primary text-right focus:outline-none focus:border-accent focus:bg-white/[0.08] transition-all"
+                              className="w-full max-w-[180px] px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[12px] text-text-primary text-right focus:outline-none focus:border-accent focus:bg-white/8 transition-all"
                             />
-                            <button
-                              onClick={handleSaveName}
-                              disabled={isRenaming || !editNameValue.trim() || countGraphemes(editNameValue) > MAX_PROJECT_NAME_LENGTH}
-                              className="text-accent hover:text-accent-soft disabled:opacity-30 disabled:cursor-not-allowed p-1 rounded hover:bg-white/5 cursor-pointer flex items-center justify-center shrink-0"
-                              title="Save Name"
-                            >
+                            <button onClick={handleSaveName} disabled={isRenaming || !editNameValue.trim() || countGraphemes(editNameValue) > MAX_PROJECT_NAME_LENGTH} className="text-accent hover:text-accent-soft disabled:opacity-30 disabled:cursor-not-allowed p-1 rounded hover:bg-white/5 cursor-pointer flex items-center justify-center shrink-0" title="Save Name">
                               <Check className="w-3.5 h-3.5" />
                             </button>
-                            <button
-                              onClick={handleCancelRename}
-                              disabled={isRenaming}
-                              className="text-text-muted hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed p-1 rounded hover:bg-white/5 cursor-pointer flex items-center justify-center shrink-0"
-                              title="Cancel"
-                            >
+                            <button onClick={handleCancelRename} disabled={isRenaming} className="text-text-muted hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed p-1 rounded hover:bg-white/5 cursor-pointer flex items-center justify-center shrink-0" title="Cancel">
                               <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -714,10 +477,8 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
 
                 {/* Export Details */}
                 <section>
-                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2.5">
-                    Export Settings
-                  </h3>
-                  <div className="rounded-lg border border-white/6 bg-white/[0.02] p-3 space-y-0.5">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2.5">Export Settings</h3>
+                  <div className="rounded-lg border border-white/6 bg-white/2 p-3 space-y-0.5">
                     <DetailRow label="Resolution" value={selectedPreset.resolution} icon={Monitor} />
                     <DetailRow label="Codec" value={selectedPreset.codecLabel} />
                     <DetailRow label="Quality" value={`CRF ${selectedPreset.crf} / ${selectedPreset.preset}`} />
@@ -728,28 +489,13 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
 
                 {/* Output Path */}
                 <section>
-                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2.5">
-                    Output
-                  </h3>
+                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2.5">Output</h3>
                   <div className="flex items-center gap-2">
-                    <div
-                      className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border text-[12px] min-w-0 ${
-                        outputPath
-                          ? "border-white/8 bg-white/[0.02] text-text-primary"
-                          : "border-white/6 bg-white/[0.01] text-text-muted"
-                      }`}
-                    >
+                    <div className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border text-[12px] min-w-0 ${outputPath ? "border-white/8 bg-white/2 text-text-primary" : "border-white/6 bg-white/1 text-text-muted"}`}>
                       <FolderOpen className="w-3.5 h-3.5 shrink-0 text-text-muted" />
-                      <span className="truncate">
-                        {displayPath || "No output file selected…"}
-                      </span>
+                      <span className="truncate">{displayPath || "No output file selected…"}</span>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleSelectOutputPath}
-                      className="shrink-0 text-[12px]"
-                    >
+                    <Button variant="ghost" size="sm" onClick={handleSelectOutputPath} className="shrink-0 text-[12px]">
                       Browse
                     </Button>
                   </div>
@@ -761,9 +507,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
                     <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
                       <p className="text-[12px] font-medium text-amber-400">No content to export</p>
-                      <p className="text-[11px] text-text-muted mt-0.5 leading-relaxed">
-                        Add clips to the timeline before exporting.
-                      </p>
+                      <p className="text-[11px] text-text-muted mt-0.5 leading-relaxed">Add clips to the timeline before exporting.</p>
                     </div>
                   </div>
                 )}
@@ -774,9 +518,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
                     <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
                       <p className="text-[12px] font-medium text-destructive">FFmpeg is required</p>
-                      <p className="text-[11px] text-text-muted mt-0.5 leading-relaxed">
-                        Video export requires FFmpeg to be installed and available in your system PATH.
-                      </p>
+                      <p className="text-[11px] text-text-muted mt-0.5 leading-relaxed">Video export requires FFmpeg to be installed and available in your system PATH.</p>
                     </div>
                   </div>
                 )}
@@ -793,9 +535,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
                   disabled={!canExport}
                   className="min-w-[100px]"
                   style={{
-                    background: canExport
-                      ? "linear-gradient(135deg, var(--color-accent), var(--color-accent-soft))"
-                      : undefined,
+                    background: canExport ? "linear-gradient(135deg, var(--color-accent), var(--color-accent-soft))" : undefined,
                   }}
                 >
                   Export
@@ -806,130 +546,107 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
 
           {/* ═══ PHASE: Exporting ═══ */}
           {phase === "exporting" && (
-            <>
-              <div className="flex-1 flex flex-col items-center justify-center p-5 gap-5">
-                {/* Progress ring */}
-                <ProgressRing progress={progress?.progress ?? 0} />
+            <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-6">
+              <ProgressRing progress={progress?.progress || 0} />
 
-                {/* Stats */}
+              <div className="w-full max-w-[320px] text-center space-y-3">
+                <h3 className="text-[15px] font-semibold text-text-primary tracking-tight">Exporting Video…</h3>
+
                 {progress && (
-                  <div className="flex items-center justify-center gap-4 text-[11px] text-text-muted">
-                    <span className="tabular-nums">
-                      Frame {progress.currentFrame.toLocaleString()}/{progress.totalFrames.toLocaleString()}
-                    </span>
-                    <span className="text-white/10">•</span>
-                    <span className="tabular-nums">{progress.fps.toFixed(1)} fps</span>
-                    <span className="text-white/10">•</span>
-                    <span className="tabular-nums">ETA {formatTime(progress.etaSeconds)}</span>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 p-3 rounded-lg border border-white/6 bg-white/1 text-[11px]">
+                    <div className="text-left text-text-muted">Progress</div>
+                    <div className="text-right font-medium text-text-primary tabular-nums">
+                      {progress.currentFrame} / {progress.totalFrames} frames
+                    </div>
+
+                    <div className="text-left text-text-muted">Speed</div>
+                    <div className="text-right font-medium text-text-primary tabular-nums">{progress.fps.toFixed(1)} fps</div>
+
+                    <div className="text-left text-text-muted">Time Remaining</div>
+                    <div className="text-right font-medium text-text-primary tabular-nums">{formatTime(progress.etaSeconds)}</div>
                   </div>
                 )}
-
-                {/* Subtle linear progress bar */}
-                <div className="w-full max-w-[280px] h-1 bg-white/6 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-300 ease-out"
-                    style={{
-                      width: `${(progress?.progress ?? 0) * 100}%`,
-                      background: "linear-gradient(90deg, var(--color-accent), var(--color-accent-soft))",
-                    }}
-                  />
-                </div>
-
-                <p className="text-[11px] text-text-muted">
-                  Encoding <span className="text-text-primary font-medium">{selectedPreset.label}</span>
-                </p>
               </div>
-
-              {/* Footer — no cancel during export for now */}
-              <div className="px-5 py-3 border-t border-white/6 flex items-center justify-center">
-                <span className="text-[11px] text-text-muted">
-                  Do not close this window during export
-                </span>
-              </div>
-            </>
+            </div>
           )}
 
           {/* ═══ PHASE: Complete ═══ */}
           {phase === "complete" && (
-            <>
-              <div className="flex-1 flex flex-col items-center justify-center p-5 gap-4">
-                <SuccessCheck />
+            <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-6 overflow-y-auto">
+              <SuccessCheck />
 
-                <div className="text-center mt-2">
-                  <h3 className="text-[15px] font-semibold text-text-primary">Export Complete</h3>
-                  <p className="text-[12px] text-text-muted mt-1">Your video has been exported successfully.</p>
+              <div className="w-full max-w-[360px] text-center space-y-4">
+                <div>
+                  <h3 className="text-[16px] font-bold text-text-primary tracking-tight">Export Complete!</h3>
+                  <p className="text-[12px] text-text-muted mt-1 leading-relaxed">Your video has been successfully generated and saved to your device.</p>
                 </div>
 
-                {/* Result stats */}
                 {result && (
-                  <div className="flex items-center justify-center gap-4 text-[11px] text-text-muted mt-1">
-                    <span className="tabular-nums">{result.totalFrames.toLocaleString()} frames</span>
-                    <span className="text-white/10">•</span>
-                    <span className="tabular-nums">{formatMs(result.totalTimeMs)}</span>
-                    <span className="text-white/10">•</span>
-                    <span className="tabular-nums">{result.avgTimePerFrameMs.toFixed(1)} ms/frame</span>
+                  <div className="p-3 rounded-lg border border-white/6 bg-white/1 text-[11px] space-y-1.5 text-left">
+                    <div className="flex justify-between">
+                      <span className="text-text-muted">Total Render Time</span>
+                      <span className="font-medium text-text-primary">{formatMs(result.totalTimeMs)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-muted">Rendered Frames</span>
+                      <span className="font-medium text-text-primary">{result.totalFrames} frames</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-muted">Average Speed</span>
+                      <span className="font-medium text-text-primary">
+                        {(1000 / result.avgTimePerFrameMs).toFixed(1)} fps ({result.avgTimePerFrameMs.toFixed(1)}ms/f)
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-muted">Saved Path</span>
+                      <span className="font-medium text-accent truncate max-w-[220px]" title={outputPath}>
+                        {displayPath}
+                      </span>
+                    </div>
                   </div>
                 )}
 
-                {/* Output path + reveal */}
-                {outputPath && (
-                  <button
-                    onClick={handleRevealInFinder}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/6 bg-white/[0.02] hover:bg-white/[0.05] transition-colors text-[11px] text-text-muted hover:text-text-primary mt-2 max-w-full"
-                    title="Reveal in Finder"
-                  >
-                    <FolderOpen className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">{displayPath}</span>
-                  </button>
-                )}
+                <div className="flex items-center justify-center gap-2 pt-2">
+                  <Button variant="ghost" size="sm" onClick={handleRevealInFinder} className="text-[11px]">
+                    Reveal in Finder
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={handleExportAnother} className="text-[11px] gap-1.5">
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Export Another
+                  </Button>
+                  <Button variant="default" size="sm" onClick={onClose} className="text-[11px]">
+                    Done
+                  </Button>
+                </div>
               </div>
-
-              {/* Footer */}
-              <div className="px-5 py-3 border-t border-white/6 flex items-center justify-end gap-2">
-                <Button variant="ghost" onClick={handleExportAnother}>
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  Export Another
-                </Button>
-                <Button variant="default" onClick={onClose}>
-                  Done
-                </Button>
-              </div>
-            </>
+            </div>
           )}
 
           {/* ═══ PHASE: Error ═══ */}
           {phase === "error" && (
-            <>
-              <div className="flex-1 flex flex-col items-center justify-center p-5 gap-4">
-                {/* Error icon */}
-                <div className="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center">
-                  <X className="w-10 h-10 text-destructive" />
-                </div>
-
-                <div className="text-center mt-2">
-                  <h3 className="text-[15px] font-semibold text-text-primary">Export Failed</h3>
-                  <p className="text-[12px] text-text-muted mt-1 max-w-[300px] leading-relaxed">
-                    {error || "An unexpected error occurred during export."}
-                  </p>
-                </div>
+            <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-5">
+              <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+                <AlertCircle className="w-8 h-8" />
               </div>
 
-              {/* Footer */}
-              <div className="px-5 py-3 border-t border-white/6 flex items-center justify-end gap-2">
-                <Button variant="ghost" onClick={onClose}>
-                  Close
-                </Button>
-                <Button
-                  variant="default"
-                  onClick={() => {
-                    setPhase("configure");
-                    setError(null);
-                  }}
-                >
-                  Try Again
-                </Button>
+              <div className="w-full max-w-[320px] text-center space-y-4">
+                <div>
+                  <h3 className="text-[15px] font-bold text-text-primary tracking-tight">Export Failed</h3>
+                  <p className="text-[11px] text-text-muted mt-1 leading-relaxed">An error occurred during the rendering and encoding process.</p>
+                </div>
+
+                {error && <div className="p-3 rounded-lg border border-destructive/20 bg-destructive/5 text-destructive text-[11px] text-left leading-normal font-mono break-all max-h-[120px] overflow-y-auto scrollbar-thin">{error}</div>}
+
+                <div className="flex items-center justify-center gap-2 pt-2">
+                  <Button variant="ghost" size="sm" onClick={handleExportAnother} className="text-[11px]">
+                    Try Again
+                  </Button>
+                  <Button variant="default" size="sm" onClick={onClose} className="text-[11px]">
+                    Close
+                  </Button>
+                </div>
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>
