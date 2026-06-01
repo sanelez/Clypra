@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Music, Smile, Wand2, Shuffle, MessageSquare } from "lucide-react";
-import { MediaTab, AudioTab, TextTab, StickersTab, EffectsTab, TransitionsTab, CaptionsTab, type TabType, MediaTabProps } from "./media-tabs";
-import { TextIcon, YouTubeIcon } from "../ui/icons";
+import { MediaTab, AudioTab, TextTab, StickersTab, EffectsTab, TransitionsTab, CaptionsTab, type TabType, MediaTabProps } from "../media-tabs";
+import { TextIcon, YouTubeIcon } from "../../ui/icons";
 
 export const EnhancedMediaPanel: React.FC<MediaTabProps> = ({ onAddToTimeline }) => {
   const [activeTab, setActiveTab] = useState<TabType>("media");

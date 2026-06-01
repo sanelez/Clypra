@@ -12,7 +12,7 @@ import { getPlaybackClock } from "@/hooks/usePlaybackClock";
 import type { SourcePlaybackContext } from "@/core/playback";
 import type { MediaAsset } from "@/types";
 import { GPUPreview } from "./GPUPreview";
-import { AudioWaveform } from "./AudioWaveform";
+import { AudioWaveform } from "../media-panel/AudioWaveform";
 import { PreviewTransport } from "./PreviewTransport";
 import { createTextClip } from "@/lib/textClip";
 import { TextSourcePreview } from "./TextSourcePreview";
@@ -342,7 +342,7 @@ export const SourcePreview: React.FC = () => {
                 height={sourceAsset.height || 1080}
                 duration={sourceAsset.duration}
                 frameRate={30}
-                onTimeUpdate={(time) => {
+                onTimeUpdate={(time: number) => {
                   setCurrentTime(time);
                   // Stop playing when reaching end
                   if (time >= duration && duration > 0) {
@@ -369,11 +369,7 @@ export const SourcePreview: React.FC = () => {
       {sourceAsset.type === "text" ? (
         <div className="flex items-center justify-between h-10 px-4 shrink-0 border-t border-border/30 bg-surface/30">
           <span className="text-[11px] text-text-muted font-medium select-none">Procedural Style Preview</span>
-          <button
-            onClick={handleAddToTimeline}
-            className="flex items-center gap-1.5 px-3 h-7 rounded text-[11px] font-semibold bg-accent hover:bg-accent-soft active:scale-95 text-white cursor-pointer transition-all duration-150 shadow-sm"
-            title="Add text to timeline"
-          >
+          <button onClick={handleAddToTimeline} className="flex items-center gap-1.5 px-3 h-7 rounded text-[11px] font-semibold bg-accent hover:bg-accent-soft active:scale-95 text-white cursor-pointer transition-all duration-150 shadow-sm" title="Add text to timeline">
             <Plus className="w-3.5 h-3.5" />
             Add to Timeline
           </button>

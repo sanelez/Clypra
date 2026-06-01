@@ -1,7 +1,7 @@
 import React from "react";
 import { TopBar } from "./TopBar";
-import { EnhancedMediaPanel } from "./EnhancedMediaPanel";
-import { PreviewPanel } from "./PreviewPanel";
+import { EnhancedMediaPanel } from "./media-panel/EnhancedMediaPanel";
+import { PreviewPanel } from "./preview/PreviewPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { Timeline } from "./timeline/Timeline";
 import { getInsertIndexForNewTrack, useTimelineStore } from "@/store/timelineStore";

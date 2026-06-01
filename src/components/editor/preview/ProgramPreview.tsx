@@ -1,22 +1,5 @@
-/**
- * Resolve aspect ratio for "Original" preview mode.
- *
- * IMPORTANT: In professional NLEs, "Original" means the SEQUENCE aspect ratio,
- * NOT the source media aspect ratio. The sequence defines the render universe.
- *
- * The program monitor always visualizes sequence space, never adapts to clips.
- * This maintains stability for:
- * - Overlays and graphics
- * - Text positioning
- * - Motion graphics
- * - Transitions
- * - Export consistency
- *
- * If users want to see source media aspect ratio, they should use Source Preview mode.
- */
-
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Check, ChevronDown, Expand, Shrink, Volume2, VolumeX } from "lucide-react";
+import { ChevronDown, Expand, Shrink } from "lucide-react";
 import { usePlaybackClock, usePlaybackControls, useTransportControls, getPlaybackClock } from "@/hooks/usePlaybackClock";
 import { useProjectStore } from "@/store/projectStore";
 import { useTimelineStore } from "@/store/timelineStore";
@@ -25,19 +8,22 @@ import { useSettingsStore } from "@/store/settingsStore";
 import { evaluateSceneCached } from "@/core/evaluation/evaluator";
 import { getFrameScheduler } from "@/core/scheduler/FrameScheduler";
 import { getActiveSessionOrNull, subscribeToSessionChanges } from "@/core/runtime/ProjectSession";
-import { SourcePreview } from "./SourcePreview";
 import { PreviewTransport } from "./PreviewTransport";
-import { TransformOverlayMemoized as TransformOverlay } from "./transform/TransformOverlay";
-import { SafeOverlay } from "./viewport/SafeOverlay";
-import { useViewportKeyboardShortcuts, useViewportWheelZoom, useViewportPan } from "./ViewportControls";
+import { TransformOverlayMemoized as TransformOverlay } from "../transform/TransformOverlay";
+import { SafeOverlay } from "../viewport/SafeOverlay";
+import { useViewportKeyboardShortcuts, useViewportWheelZoom, useViewportPan } from "../viewport/ViewportControls";
 import { calculateDisplayTransform } from "@/lib/coordinateSystem";
 import { GPUTextureCache } from "@/lib/gpuTextureCache";
 import { PreviewQualityManager, PreviewQualityTier } from "@/lib/preview/PreviewQualityManager";
 import { cn } from "@/lib/utils";
-// import type { EvaluatedMediaLayer } from "@/core/evaluation/types";
 import { AspectRatio, PREVIEW_ASPECT_LABEL } from "@/types";
-import { AspectMenuRow } from "../ui/AspectRatio";
 import { formatTime } from "@/lib/timeFormatting";
+
+import { TelemetryOverlay, type TelemetryStats } from "./TelemetryOverlay";
+import { AspectSelector } from "./AspectSelector";
+import { PlaybackSpeedSelector } from "./PlaybackSpeedSelector";
+import { PlaybackQualitySelector } from "./PlaybackQualitySelector";
+import { VolumeControl } from "./VolumeControl";
 
 const PREVIEW_ASPECT_RATIO: Record<AspectRatio, number | null> = {
   original: null, // Uses project canvas
@@ -55,33 +41,7 @@ const CANVAS_DIMENSIONS: Record<Exclude<AspectRatio, "original">, { width: numbe
   "4:5": { width: 1080, height: 1350 },
 };
 
-function PreviewAspectShapeIcon({ widthOverHeight }: { widthOverHeight: number }) {
-  const max = 22;
-  const min = 8;
-  let w: number;
-  let h: number;
-  if (widthOverHeight >= 1) {
-    h = 12;
-    w = Math.round(Math.min(max, Math.max(min, h * widthOverHeight)));
-  } else {
-    w = 12;
-    h = Math.round(Math.min(max, Math.max(min, w / widthOverHeight)));
-  }
-  return <span className="inline-flex shrink-0 rounded-sm border border-border-soft bg-bg" style={{ width: w, height: h }} aria-hidden />;
-}
-
-export const PreviewPanel: React.FC = () => {
-  const { previewMode } = useUIStore();
-
-  // If in source mode, show SourcePreview
-  if (previewMode === "source") {
-    return <SourcePreview />;
-  }
-
-  return <ProgramPreview />;
-};
-
-const ProgramPreview: React.FC = () => {
+export const ProgramPreview: React.FC = () => {
   // =========================================================================
   // 1. SELECTORS & STATE SUBSCRIPTIONS (Strictly first)
   // =========================================================================
@@ -120,15 +80,7 @@ const ProgramPreview: React.FC = () => {
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [useCanvasPreview] = useState(true);
   const [showSafeOverlay, setShowSafeOverlay] = useState(false);
-  const [telemetryStats, setTelemetryStats] = useState<{
-    avgEvaluationTimeMs: number;
-    avgRasterTimeMs: number;
-    avgTotalTimeMs: number;
-    cacheHitRate: number;
-    active: number;
-    droppedFrames: number;
-    driftMagnitude: number;
-  } | null>(null);
+  const [telemetryStats, setTelemetryStats] = useState<TelemetryStats | null>(null);
 
   // =========================================================================
   // 4. REF DECLARATIONS (useRef)
@@ -543,26 +495,51 @@ const ProgramPreview: React.FC = () => {
       <div className="flex items-center px-4 h-10 shrink-0 gap-2">
         <span className="text-[13px] font-semibold text-text-primary tracking-tight">Program Preview</span>
         <span className="text-[13px] text-text-muted">— Timeline</span>
-        <button onClick={() => setShowSafeOverlay((s) => !s)} className={cn("ml-auto px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer", showSafeOverlay ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6")} title="Toggle Title/Action Safe Zones" aria-label="Toggle Title/Action Safe Zones">
+        <button
+          onClick={() => setShowSafeOverlay((s) => !s)}
+          className={cn(
+            "ml-auto px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer",
+            showSafeOverlay ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6"
+          )}
+          title="Toggle Title/Action Safe Zones"
+          aria-label="Toggle Title/Action Safe Zones"
+        >
           Safe Zones
         </button>
-        <button onClick={() => setShowTelemetry((s) => !s)} className={cn("px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer", showTelemetry ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6")} title="Toggle render telemetry" aria-label="Toggle render telemetry">
+        <button
+          onClick={() => setShowTelemetry((s) => !s)}
+          className={cn(
+            "px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer",
+            showTelemetry ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6"
+          )}
+          title="Toggle render telemetry"
+          aria-label="Toggle render telemetry"
+        >
           Stats
         </button>
       </div>
 
       {/* ── Video Area ─────────────────────────────────────────────── */}
       <div className="flex-1 flex items-center justify-center overflow-hidden bg-[#06080a] relative">
-        <div ref={containerRef} onPointerDownCapture={handlePreviewPointerDownCapture} className={cn("w-full h-full flex items-center justify-center relative z-10 overflow-hidden", isPanning && "cursor-grabbing", spacePressed && !isPanning && "cursor-grab")}>
-          <div data-testid="program-preview-viewport" className="relative flex shrink-0 items-center justify-center overflow-hidden shadow-[0_0_40px_rgba(0, 0, 0, 0.36)]" style={{ width: displayWidth, height: displayHeight }}>
+        <div
+          ref={containerRef}
+          onPointerDownCapture={handlePreviewPointerDownCapture}
+          className={cn(
+            "w-full h-full flex items-center justify-center relative z-10 overflow-hidden",
+            isPanning && "cursor-grabbing",
+            spacePressed && !isPanning && "cursor-grab"
+          )}
+        >
+          <div
+            data-testid="program-preview-viewport"
+            className="relative flex shrink-0 items-center justify-center overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.36)]"
+            style={{ width: displayWidth, height: displayHeight }}
+          >
             <>
               {/* Canvas-based preview (matches export rendering) */}
               <canvas
                 ref={canvasRef}
                 data-testid="program-preview-canvas"
-                /* Backing-store size is set dynamically in the render-loop effect
-                   to displayWidth*dpr × displayHeight*dpr for crisp HiDPI rendering.
-                   CSS size controls layout. */
                 style={{
                   width: displayWidth,
                   height: displayHeight,
@@ -572,17 +549,34 @@ const ProgramPreview: React.FC = () => {
               />
 
               {/* Transform overlay for selected clips */}
-              <TransformOverlay canvasWidth={canvasWidth} canvasHeight={canvasHeight} scale={scale} viewport={previewViewport} displayOffset={{ x: offsetX, y: offsetY }} displayWidth={displayWidth} displayHeight={displayHeight} currentTime={currentTime} />
+              <TransformOverlay
+                canvasWidth={canvasWidth}
+                canvasHeight={canvasHeight}
+                scale={scale}
+                viewport={previewViewport}
+                displayOffset={{ x: offsetX, y: offsetY }}
+                displayWidth={displayWidth}
+                displayHeight={displayHeight}
+                currentTime={currentTime}
+              />
 
               {/* Title & Action Safe Areas Overlay */}
-              <SafeOverlay visible={showSafeOverlay} displayWidth={displayWidth} displayHeight={displayHeight} displayOffset={{ x: offsetX, y: offsetY }} />
+              <SafeOverlay
+                visible={showSafeOverlay}
+                displayWidth={displayWidth}
+                displayHeight={displayHeight}
+                displayOffset={{ x: offsetX, y: offsetY }}
+              />
             </>
           </div>
         </div>
 
-        {/* Professional empty state - shows sequence context when no clips. Applied same width and height has canvas, so that it's always fit-in professionally*/}
+        {/* Professional empty state */}
         {clips.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none mx-auto" style={{ width: displayWidth, height: displayHeight }}>
+          <div
+            className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none mx-auto"
+            style={{ width: displayWidth, height: displayHeight }}
+          >
             <div className="text-center space-y-3">
               <div className="text-sm font-medium text-text-muted">No clips in sequence</div>
               <div className="text-xs text-text-muted/80 space-y-1 font-mono">
@@ -597,39 +591,7 @@ const ProgramPreview: React.FC = () => {
         )}
 
         {/* Telemetry Overlay */}
-        {showTelemetry && telemetryStats && (
-          <div className="absolute top-4 left-4 z-20 bg-black/80 backdrop-blur-sm rounded-lg p-3 text-xs font-mono text-white/90 space-y-1 border border-white/10">
-            <div className="font-semibold text-accent mb-2">Render Telemetry</div>
-            <div className="flex justify-between gap-4">
-              <span className="text-white/60">Eval:</span>
-              <span>{telemetryStats.avgEvaluationTimeMs.toFixed(2)}ms</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-white/60">Raster:</span>
-              <span>{telemetryStats.avgRasterTimeMs.toFixed(2)}ms</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-white/60">Total:</span>
-              <span>{telemetryStats.avgTotalTimeMs.toFixed(2)}ms</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-white/60">Cache:</span>
-              <span>{(telemetryStats.cacheHitRate * 100).toFixed(0)}%</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-white/60">Active:</span>
-              <span>{telemetryStats.active}</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-white/60">Dropped:</span>
-              <span className={telemetryStats.droppedFrames > 0 ? "text-yellow-400" : ""}>{telemetryStats.droppedFrames}</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-white/60">Max Drift:</span>
-              <span className={telemetryStats.driftMagnitude > 0.04 ? "text-yellow-400" : ""}>{(telemetryStats.driftMagnitude * 1000).toFixed(0)}ms</span>
-            </div>
-          </div>
-        )}
+        <TelemetryOverlay showTelemetry={showTelemetry} telemetryStats={telemetryStats} />
       </div>
 
       <PreviewTransport
@@ -638,117 +600,45 @@ const ProgramPreview: React.FC = () => {
         isPlaying={isPlaying}
         disabled={clips.length === 0}
         onPlayPause={() => {
-          if (clips.length === 0) return; // Disable playback when timeline is empty
-          // Ensure program context is active before playing timeline
+          if (clips.length === 0) return;
           setActiveContext?.("program");
           isPlaying ? transportPause() : transportPlay();
         }}
         onSeek={(time) => {
-          if (clips.length === 0) return; // Disable seeking when timeline is empty
+          if (clips.length === 0) return;
           seek(time);
         }}
         formatTime={formatTime}
         onStepBack={() => {
-          if (clips.length === 0) return; // Disable frame stepping when timeline is empty
+          if (clips.length === 0) return;
           seek(Math.max(0, currentTime - step));
         }}
         onStepForward={() => {
-          if (clips.length === 0) return; // Disable frame stepping when timeline is empty
+          if (clips.length === 0) return;
           seek(Math.min(duration, currentTime + step));
         }}
         leftActions={
           <div className="flex items-center gap-1">
             {/* Speed selection */}
             <div className="relative" ref={speedMenuRef}>
-              <button onClick={() => setSpeedMenuOpen((o) => !o)} className="flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors" title="Playback speed" aria-expanded={speedMenuOpen}>
-                <span className="max-w-18 truncate">{playbackSpeed}x</span>
-                <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
-              </button>
-              {speedMenuOpen && (
-                <div className="absolute bottom-full right-0 z-50 mb-1 w-[140px] overflow-hidden rounded-lg border border-border bg-surface py-1 text-text-primary shadow-xl" role="listbox">
-                  <div className="px-1">
-                    {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                      <button
-                        key={speed}
-                        type="button"
-                        role="option"
-                        aria-selected={playbackSpeed === speed}
-                        className={cn("flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-text-primary hover:bg-surface-raised", playbackSpeed === speed && "bg-surface-raised")}
-                        onClick={() => {
-                          setSpeed(speed);
-                          setSpeedMenuOpen(false);
-                        }}
-                      >
-                        <span className="flex w-5 shrink-0 justify-center">{playbackSpeed === speed ? <Check className="h-3.5 w-3.5 text-accent" /> : null}</span>
-                        <span className="min-w-0 flex-1 truncate">{speed}x</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <PlaybackSpeedSelector
+                playbackSpeed={playbackSpeed}
+                speedMenuOpen={speedMenuOpen}
+                setSpeedMenuOpen={setSpeedMenuOpen}
+                setSpeed={setSpeed}
+              />
             </div>
 
             <div className="w-px h-3 bg-white/10 mx-0.5" />
 
             {/* Playback Quality selection */}
             <div className="relative" ref={qualityMenuRef}>
-              <button onClick={() => setQualityMenuOpen((o) => !o)} className="flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors" title="Playback quality" aria-expanded={qualityMenuOpen}>
-                <span className="max-w-18 truncate capitalize">
-                  {previewQuality}
-                </span>
-                <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
-              </button>
-              {qualityMenuOpen && (
-                <div className="absolute bottom-full left-0 z-50 mb-1 w-[300px] overflow-hidden rounded-lg border border-border bg-surface py-1.5 text-text-primary shadow-xl" role="listbox">
-                  <div className="px-1.5 space-y-0.5">
-                    {[
-                      {
-                        value: "full",
-                        label: "Full quality",
-                        description: "Original video resolution"
-                      },
-                      {
-                        value: "high",
-                        label: "High quality",
-                        description: "Smooth playback, no impact on exported video"
-                      },
-                      {
-                        value: "medium",
-                        label: "Medium quality",
-                        description: "Smoother playback, no impact on exported video"
-                      },
-                      {
-                        value: "low",
-                        label: "Low quality",
-                        description: "Smoothest playback, no impact on exported video"
-                      }
-                    ].map((q) => (
-                      <button
-                        key={q.value}
-                        type="button"
-                        role="option"
-                        aria-selected={previewQuality === q.value}
-                        className={cn(
-                          "flex w-full items-start gap-2.5 rounded px-2 py-2 text-left hover:bg-surface-raised transition-colors duration-150",
-                          previewQuality === q.value && "bg-surface-raised"
-                        )}
-                        onClick={() => {
-                          setPreviewQuality(q.value as any);
-                          setQualityMenuOpen(false);
-                        }}
-                      >
-                        <span className="flex w-4 shrink-0 justify-center pt-0.5">
-                          {previewQuality === q.value ? <Check className="h-3.5 w-3.5 text-accent" /> : null}
-                        </span>
-                        <div className="flex flex-col min-w-0 flex-1 leading-none">
-                          <span className="text-xs font-semibold text-text-primary">{q.label}</span>
-                          <span className="text-[10px] text-text-muted mt-1 leading-normal whitespace-normal">{q.description}</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <PlaybackQualitySelector
+                previewQuality={previewQuality}
+                qualityMenuOpen={qualityMenuOpen}
+                setQualityMenuOpen={setQualityMenuOpen}
+                setPreviewQuality={setPreviewQuality}
+              />
             </div>
           </div>
         }
@@ -756,36 +646,37 @@ const ProgramPreview: React.FC = () => {
           <>
             {/* Aspect menu */}
             <div className="relative shrink-0" ref={aspectMenuRef}>
-              <button onClick={() => setAspectMenuOpen((o) => !o)} className="flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors" title="Preview aspect ratio" aria-expanded={aspectMenuOpen}>
-                <span className="max-w-18 truncate">{PREVIEW_ASPECT_LABEL[previewAspectPreset]}</span>
-                <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
-              </button>
-              {aspectMenuOpen && (
-                <div className="absolute bottom-full right-0 z-50 mb-1 w-[200px] overflow-hidden rounded-lg border border-border bg-surface py-1 text-text-primary shadow-xl" role="listbox">
-                  <div className="px-1">
-                    <AspectMenuRow preset="original" selected={previewAspectPreset} onSelect={selectAspectPreset} icon={<PreviewAspectShapeIcon widthOverHeight={canvasWidth / Math.max(1, canvasHeight)} />} />
-                  </div>
-                  <div className="my-1 h-px bg-border" />
-                  <div className="px-1">
-                    {(["16:9", "9:16", "1:1", "4:5"] as const).map((p) => (
-                      <AspectMenuRow key={p} preset={p} selected={previewAspectPreset} onSelect={selectAspectPreset} icon={<PreviewAspectShapeIcon widthOverHeight={PREVIEW_ASPECT_RATIO[p]!} />} />
-                    ))}
-                  </div>
-                </div>
-              )}
+              <AspectSelector
+                aspectMenuOpen={aspectMenuOpen}
+                setAspectMenuOpen={setAspectMenuOpen}
+                previewAspectPreset={previewAspectPreset}
+                selectAspectPreset={selectAspectPreset}
+                canvasWidth={canvasWidth}
+                canvasHeight={canvasHeight}
+              />
             </div>
 
-            <button onClick={() => setPreviewScaleMode((m) => (m === "fit" ? "fill" : "fit"))} className="w-6 h-6 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors" title={previewScaleMode === "fit" ? "Fill preview — scale to cover (crop edges)" : "Fit preview — show entire frame (letterbox)"} aria-label={previewScaleMode === "fit" ? "Fill preview" : "Fit preview"}>
+            <button
+              onClick={() => setPreviewScaleMode((m) => (m === "fit" ? "fill" : "fit"))}
+              className="w-6 h-6 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors cursor-pointer"
+              title={
+                previewScaleMode === "fit"
+                  ? "Fill preview — scale to cover (crop edges)"
+                  : "Fit preview — show entire frame (letterbox)"
+              }
+              aria-label={previewScaleMode === "fit" ? "Fill preview" : "Fit preview"}
+            >
               {previewScaleMode === "fit" ? <Expand className="w-3.5 h-3.5" /> : <Shrink className="w-3.5 h-3.5" />}
             </button>
 
             <div className="w-px h-4 bg-white/10 mx-1" />
 
-            <button onClick={() => setIsMuted((m) => !m)} className="w-6 h-6 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors" title={isMuted ? "Unmute" : "Mute"} aria-label={isMuted ? "Unmute audio" : "Mute audio"}>
-              {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-            </button>
-
-            <input type="range" min="0" max="100" value={volume} onChange={(e) => setVolume(Number(e.target.value))} className="w-16 h-1 bg-surface-raised rounded-full appearance-none outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent cursor-pointer" />
+            <VolumeControl
+              isMuted={isMuted}
+              setIsMuted={setIsMuted}
+              volume={volume}
+              setVolume={setVolume}
+            />
           </>
         }
       />
