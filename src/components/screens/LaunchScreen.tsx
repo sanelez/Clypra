@@ -185,7 +185,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
               <p className="text-[11px] text-text-muted font-medium tracking-wide">VIDEO EDITOR</p>
             </div>
           </div>
-          {/* <span className="text-[10px] text-text-muted/50 font-mono">v0.1.0-dev</span> */}
+
           <Button variant="ghost" size="icon-sm" onClick={toggleSettingsModal} title="Settings" style={{ WebkitAppRegion: "no-drag", cursor: "pointer" } as React.CSSProperties}>
             <Settings className="w-3.5 h-3.5" />
           </Button>

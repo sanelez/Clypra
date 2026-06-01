@@ -3,5 +3,48 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging", "opener:default", "dialog:default", "core:path:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "opener:default",
+    "dialog:default",
+    "core:path:default",
+    "fs:default",
+    {
+      "identifier": "fs:allow-read",
+      "allow": [
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**/*" },
+        { "path": "$APPLOCALDATA" },
+        { "path": "$APPLOCALDATA/**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write",
+      "allow": [
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**/*" },
+        { "path": "$APPLOCALDATA" },
+        { "path": "$APPLOCALDATA/**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**/*" },
+        { "path": "$APPLOCALDATA" },
+        { "path": "$APPLOCALDATA/**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**/*" },
+        { "path": "$APPLOCALDATA" },
+        { "path": "$APPLOCALDATA/**/*" }
+      ]
+    }
+  ]
 }

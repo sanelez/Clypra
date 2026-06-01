@@ -65,6 +65,7 @@ export const useEffectsStore = create<EffectsState>((set, get) => ({
 
     try {
       const res = await fetch(`${API_BASE}/effects/${catKey}`, {
+        cache: "reload",
         headers: getHeaders(),
       });
 
@@ -98,6 +99,7 @@ export const useEffectsStore = create<EffectsState>((set, get) => ({
 
     const catKey = category.toLowerCase();
     const res = await fetch(`${API_BASE}/effects/${catKey}/${id}`, {
+      cache: "reload",
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -148,6 +150,7 @@ export const useEffectsStore = create<EffectsState>((set, get) => ({
     });
 
     fetch(`${API_BASE}/effects/${catKey}/${id}`, {
+      cache: "reload",
       headers: getHeaders(),
     })
       .then((r) => {

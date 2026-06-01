@@ -1,4 +1,3 @@
-// src/features/text-effects/api/clypraApi.ts
 import { TextEffectDefinition } from "../types/types";
 import { TemplateDefinition } from "@/features/text-templates/types";
 
@@ -51,6 +50,7 @@ export const ClypraApi = {
   // 1. Fetch summaries for category tab picker UI
   async getEffectsIndex(): Promise<TextEffectSummary[]> {
     const res = await fetch(`${BASE}/effects`, {
+      cache: "reload",
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error("Failed to load effects index");
@@ -59,6 +59,7 @@ export const ClypraApi = {
 
   async getEffectsByCategory(category: string): Promise<TextEffectSummary[]> {
     const res = await fetch(`${BASE}/effects/${category}`, {
+      cache: "reload",
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load category manifest for: ${category}`);
@@ -74,6 +75,7 @@ export const ClypraApi = {
 
     console.log(`[API] Fetching heavy configuration on-demand for effect: ${id}`);
     const res = await fetch(`${BASE}/effects/${category}/${id}`, {
+      cache: "reload",
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load heavy configuration for effect: ${id}`);
@@ -86,6 +88,7 @@ export const ClypraApi = {
   // 3. Fetch summaries for template category tab picker UI
   async getTemplatesIndex(): Promise<TemplateDefinition[]> {
     const res = await fetch(`${BASE}/templates`, {
+      cache: "reload",
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error("Failed to load templates index");
@@ -94,6 +97,7 @@ export const ClypraApi = {
 
   async getTemplatesByCategory(category: string): Promise<TemplateDefinition[]> {
     const res = await fetch(`${BASE}/templates/${category}`, {
+      cache: "reload",
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load templates for category: ${category}`);
@@ -109,6 +113,7 @@ export const ClypraApi = {
 
     console.log(`[API] Fetching heavy Lottie vector data on-demand for template: ${id}`);
     const res = await fetch(`${BASE}/templates/${category}/${id}`, {
+      cache: "reload",
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load Lottie animation payload for: ${id}`);

@@ -1,20 +1,22 @@
 import React, { useState } from "react";
-import { Check, Palette, SlidersHorizontal, Info, Paintbrush, RotateCcw, Copy, Download, Upload } from "lucide-react";
+import { Check, Palette, SlidersHorizontal, Info, Paintbrush, RotateCcw, Copy, Download, Upload, HardDrive } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Modal } from "./Modal";
 import { useSettingsStore, Theme, FontFamily, THEME_META, FONT_META, getThemeColors, getBaseThemeForCustomization, getThemeColorKeys } from "@/store/settingsStore";
 import { useProjectStore } from "@/store/projectStore";
+import { CacheSettings } from "@/components/settings/CacheSettings";
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type Tab = "appearance" | "editor" | "about";
+type Tab = "appearance" | "editor" | "cache" | "about";
 
 const TABS: { id: Tab; label: string; icon: React.FC<{ className?: string }> }[] = [
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "editor", label: "Editor", icon: SlidersHorizontal },
+  { id: "cache", label: "Storage & Cache", icon: HardDrive },
   { id: "about", label: "About", icon: Info },
 ];
 
@@ -533,7 +535,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors ${isActive ? "bg-accent/1 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/4"}`}>
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-1.5 px-2 py-1.5 text-nowrap cursor-pointer rounded-lg text-[13px] font-medium transition-colors ${isActive ? "text-accent bg-white/4" : "text-text-muted hover:text-text-primary hover:bg-white/4"}`}>
                 <Icon className="w-4 h-4 shrink-0" />
                 {tab.label}
               </button>
@@ -545,6 +547,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         <div className="flex-1 p-5 overflow-y-auto">
           {activeTab === "appearance" && <AppearanceTab />}
           {activeTab === "editor" && <EditorTab />}
+          {activeTab === "cache" && <CacheSettings />}
           {activeTab === "about" && <AboutTab />}
         </div>
       </div>

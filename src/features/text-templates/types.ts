@@ -37,6 +37,8 @@ export interface TemplateDefinition {
 
   // Preview thumbnail (first frame or keyframe)
   thumbnailFrame: number; // which frame to use as picker thumbnail
+  thumbnail?: string; // URL to thumbnail image (from API)
+  thumbnailUrl?: string; // Alternative field name for thumbnail URL
 
   lottieData?: any; // The imported JSON payload for the animation
 }

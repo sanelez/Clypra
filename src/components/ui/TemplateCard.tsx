@@ -9,40 +9,109 @@ interface TemplateCardProps {
   isFavorite: boolean;
   isDownloading: boolean;
   isDownloaded?: boolean;
+  loop?: boolean; // NEW: Control whether template should loop
   onFavorite: (e: React.MouseEvent) => void;
   onApply: (e: React.MouseEvent) => void;
   onPreview: () => void;
 }
 
-export const TemplateCard: React.FC<TemplateCardProps> = ({ template, isFavorite, isDownloading, isDownloaded = false, onFavorite, onApply, onPreview }) => {
+export const TemplateCard: React.FC<TemplateCardProps> = ({
+  template,
+  isFavorite,
+  isDownloading,
+  isDownloaded = false,
+  loop = true, // Default to looping
+  onFavorite,
+  onApply,
+  onPreview,
+}) => {
   const lottieRef = useRef<LottiePlayerHandle>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
   const [lottieData, setLottieData] = useState<any>(template.lottieData || null);
   const [isLoadingLottie, setIsLoadingLottie] = useState(false);
 
-  // Lazy-load lottieData on hover if not already loaded
+  // Track if we should play after fetch completes
+  const shouldPlayAfterFetchRef = useRef(false);
+  // Track the current fetch to allow cancellation
+  const fetchAbortControllerRef = useRef<AbortController | null>(null);
+
+  // Prefetch lottieData on hover if not already loaded
   useEffect(() => {
     if (isHovered && !lottieData && !isLoadingLottie) {
+      // Mark that we want to play after fetch (if still hovering)
+      shouldPlayAfterFetchRef.current = true;
+
+      // Create abort controller for this fetch
+      const abortController = new AbortController();
+      fetchAbortControllerRef.current = abortController;
+
       setIsLoadingLottie(true);
+
       ClypraApi.getLottieTemplate(template.category, template.id)
         .then((data) => {
+          // Check if fetch was cancelled (user moused out)
+          if (abortController.signal.aborted) {
+            return;
+          }
+
           setLottieData(data);
           setIsLoadingLottie(false);
+
+          // Only play if user is still hovering AND loop is enabled
+          if (shouldPlayAfterFetchRef.current && loop) {
+            // Play will be triggered by the next useEffect when lottieData changes
+          }
         })
         .catch((err) => {
+          if (abortController.signal.aborted) {
+            console.log(`Fetch cancelled for template ${template.id}`);
+            return;
+          }
           console.error(`Failed to load Lottie data for template ${template.id}:`, err);
           setIsLoadingLottie(false);
         });
     }
-  }, [isHovered, lottieData, isLoadingLottie, template.category, template.id]);
 
-  // Always autoplay and loop when lottieData is available
+    // Cleanup: cancel fetch if user mouses out while fetching
+    if (!isHovered && isLoadingLottie) {
+      shouldPlayAfterFetchRef.current = false;
+      if (fetchAbortControllerRef.current) {
+        fetchAbortControllerRef.current.abort();
+        fetchAbortControllerRef.current = null;
+      }
+    }
+  }, [isHovered, lottieData, isLoadingLottie, template.category, template.id, loop]);
+
+  // Control playback based on hover state and loop setting
   useEffect(() => {
     if (lottieRef.current && lottieData) {
-      lottieRef.current.play();
+      if (loop && isHovered && shouldPlayAfterFetchRef.current) {
+        // Play animation when hovering and loop is enabled
+        lottieRef.current.play();
+      } else if (!loop) {
+        // For non-looping templates, show thumbnail frame
+        lottieRef.current.goToFrame(template.thumbnailFrame || 0);
+      }
     }
-  }, [lottieData]);
+  }, [lottieData, isHovered, loop, template.thumbnailFrame]);
+
+  // Handle mouse enter
+  const handleMouseEnter = () => {
+    setIsHovered(true);
+    shouldPlayAfterFetchRef.current = true;
+  };
+
+  // Handle mouse leave
+  const handleMouseLeave = () => {
+    setIsHovered(false);
+    shouldPlayAfterFetchRef.current = false;
+
+    // Pause animation if it's playing
+    if (lottieRef.current && lottieData && loop) {
+      lottieRef.current.pause();
+    }
+  };
 
   // Handle high-performance off-React timeline progress bar update (60fps)
   const handleFrameChange = (currentFrame: number, totalFrames: number) => {
@@ -55,8 +124,10 @@ export const TemplateCard: React.FC<TemplateCardProps> = ({ template, isFavorite
   // Initial calculation for static mounting percentage
   const initPercentage = template.durationFrames && template.durationFrames > 0 ? ((template.thumbnailFrame || 0) / template.durationFrames) * 100 : 0;
 
+  console.log("TEMPLATE CARD: ", template);
+
   return (
-    <div onClick={onPreview} onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)} className="w-full aspect-video bg-surface-raised/10 hover:bg-surface-raised/20 border border-border/30 hover:border-accent/40 rounded-xl relative overflow-hidden flex flex-col justify-between transition-all duration-500 group cursor-pointer shadow-[0_4px_24px_rgba(0,0,0,0.4)] hover:shadow-[0_4px_30px_rgba(139,92,246,0.15)]">
+    <div onClick={onPreview} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave} className="w-full aspect-video bg-surface-raised/10 hover:bg-surface-raised/20 border border-border/30 hover:border-accent/40 rounded-xl relative overflow-hidden flex flex-col justify-between transition-all duration-500 group cursor-pointer shadow-[0_4px_24px_rgba(0,0,0,0.4)] hover:shadow-[0_4px_30px_rgba(139,92,246,0.15)]">
       {/* Downloading Overlay */}
       {isDownloading && (
         <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px] flex items-center justify-center z-30 pointer-events-none">
@@ -79,8 +150,27 @@ export const TemplateCard: React.FC<TemplateCardProps> = ({ template, isFavorite
             <Loader2 className="w-8 h-8 animate-spin text-accent" />
             <span className="text-xs font-medium">Loading...</span>
           </div>
+        ) : !loop && template.thumbnail ? (
+          // Show static thumbnail for non-looping templates
+          <img
+            src={template.thumbnail}
+            alt={template.name}
+            className="w-full h-full object-contain drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)]"
+            onError={(e) => {
+              // Fallback to placeholder if thumbnail fails to load
+              e.currentTarget.style.display = "none";
+            }}
+          />
         ) : lottieData ? (
-          <LottiePlayer ref={lottieRef} lottieData={lottieData} autoplay={true} loop={true} initialFrame={template.thumbnailFrame || 0} onFrameChange={handleFrameChange} className="w-full h-full object-contain drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)]" />
+          <LottiePlayer
+            ref={lottieRef}
+            lottieData={lottieData}
+            autoplay={false} // Manual control via ref
+            loop={loop}
+            initialFrame={template.thumbnailFrame || 0}
+            onFrameChange={handleFrameChange}
+            className="w-full h-full object-contain drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)]"
+          />
         ) : (
           <div className="flex flex-col items-center justify-center gap-2 text-text-muted">
             <div className="w-12 h-12 rounded-lg bg-accent/20 flex items-center justify-center">
@@ -107,9 +197,11 @@ export const TemplateCard: React.FC<TemplateCardProps> = ({ template, isFavorite
       </div>
 
       {/* Sleek, Off-React Timeline Playback Progress Bar */}
-      <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/5 overflow-hidden z-20 pointer-events-none">
-        <div ref={progressBarRef} style={{ width: `${initPercentage}%` }} className="h-full bg-linear-to-r from-accent to-accent-soft rounded-r-full transition-[width] duration-75 ease-out shadow-[0_0_8px_rgba(139,92,246,0.8)]" />
-      </div>
+      {loop && (
+        <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/5 overflow-hidden z-20 pointer-events-none">
+          <div ref={progressBarRef} style={{ width: `${initPercentage}%` }} className="h-full bg-linear-to-r from-accent to-accent-soft rounded-r-full transition-[width] duration-75 ease-out shadow-[0_0_8px_rgba(139,92,246,0.8)]" />
+        </div>
+      )}
     </div>
   );
 };
