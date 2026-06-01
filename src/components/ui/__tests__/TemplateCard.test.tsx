@@ -26,6 +26,14 @@ describe("TemplateCard Component", () => {
     durationFrames: 60,
     thumbnailFrame: 10,
     lottieData: null,
+    description: "Mock template description",
+    tags: ["mock", "test"],
+    fps: 30,
+    width: 1920,
+    height: 1080,
+    textLayers: [],
+    defaultPlacement: "lower-third",
+    lottieFile: "mock.json",
   };
 
   const defaultProps = {

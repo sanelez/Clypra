@@ -1,4 +1,7 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
+import type { DensityLevel, ThumbnailTile } from "../types";
+
+const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /**
  * Tauri `invoke` / FFmpeg need a native filesystem path. The webview may use
@@ -25,14 +28,21 @@ export function normalizePathForTauriInvoke(inputPath: string): string {
 // ─── Native FFmpeg Decoder Commands ───────────────────────────────────────
 // All video operations use the native ffmpeg-next decoder
 
-import type { DensityLevel, ThumbnailTile } from "../types";
-
 /**
  * Extract a single frame using the native decoder (fast path).
  * ~20-50ms first frame, ~3-15ms subsequent frames.
  * Returns base64-encoded WebP data URL.
  */
-export async function decodeFrame(videoPath: string, timeSecs: number, width: number, height: number): Promise<string> {
+export async function decodeFrame(
+  videoPath: string,
+  timeSecs: number,
+  width: number,
+  height: number
+): Promise<string> {
+  if (!isTauri()) {
+    console.warn("[Tauri] decodeFrame bypassed: Non-Tauri environment.");
+    return "data:image/png;base64,mockedDataURL";
+  }
   return invoke<string>("decode_frame", {
     videoPath: normalizePathForTauriInvoke(videoPath),
     timeSecs,
@@ -44,7 +54,19 @@ export async function decodeFrame(videoPath: string, timeSecs: number, width: nu
 /**
  * Extract multiple frames using the native decoder with streaming, instead of sidecar FFmpeg. Much faster for batch extractions.
  */
-export async function decodeFramesStreaming(videoPath: string, timestamps: number[], density: DensityLevel, width: number, height: number, duration: number, onTile: (tile: ThumbnailTile) => void): Promise<void> {
+export async function decodeFramesStreaming(
+  videoPath: string,
+  timestamps: number[],
+  density: DensityLevel,
+  width: number,
+  height: number,
+  duration: number,
+  onTile: (tile: ThumbnailTile) => void
+): Promise<void> {
+  if (!isTauri()) {
+    console.warn("[Tauri] decodeFramesStreaming bypassed: Non-Tauri environment.");
+    return;
+  }
   const channel = new Channel<ThumbnailTile>();
   channel.onmessage = onTile;
 
@@ -63,6 +85,10 @@ export async function decodeFramesStreaming(videoPath: string, timestamps: numbe
  * Release the native decoder for a video to free memory. Call this when a clip is removed from the project.
  */
 export function releaseVideoDecoder(videoPath: string): void {
+  if (!isTauri()) {
+    console.warn("[Tauri] releaseVideoDecoder bypassed: Non-Tauri environment.");
+    return;
+  }
   invoke("release_video_decoder", {
     videoPath: normalizePathForTauriInvoke(videoPath),
   });
@@ -78,5 +104,13 @@ export async function getRenderCacheStats(): Promise<{
   decodes: number;
   total_requests: number;
 }> {
+  if (!isTauri()) {
+    return {
+      atlas_hits: 0,
+      tier_cache_hits: 0,
+      decodes: 0,
+      total_requests: 0,
+    };
+  }
   return invoke("get_render_cache_stats");
 }

@@ -5,6 +5,7 @@ import { useEffectsStore } from "../../store/effectsStore";
 import { useFavoritesStore } from "@/store/favoritesStore";
 import { useUIStore } from "@/store/uiStore";
 import { ClypraApi } from "../../api/clypraApi";
+import type { TextEffectDefinition } from "../../types/types";
 
 // Mock ClypraApi
 vi.mock("../../api/clypraApi", () => ({
@@ -127,7 +128,17 @@ describe("EffectGrid Component", () => {
   });
 
   it("calls startDownload and completeDownload during apply download triggers", async () => {
-    const fullEffectMock = { id: "classic-3d", name: "Classic 3D", category: "3d" };
+    const fullEffectMock: TextEffectDefinition = {
+      id: "classic-3d",
+      name: "Classic 3D",
+      category: "3d",
+      description: "Classic 3D text style",
+      tags: ["3d", "classic"],
+      font: { family: "Inter", weight: 700, style: "normal", letterSpacing: 0, lineHeight: 1.2 },
+      fills: [{ type: "solid", color: "#FFE259" }],
+      strokes: [],
+      shadows: [],
+    };
     vi.mocked(ClypraApi.getFullEffect).mockResolvedValue(fullEffectMock);
 
     const startDownloadSpy = vi.spyOn(useFavoritesStore.getState(), "startDownload");
@@ -160,7 +171,17 @@ describe("EffectGrid Component", () => {
   });
 
   it("shows download spinner immediately on card click for preview, and projects preview only on completion", async () => {
-    const fullEffectMock = { id: "classic-3d", name: "Classic 3D", category: "3d" };
+    const fullEffectMock: TextEffectDefinition = {
+      id: "classic-3d",
+      name: "Classic 3D",
+      category: "3d",
+      description: "Classic 3D text style",
+      tags: ["3d", "classic"],
+      font: { family: "Inter", weight: 700, style: "normal", letterSpacing: 0, lineHeight: 1.2 },
+      fills: [{ type: "solid", color: "#FFE259" }],
+      strokes: [],
+      shadows: [],
+    };
     vi.mocked(ClypraApi.getFullEffect).mockResolvedValue(fullEffectMock);
     vi.spyOn(useEffectsStore.getState(), "selectEffect").mockResolvedValue(undefined as any);
 
@@ -189,11 +210,35 @@ describe("EffectGrid Component", () => {
   });
 
   it("handles race downloading of multiple cards and projects using latest-intent-wins", async () => {
-    let resolveA: (value: any) => void = () => {};
-    let resolveB: (value: any) => void = () => {};
+    let resolveA: (value: TextEffectDefinition) => void = () => {};
+    let resolveB: (value: TextEffectDefinition) => void = () => {};
 
-    const promiseA = new Promise((resolve) => { resolveA = resolve; });
-    const promiseB = new Promise((resolve) => { resolveB = resolve; });
+    const promiseA = new Promise<TextEffectDefinition>((resolve) => { resolveA = resolve; });
+    const promiseB = new Promise<TextEffectDefinition>((resolve) => { resolveB = resolve; });
+
+    const classic3dMock: TextEffectDefinition = {
+      id: "classic-3d",
+      name: "Classic 3D",
+      category: "3d",
+      description: "Classic 3D text style",
+      tags: ["3d", "classic"],
+      font: { family: "Inter", weight: 700, style: "normal", letterSpacing: 0, lineHeight: 1.2 },
+      fills: [{ type: "solid", color: "#FFE259" }],
+      strokes: [],
+      shadows: [],
+    };
+
+    const neonGlowMock: TextEffectDefinition = {
+      id: "neon-glow",
+      name: "Neon Glow",
+      category: "neon",
+      description: "Neon glow text style",
+      tags: ["neon", "glow"],
+      font: { family: "Inter", weight: 700, style: "normal", letterSpacing: 0, lineHeight: 1.2 },
+      fills: [{ type: "solid", color: "#FFA751" }],
+      strokes: [],
+      shadows: [],
+    };
 
     vi.mocked(ClypraApi.getFullEffect).mockImplementation((category, id) => {
       if (id === "classic-3d") return promiseA;
@@ -218,19 +263,19 @@ describe("EffectGrid Component", () => {
 
     // 3. Resolve B (neon-glow) first
     await act(async () => {
-      resolveB({ id: "neon-glow", name: "Neon Glow", category: "neon" });
+      resolveB(neonGlowMock);
       await promiseB;
     });
 
     // B should project because previewMediaId is "neon-glow"
     await waitFor(() => {
-      expect(previewTextPresetSpy).toHaveBeenCalledWith({ id: "neon-glow", name: "Neon Glow", category: "neon" }, "effect");
+      expect(previewTextPresetSpy).toHaveBeenCalledWith(neonGlowMock, "effect");
     });
     previewTextPresetSpy.mockClear();
 
     // 4. Resolve A (classic-3d) later
     await act(async () => {
-      resolveA({ id: "classic-3d", name: "Classic 3D", category: "3d" });
+      resolveA(classic3dMock);
       await promiseA;
     });
 

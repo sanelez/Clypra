@@ -11,6 +11,13 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 import { normalizePathForTauriInvoke, decodeFrame, decodeFramesStreaming, releaseVideoDecoder } from "../tauri";
 import { DensityLevel } from "@/types";
 
+// Stub Tauri internals globally for this test suite
+Object.defineProperty(window, "__TAURI_INTERNALS__", {
+  value: {},
+  writable: true,
+  configurable: true,
+});
+
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 // vi.mock factories are hoisted — define the Channel class via vi.hoisted() so

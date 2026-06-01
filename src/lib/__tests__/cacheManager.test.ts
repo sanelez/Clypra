@@ -27,7 +27,7 @@ describe("CacheManager", () => {
         writable: true,
         configurable: true,
       });
-      (global as any).indexedDB = mockIDB;
+      (globalThis as any).indexedDB = mockIDB;
     }
 
     // Reset global state mocks
