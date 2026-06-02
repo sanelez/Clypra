@@ -153,42 +153,22 @@ export const renderTextEffectAsync = async (canvas: HTMLCanvasElement, text: str
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  // Step 1 — Set canvas dimensions before any drawing
+  // Step 1 — Set canvas dimensions before any drawing.
+  // Engine centers text relative to canvasWidth/canvasHeight.
   canvas.width = 640;
   canvas.height = 360;
 
   const cfg = buildEngineConfig(effect, text, fontSize, canvas.width, canvas.height, time);
-  const fontFamily = (cfg.fontFamily as string) || "Inter";
-  const fontWeight = (cfg.fontWeight as number) || 700;
 
-  // Step 2 — Inject Google Font stylesheet if not already present
-  const fontId = `clypra-font-${fontFamily.replace(/\s+/g, "-").toLowerCase()}`;
-  if (!document.getElementById(fontId)) {
-    const link = document.createElement("link");
-    link.id = fontId;
-    link.rel = "stylesheet";
-    link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontFamily)}:wght@${fontWeight}&display=swap`;
-    document.head.appendChild(link);
-  }
+  // Step 2 — All fonts are pre-loaded via Fontsource imports in index.css.
+  // Wait for document.fonts.ready to ensure they are fully registered before
+  // the first draw, preventing fallback-font renders.
+  await document.fonts.ready;
 
-  // Step 3 — Wait for the specific font variant before first draw
-  const fontSpec = `${fontWeight} ${fontSize}px "${fontFamily}"`;
-  try {
-    await document.fonts.load(fontSpec);
-  } catch {
-    // Font load failed (offline / unknown family) — render with fallback
-  }
-
-  // Step 4 — Draw (routes through WebGLCompositor if ctx.filter unsupported)
-  const draw = () => {
-    const cfg = buildEngineConfig(effect, text, fontSize, canvas.width, canvas.height, time);
-    drawScene(ctx, cfg, time ?? 0);
-  };
+  // Step 3 — Draw (routes through WebGLCompositor if ctx.filter unsupported)
+  const draw = () => drawScene(ctx, cfg, time ?? 0);
 
   draw();
-
-  // Step 5 — Re-draw after all fonts settle (catches variable-weight variants)
-  document.fonts.ready.then(draw);
 };
 
 /**
