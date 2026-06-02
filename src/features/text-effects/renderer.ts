@@ -1,183 +1,149 @@
-import { renderTextEffectCore, defaultConfig as engineDefaultConfig } from "@clypra/engine";
-import { applyFontConfig, wrapText, resolveFontFamilyName } from "./lib/helpers";
+import { evaluateScene, textEffectConfigToScene, defaultConfig as engineDefaultConfig, type TextEffectConfig } from "@clypra/engine";
+import { applyFontConfig, resolveFontFamilyName } from "./lib/helpers";
 import { TextEffectDefinition } from "./types/types";
 import { hasRegisteredEngine, renderRegisteredEffect, _buildConfig } from "./registry";
+
+// ─── Scene cache ──────────────────────────────────────────────────────────────
+// textEffectConfigToScene is pure — cache by config identity to avoid rebuilding
+// on every animation frame.
+const _sceneCache = new WeakMap<object, ReturnType<typeof textEffectConfigToScene>>();
+
+function getOrBuildScene(cfg: TextEffectConfig) {
+  if (_sceneCache.has(cfg)) return _sceneCache.get(cfg)!;
+  const scene = textEffectConfigToScene(cfg);
+  _sceneCache.set(cfg, scene);
+  return scene;
+}
+
+/**
+ * Build the engine config from a TextEffectDefinition + runtime params.
+ * Correctly maps width/height → canvasWidth/canvasHeight for the engine.
+ */
+function buildEngineConfig(effect: TextEffectDefinition, text: string, fontSize: number, canvasWidth: number, canvasHeight: number, time?: number, clipStartTime?: number, clipDuration?: number): TextEffectConfig {
+  const builtCfg = _buildConfig(effect, text, fontSize, canvasWidth, canvasHeight, time, clipStartTime, clipDuration);
+  return {
+    ...engineDefaultConfig,
+    ...builtCfg,
+    // _buildConfig writes to width/height (legacy local-engine keys).
+    // The published engine uses canvasWidth/canvasHeight for text centering.
+    canvasWidth,
+    canvasHeight,
+  } as TextEffectConfig;
+}
 
 /**
  * Core Canvas 2D Text Effects Rendering Context Engine.
  * Renders full text layers onto any rendering context.
  *
- * Effect dispatch is driven entirely by the registry — no per-effect if-blocks here.
- * To add a new effect: drop its file in effects/ and add two lines to registry.ts.
+ * Uses evaluateScene (the correct full pipeline) for API-fetched effects so
+ * that stroke blur (ctx.filter), glow compositing, bevel, and all other
+ * post-fx are applied correctly.
  */
 export const renderTextEffectToContext = (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, text: string, effect: TextEffectDefinition, fontSize: number, _x: number, _y: number, canvasWidth: number, canvasHeight: number, time?: number, clipStartTime?: number, clipDuration?: number) => {
-  // Overhaul context with a dynamic text animation interception wrapper
-  const originalFillText = ctx.fillText;
-  const originalStrokeText = ctx.strokeText;
-
-  const animation = effect.animation;
-  const hasAnimation = animation && animation.type !== "none";
-
-  if (hasAnimation && typeof time === "number" && typeof clipStartTime === "number" && typeof clipDuration === "number") {
-    const localTime = Math.max(0, time - clipStartTime);
-    const progress = Math.min(1.0, localTime / Math.max(0.1, clipDuration));
-
-    const drawAnimatedText = (originalFn: (text: string, x: number, y: number) => void, txt: string, x: number, y: number) => {
-      ctx.save();
-
-      // Retrieve current text properties from context
-      const font = ctx.font;
-      const align = ctx.textAlign || "center";
-      const baseline = ctx.textBaseline || "alphabetic";
-      const letterSpacing = typeof (ctx as any).letterSpacing === "string" ? parseFloat((ctx as any).letterSpacing) : 0;
-
-      // We will draw letter-by-letter, so set alignment to left
-      ctx.textAlign = "left";
-
-      // Measure total text width to calculate start X based on alignment
-      const totalWidth = ctx.measureText(txt).width;
-      let startX = x;
-      if (align === "center") {
-        startX = x - totalWidth / 2;
-      } else if (align === "right") {
-        startX = x - totalWidth;
-      }
-
-      // Draw character by character
-      let cumulativeWidth = 0;
-      const originalAlpha = ctx.globalAlpha;
-
-      for (let i = 0; i < txt.length; i++) {
-        const char = txt[i];
-        const charWidth = ctx.measureText(char).width;
-        const charX = startX + cumulativeWidth;
-
-        // Apply animations
-        let drawChar = true;
-        let charY = y;
-        let charXOffset = 0;
-
-        if (animation.type === "typewriter") {
-          const typewriterProgress = progress;
-          const visibleCount = Math.floor(typewriterProgress * txt.length);
-          if (i >= visibleCount) {
-            drawChar = false;
-          }
-        } else if (animation.type === "wave") {
-          const waveSpeed = animation.speed ?? 1.0;
-          const waveAmp = animation.amplitude ?? fontSize * 0.12;
-          const waveFreq = animation.frequency ?? 5.0;
-          const waveY = Math.sin(localTime * waveFreq * waveSpeed + i * 0.4) * waveAmp;
-          charY = y + waveY;
-        } else if (animation.type === "fade") {
-          // Staggered fade in: delay starts from 0 to 0.4 seconds based on character index
-          const staggerDelay = (i / txt.length) * 0.4;
-          const fadeDuration = 0.25;
-          const charProgress = Math.max(0, Math.min(1.0, (localTime - staggerDelay) / fadeDuration));
-          ctx.globalAlpha = originalAlpha * charProgress;
-        } else if (animation.type === "glitch") {
-          // Jitter/skew characters occasionally based on a time trigger
-          const glitchTimeTrigger = Math.floor(localTime * 10); // changes 10 times a second
-          const noise = Math.sin(glitchTimeTrigger * 12.9898) * 43758.5453;
-          const randomVal = noise - Math.floor(noise);
-
-          if (randomVal < 0.15) {
-            // 15% chance of glitch active at this instant
-            // Apply slight skew/offset to some letters
-            const letterHash = Math.sin(i * 7.13) * 1000;
-            const letterRandom = letterHash - Math.floor(letterHash);
-            if (letterRandom < 0.3) {
-              charXOffset = (Math.random() - 0.5) * (fontSize * 0.08);
-              charY = y + (Math.random() - 0.5) * (fontSize * 0.08);
-            }
-          }
-        }
-
-        if (drawChar) {
-          originalFn.call(ctx, char, charX + charXOffset, charY);
-        }
-
-        cumulativeWidth += charWidth + letterSpacing;
-      }
-
-      ctx.restore();
-    };
-
-    ctx.fillText = function (txt, x, y) {
-      drawAnimatedText(originalFillText, txt, x, y);
-    };
-
-    ctx.strokeText = function (txt, x, y) {
-      drawAnimatedText(originalStrokeText, txt, x, y);
-    };
-  }
-
-  // Registry dispatch — covers all studio-generated engine effects.
-  // Registered engines set their own ctx.font and expect default textBaseline ("alphabetic").
-  // Do NOT call applyFontConfig here — it sets textBaseline = "middle" which breaks
-  // the engines' vertical centering math (fontSize * 0.8 offset assumes "alphabetic").
+  // ── Locally registered engine (studio-generated class) ────────────────────
+  // These are registered via register() in registry.ts and handle their own
+  // animation interception internally.
   if (hasRegisteredEngine(effect?.id)) {
+    const originalFillText = ctx.fillText;
+    const originalStrokeText = ctx.strokeText;
     renderRegisteredEffect(ctx, effect, text, fontSize, canvasWidth, canvasHeight, time, clipStartTime, clipDuration);
-
-    // Restore original functions
     ctx.fillText = originalFillText;
     ctx.strokeText = originalStrokeText;
     return;
   }
 
-  // Apply baseline font config only for the fallback generic renderer
-  applyFontConfig(ctx, effect.font || { family: "Arial", weight: "bold", style: "normal", letterSpacing: 0, lineHeight: 1.2 }, fontSize);
+  // ── @clypra/engine pipeline (all API-fetched effects) ─────────────────────
+  // Use evaluateScene — the correct full pipeline. This is the only path that
+  // correctly applies ctx.filter for stroke blur, multi-pass glow compositing,
+  // bevel depth, and all other post-fx the engine supports.
+  const cfg = buildEngineConfig(effect, text, fontSize, canvasWidth, canvasHeight, time, clipStartTime, clipDuration);
+  const scene = getOrBuildScene(cfg);
 
-  // ── @clypra/engine fallback renderer ─────────────────────────────────────
-  // All API-fetched effects that have no registered local engine are rendered
-  // here via the published @clypra/engine package. _buildConfig translates the
-  // structured TextEffectDefinition into the flat TextEffectConfig that
-  // renderTextEffectCore expects, so all fills, gradients, glows, strokes,
-  // bevels, and panels are handled correctly and consistently.
-  const engineConfig = {
-    ...engineDefaultConfig,
-    ..._buildConfig(effect, text, fontSize, canvasWidth, canvasHeight, time, clipStartTime, clipDuration),
-  };
-
-  // OffscreenCanvasRenderingContext2D is not assignable to CanvasRenderingContext2D
-  // but renderTextEffectCore accepts both at runtime — cast is safe here.
-  renderTextEffectCore(ctx as CanvasRenderingContext2D, engineConfig);
-
-  // Restore original functions
-  ctx.fillText = originalFillText;
-  ctx.strokeText = originalStrokeText;
+  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+  evaluateScene(scene, time ?? 0, ctx as CanvasRenderingContext2D);
 };
 
 /**
- * Core Canvas 2D Text Effects Rendering Engine.
- * Renders full text layers in premium NLE composition order.
- * @param canvas - The HTMLCanvasElement to render onto.
- * @param text - The text string, supporting newlines.
- * @param effect - The text effect definition block.
- * @param fontSize - Master font size in pixels.
+ * Render a text effect to an HTMLCanvasElement synchronously.
+ * Canvas must be sized correctly before calling.
+ *
+ * For preview use, prefer renderTextEffectAsync which waits for fonts first.
  */
-export const renderTextEffect = (canvas: HTMLCanvasElement, text: string, effect: TextEffectDefinition, fontSize: number) => {
+export const renderTextEffect = (canvas: HTMLCanvasElement, text: string, effect: TextEffectDefinition, fontSize: number, time?: number) => {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
+  // Size must be set before drawing — engine centers relative to canvas dimensions.
+  // Only reset if not already sized to avoid clearing a pre-sized canvas.
+  if (canvas.width === 0 || canvas.height === 0) {
+    canvas.width = 640;
+    canvas.height = 360;
+  }
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  renderTextEffectToContext(ctx, text, effect, fontSize, canvas.width / 2, canvas.height / 2, canvas.width, canvas.height);
+  renderTextEffectToContext(ctx, text, effect, fontSize, canvas.width / 2, canvas.height / 2, canvas.width, canvas.height, time);
 };
 
 /**
- * Renders the full text effect on a configurable offscreen canvas and returns a high-resolution export PNG data URL.
- * @param text - The text string.
- * @param effect - The text effect definition block.
- * @param fontSize - Master font size in pixels.
- * @param width - Canvas export width in px (default: 800).
- * @param height - Canvas export height in px (default: 400).
- * @returns A base64 PNG data URL string.
+ * Render a text effect to an HTMLCanvasElement, waiting for fonts first.
+ *
+ * This is the correct entry point for preview rendering. It:
+ * 1. Sets canvas dimensions
+ * 2. Injects the required Google Font if needed
+ * 3. Waits for the font to load
+ * 4. Draws via evaluateScene (full engine pipeline including ctx.filter)
+ * 5. Re-draws after document.fonts.ready to catch any late-loading variants
  */
-export const renderTextEffectToDataURL = (text: string, effect: TextEffectDefinition, fontSize: number, width: number = 800, height: number = 400): string => {
+export const renderTextEffectAsync = async (canvas: HTMLCanvasElement, text: string, effect: TextEffectDefinition, fontSize: number, time?: number): Promise<void> => {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  // Step 1 — Set canvas dimensions before any drawing
+  canvas.width = 640;
+  canvas.height = 360;
+
+  const cfg = buildEngineConfig(effect, text, fontSize, canvas.width, canvas.height, time);
+  const fontFamily = (cfg.fontFamily as string) || "Inter";
+  const fontWeight = (cfg.fontWeight as number) || 700;
+
+  // Step 2 — Inject Google Font stylesheet if not already present
+  const fontId = `clypra-font-${fontFamily.replace(/\s+/g, "-").toLowerCase()}`;
+  if (!document.getElementById(fontId)) {
+    const link = document.createElement("link");
+    link.id = fontId;
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontFamily)}:wght@${fontWeight}&display=swap`;
+    document.head.appendChild(link);
+  }
+
+  // Step 3 — Wait for the specific font variant before first draw
+  const fontSpec = `${fontWeight} ${fontSize}px "${fontFamily}"`;
+  try {
+    await document.fonts.load(fontSpec);
+  } catch {
+    // Font load failed (offline / unknown family) — render with fallback
+  }
+
+  // Step 4 — Draw
+  const draw = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    renderTextEffectToContext(ctx, text, effect, fontSize, canvas.width / 2, canvas.height / 2, canvas.width, canvas.height, time);
+  };
+
+  draw();
+
+  // Step 5 — Re-draw after all fonts settle (catches variable-weight variants)
+  document.fonts.ready.then(draw);
+};
+
+/**
+ * Renders the full text effect on a configurable offscreen canvas and returns
+ * a high-resolution export PNG data URL.
+ */
+export const renderTextEffectToDataURL = (text: string, effect: TextEffectDefinition, fontSize: number, width = 800, height = 400): string => {
   const offscreen = document.createElement("canvas");
   offscreen.width = width;
   offscreen.height = height;
-
   renderTextEffect(offscreen, text, effect, fontSize);
   return offscreen.toDataURL("image/png");
 };

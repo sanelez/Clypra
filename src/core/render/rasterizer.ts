@@ -19,7 +19,7 @@ import type { EvaluatedScene, EvaluatedMediaLayer, EvaluatedTextLayer } from "..
 import { getResourceCache } from "../resources/ResourceCache";
 import { renderTextEffectToContext } from "../../features/text-effects/renderer";
 import { _buildConfig } from "../../features/text-effects/registry";
-import { renderTextEffectCore, defaultConfig as engineDefaultConfig } from "@clypra/engine";
+import { renderTextEffectCore, defaultConfig as engineDefaultConfig, evaluateScene, textEffectConfigToScene, type TextEffectConfig } from "@clypra/engine";
 import { useEffectsStore } from "../../features/text-effects/store/effectsStore";
 
 /**
@@ -371,14 +371,20 @@ function rasterizeTextLayer(ctx: CanvasRenderingContext2D | OffscreenCanvasRende
         offCtx.setTransform(1, 0, 0, 1, 0, 0);
         offCtx.clearRect(0, 0, offW, offH);
 
-        // Use @clypra/engine to render — produces pixel-perfect results matching
-        // the source-of-truth engine used everywhere else in the pipeline.
-        const engineConfig = {
+        // Use evaluateScene — the correct full engine pipeline that applies
+        // ctx.filter for stroke blur, glow compositing, bevel, and all post-fx.
+        const builtCfg = _buildConfig(effectDef, layer.text, fontSize, offW, offH, layer.time, layer.clipStartTime, layer.clipDuration);
+        const engineConfig: TextEffectConfig = {
           ...engineDefaultConfig,
-          ..._buildConfig(effectDef, layer.text, fontSize, offW, offH, layer.time, layer.clipStartTime, layer.clipDuration),
+          ...builtCfg,
+          // _buildConfig uses width/height — engine expects canvasWidth/canvasHeight.
+          canvasWidth: offW,
+          canvasHeight: offH,
           fontFamily: layer.fontFamily || effectDef.font?.family,
-        };
-        renderTextEffectCore(offCtx as unknown as CanvasRenderingContext2D, engineConfig);
+        } as TextEffectConfig;
+
+        offCtx.clearRect(0, 0, offW, offH);
+        evaluateScene(textEffectConfigToScene(engineConfig), layer.time ?? 0, offCtx as unknown as CanvasRenderingContext2D);
 
         ctx.drawImage(offscreen, 0, 0, offW, offH, -width / 2 - effectPadding, -height / 2 - effectPadding, offW, offH);
       }
