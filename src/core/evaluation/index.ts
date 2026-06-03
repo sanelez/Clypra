@@ -1,33 +1,26 @@
 /**
- * Evaluation Module - Canonical Timeline Evaluation
- *
- * This is the SINGLE SOURCE OF TRUTH for timeline evaluation.
+ * Evaluation Module - Canonical NLE Timeline Evaluation
  *
  * Architecture:
  *
- *   Timeline State
+ *   Timeline State (Clips / Tracks / Assets)
  *        ↓
- *   Evaluation Contract (contract.md)
+ *   evaluateTimelineScene()  ← entry point for all rendering paths
  *        ↓
- *   Scene Evaluator (evaluator.ts)
+ *   EvaluatedScene           ← universal render currency
  *        ↓
- *   EvaluatedScene (types.ts)
- *        ↓
- *   Render Engine
+ *   rasterizeScene()         ← pixel generation (rasterizer.ts)
  *
- * All rendering paths use this:
- * - Preview rendering
- * - Export rendering
- * - Thumbnail generation
- * - Proxy rendering
- * - Timeline validation
+ * Naming note: the function is called evaluateTimelineScene (not evaluateScene)
+ * to avoid collision with @clypra/engine's evaluateScene, which operates on
+ * a SceneDocument and draws directly to a Canvas 2D context.
  */
 
 // Types
-export type { EvaluatedScene, EvaluatedVisualLayer, EvaluatedAudioLayer, EvaluatedTransition, EvaluatedEffect, EvaluatedMask, SceneMetadata, BlendMode, EvaluationCacheKey, EvaluationResult } from "./types";
+export type { EvaluatedScene, EvaluatedVisualLayer, EvaluatedMediaLayer, EvaluatedTextLayer, EvaluatedAudioLayer, EvaluatedTransition, EvaluatedEffect, EvaluatedMask, SceneMetadata, BlendMode, EvaluationCacheKey, EvaluationResult } from "./types";
 
-// Evaluator
-export { evaluateScene, evaluateSceneCached, getEvaluationCacheStats, clearEvaluationCache, invalidateEvaluationCache } from "./evaluator";
+// Evaluator — primary API
+export { evaluateTimelineScene, evaluateTimelineSceneCached, getEvaluationCacheStats, clearEvaluationCache, invalidateEvaluationCache, normalizeFontFamily } from "./evaluator";
 
 // Cache
 export { getEvaluationCache, resetEvaluationCache, computeClipVersion } from "./cache";

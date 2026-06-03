@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { evaluateScene } from "../evaluator";
+import { evaluateTimelineScene as evaluateScene } from "../evaluator";
 import type { TextClip, Track, MediaAsset, Project } from "@/types";
 
 // Mock Tauri API

@@ -5,7 +5,7 @@ import { useProjectStore } from "@/store/projectStore";
 import { useTimelineStore } from "@/store/timelineStore";
 import { useUIStore } from "@/store/uiStore";
 import { useSettingsStore } from "@/store/settingsStore";
-import { evaluateSceneCached } from "@/core/evaluation/evaluator";
+import { evaluateTimelineSceneCached } from "@/core/evaluation/evaluator";
 import { getFrameScheduler } from "@/core/scheduler/FrameScheduler";
 import { getActiveSessionOrNull, subscribeToSessionChanges } from "@/core/runtime/ProjectSession";
 import { PreviewTransport } from "./PreviewTransport";
@@ -157,7 +157,7 @@ export const ProgramPreview: React.FC = () => {
   renderStateRef.current.canvasHeight = canvasHeight;
 
   const scene = useMemo(() => {
-    return evaluateSceneCached(clockState.time, clips, tracks, mediaAssets, project ?? null, epoch);
+    return evaluateTimelineSceneCached(clockState.time, clips, tracks, mediaAssets, project ?? null, epoch);
   }, [tracks, clips, mediaAssets, clockState.time, project, epoch]);
 
   // =========================================================================
@@ -495,46 +495,18 @@ export const ProgramPreview: React.FC = () => {
       <div className="flex items-center px-4 h-10 shrink-0 gap-2">
         <span className="text-[13px] font-semibold text-text-primary tracking-tight">Program Preview</span>
         <span className="text-[13px] text-text-muted">— Timeline</span>
-        <button
-          onClick={() => setShowSafeOverlay((s) => !s)}
-          className={cn(
-            "ml-auto px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer",
-            showSafeOverlay ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6"
-          )}
-          title="Toggle Title/Action Safe Zones"
-          aria-label="Toggle Title/Action Safe Zones"
-        >
+        <button onClick={() => setShowSafeOverlay((s) => !s)} className={cn("ml-auto px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer", showSafeOverlay ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6")} title="Toggle Title/Action Safe Zones" aria-label="Toggle Title/Action Safe Zones">
           Safe Zones
         </button>
-        <button
-          onClick={() => setShowTelemetry((s) => !s)}
-          className={cn(
-            "px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer",
-            showTelemetry ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6"
-          )}
-          title="Toggle render telemetry"
-          aria-label="Toggle render telemetry"
-        >
+        <button onClick={() => setShowTelemetry((s) => !s)} className={cn("px-2 h-6 rounded text-[10px] font-medium transition-colors cursor-pointer", showTelemetry ? "bg-accent/20 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/6")} title="Toggle render telemetry" aria-label="Toggle render telemetry">
           Stats
         </button>
       </div>
 
       {/* ── Video Area ─────────────────────────────────────────────── */}
       <div className="flex-1 flex items-center justify-center overflow-hidden bg-[#06080a] relative">
-        <div
-          ref={containerRef}
-          onPointerDownCapture={handlePreviewPointerDownCapture}
-          className={cn(
-            "w-full h-full flex items-center justify-center relative z-10 overflow-hidden",
-            isPanning && "cursor-grabbing",
-            spacePressed && !isPanning && "cursor-grab"
-          )}
-        >
-          <div
-            data-testid="program-preview-viewport"
-            className="relative flex shrink-0 items-center justify-center overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.36)]"
-            style={{ width: displayWidth, height: displayHeight }}
-          >
+        <div ref={containerRef} onPointerDownCapture={handlePreviewPointerDownCapture} className={cn("w-full h-full flex items-center justify-center relative z-10 overflow-hidden", isPanning && "cursor-grabbing", spacePressed && !isPanning && "cursor-grab")}>
+          <div data-testid="program-preview-viewport" className="relative flex shrink-0 items-center justify-center overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.36)]" style={{ width: displayWidth, height: displayHeight }}>
             <>
               {/* Canvas-based preview (matches export rendering) */}
               <canvas
@@ -549,34 +521,17 @@ export const ProgramPreview: React.FC = () => {
               />
 
               {/* Transform overlay for selected clips */}
-              <TransformOverlay
-                canvasWidth={canvasWidth}
-                canvasHeight={canvasHeight}
-                scale={scale}
-                viewport={previewViewport}
-                displayOffset={{ x: offsetX, y: offsetY }}
-                displayWidth={displayWidth}
-                displayHeight={displayHeight}
-                currentTime={currentTime}
-              />
+              <TransformOverlay canvasWidth={canvasWidth} canvasHeight={canvasHeight} scale={scale} viewport={previewViewport} displayOffset={{ x: offsetX, y: offsetY }} displayWidth={displayWidth} displayHeight={displayHeight} currentTime={currentTime} />
 
               {/* Title & Action Safe Areas Overlay */}
-              <SafeOverlay
-                visible={showSafeOverlay}
-                displayWidth={displayWidth}
-                displayHeight={displayHeight}
-                displayOffset={{ x: offsetX, y: offsetY }}
-              />
+              <SafeOverlay visible={showSafeOverlay} displayWidth={displayWidth} displayHeight={displayHeight} displayOffset={{ x: offsetX, y: offsetY }} />
             </>
           </div>
         </div>
 
         {/* Professional empty state */}
         {clips.length === 0 && (
-          <div
-            className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none mx-auto"
-            style={{ width: displayWidth, height: displayHeight }}
-          >
+          <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none mx-auto" style={{ width: displayWidth, height: displayHeight }}>
             <div className="text-center space-y-3">
               <div className="text-sm font-medium text-text-muted">No clips in sequence</div>
               <div className="text-xs text-text-muted/80 space-y-1 font-mono">
@@ -621,24 +576,14 @@ export const ProgramPreview: React.FC = () => {
           <div className="flex items-center gap-1">
             {/* Speed selection */}
             <div className="relative" ref={speedMenuRef}>
-              <PlaybackSpeedSelector
-                playbackSpeed={playbackSpeed}
-                speedMenuOpen={speedMenuOpen}
-                setSpeedMenuOpen={setSpeedMenuOpen}
-                setSpeed={setSpeed}
-              />
+              <PlaybackSpeedSelector playbackSpeed={playbackSpeed} speedMenuOpen={speedMenuOpen} setSpeedMenuOpen={setSpeedMenuOpen} setSpeed={setSpeed} />
             </div>
 
             <div className="w-px h-3 bg-white/10 mx-0.5" />
 
             {/* Playback Quality selection */}
             <div className="relative" ref={qualityMenuRef}>
-              <PlaybackQualitySelector
-                previewQuality={previewQuality}
-                qualityMenuOpen={qualityMenuOpen}
-                setQualityMenuOpen={setQualityMenuOpen}
-                setPreviewQuality={setPreviewQuality}
-              />
+              <PlaybackQualitySelector previewQuality={previewQuality} qualityMenuOpen={qualityMenuOpen} setQualityMenuOpen={setQualityMenuOpen} setPreviewQuality={setPreviewQuality} />
             </div>
           </div>
         }
@@ -646,37 +591,16 @@ export const ProgramPreview: React.FC = () => {
           <>
             {/* Aspect menu */}
             <div className="relative shrink-0" ref={aspectMenuRef}>
-              <AspectSelector
-                aspectMenuOpen={aspectMenuOpen}
-                setAspectMenuOpen={setAspectMenuOpen}
-                previewAspectPreset={previewAspectPreset}
-                selectAspectPreset={selectAspectPreset}
-                canvasWidth={canvasWidth}
-                canvasHeight={canvasHeight}
-              />
+              <AspectSelector aspectMenuOpen={aspectMenuOpen} setAspectMenuOpen={setAspectMenuOpen} previewAspectPreset={previewAspectPreset} selectAspectPreset={selectAspectPreset} canvasWidth={canvasWidth} canvasHeight={canvasHeight} />
             </div>
 
-            <button
-              onClick={() => setPreviewScaleMode((m) => (m === "fit" ? "fill" : "fit"))}
-              className="w-6 h-6 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors cursor-pointer"
-              title={
-                previewScaleMode === "fit"
-                  ? "Fill preview — scale to cover (crop edges)"
-                  : "Fit preview — show entire frame (letterbox)"
-              }
-              aria-label={previewScaleMode === "fit" ? "Fill preview" : "Fit preview"}
-            >
+            <button onClick={() => setPreviewScaleMode((m) => (m === "fit" ? "fill" : "fit"))} className="w-6 h-6 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors cursor-pointer" title={previewScaleMode === "fit" ? "Fill preview — scale to cover (crop edges)" : "Fit preview — show entire frame (letterbox)"} aria-label={previewScaleMode === "fit" ? "Fill preview" : "Fit preview"}>
               {previewScaleMode === "fit" ? <Expand className="w-3.5 h-3.5" /> : <Shrink className="w-3.5 h-3.5" />}
             </button>
 
             <div className="w-px h-4 bg-white/10 mx-1" />
 
-            <VolumeControl
-              isMuted={isMuted}
-              setIsMuted={setIsMuted}
-              volume={volume}
-              setVolume={setVolume}
-            />
+            <VolumeControl isMuted={isMuted} setIsMuted={setIsMuted} volume={volume} setVolume={setVolume} />
           </>
         }
       />

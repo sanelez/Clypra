@@ -10,7 +10,7 @@ import { FrameRequest } from "@/core/resources";
 
 // Mock dependencies
 vi.mock("../../evaluation/evaluator", () => ({
-  evaluateSceneCached: vi.fn(() => ({
+  evaluateTimelineSceneCached: vi.fn(() => ({
     visualLayers: [],
     audioLayers: [],
     transitions: [],

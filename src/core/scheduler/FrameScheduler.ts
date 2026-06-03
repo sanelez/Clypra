@@ -16,7 +16,7 @@
 
 import type { FrameRequest, FrameResult, RenderResourceHandle } from "../resources/types";
 import type { Clip, Track, MediaAsset, Project } from "@/types";
-import { evaluateSceneCached } from "../evaluation/evaluator";
+import { evaluateTimelineSceneCached } from "../evaluation/evaluator";
 import { rasterizeScene } from "../render/rasterizer";
 import { getResourceCache } from "../resources/ResourceCache";
 import { getFontLoader } from "../fonts/FontLoader";
@@ -399,7 +399,7 @@ export class FrameScheduler {
       job.progress = 0.3;
       const evalStartTime = Date.now();
 
-      const scene = evaluateSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch);
+      const scene = evaluateTimelineSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch);
 
       job.metrics.evaluationTimeMs = Date.now() - evalStartTime;
       this.stats.totalEvaluationTimeMs += job.metrics.evaluationTimeMs;
@@ -544,7 +544,7 @@ export class FrameScheduler {
    */
   private async preloadResources(job: FrameJob): Promise<void> {
     // Evaluate scene to discover required resources
-    const scene = evaluateSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch);
+    const scene = evaluateTimelineSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch);
 
     const resourceCache = getResourceCache();
     const loadPromises: Promise<void>[] = [];
@@ -630,7 +630,7 @@ export class FrameScheduler {
    */
   private async preloadFonts(job: FrameJob): Promise<void> {
     // Evaluate scene to discover required fonts
-    const scene = evaluateSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch);
+    const scene = evaluateTimelineSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch);
 
     const fontLoader = getFontLoader();
     const fontDescriptors = [];

@@ -1,5 +1,5 @@
 import { vi, describe, expect, it } from "vitest";
-import { evaluateScene } from "@/core/evaluation/evaluator";
+import { evaluateTimelineScene as evaluateScene } from "@/core/evaluation/evaluator";
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (value: string) => value,

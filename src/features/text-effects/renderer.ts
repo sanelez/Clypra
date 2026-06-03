@@ -1,71 +1,75 @@
-import { evaluateScene, textEffectConfigToScene, defaultConfig as engineDefaultConfig, WebGLCompositor, type TextEffectConfig } from "@clypra/engine";
+import { evaluateScene as engineEvaluateScene, textEffectConfigToScene, defaultConfig as engineDefaultConfig, supportsCtxFilter, supportsOffscreenCanvas, WebGLCompositor, type TextEffectConfig } from "@clypra/engine";
 import { TextEffectDefinition } from "./types/types";
 import { hasRegisteredEngine, renderRegisteredEffect, _buildConfig } from "./registry";
 import { getFontLoader } from "@/core/fonts/FontLoader";
 
-// ─── ctx.filter support detection ────────────────────────────────────────────
-// Tauri WebView (WKWebView on macOS) does not support ctx.filter, which the
-// engine uses for stroke blur and glow effects. Detect once at module load and
-// use the WebGLCompositor workaround when unsupported.
-let _ctxFilterSupported: boolean | null = null;
-let _compositor: InstanceType<typeof WebGLCompositor> | null = null;
+// ─── Shared WebGLCompositor ───────────────────────────────────────────────────
+// Platform capability detection (supportsCtxFilter) is now provided by
+// @clypra/engine/platform.ts — the single canonical implementation.
+// This module no longer maintains its own detection state.
 
-function isCtxFilterSupported(): boolean {
-  if (_ctxFilterSupported !== null) return _ctxFilterSupported;
-  try {
-    const test = document.createElement("canvas").getContext("2d")!;
-    test.filter = "blur(4px)";
-    _ctxFilterSupported = test.filter !== "none" && test.filter !== "" && test.filter !== "blur(4px)";
-    // Some WebViews accept the assignment silently but don't actually apply it —
-    // check if the filter string round-trips correctly.
-    _ctxFilterSupported = test.filter.includes("blur");
-  } catch {
-    _ctxFilterSupported = false;
-  }
-  return _ctxFilterSupported;
-}
+let _compositor: WebGLCompositor | null = null;
 
-function getCompositor(): InstanceType<typeof WebGLCompositor> | null {
+function getCompositor(): WebGLCompositor | null {
   if (_compositor !== null) return _compositor;
+  if (typeof document === "undefined") return null;
   _compositor = new WebGLCompositor();
   return _compositor.isSupported ? _compositor : null;
 }
 
 /**
- * Draw an evaluated scene to the target canvas.
- * Routes through WebGLCompositor when ctx.filter is unsupported (Tauri WebView).
+ * Draw a SceneDocument to the target canvas context.
+ *
+ * Routes through WebGLCompositor when ctx.filter is unsupported (WKWebView on
+ * macOS Tauri). On standard browsers and Windows WebView2, evaluates directly
+ * onto the target context with no intermediate allocation.
  */
 function drawScene(targetCtx: CanvasRenderingContext2D, cfg: TextEffectConfig, time: number): void {
   const scene = getOrBuildScene(cfg);
   const w = cfg.canvasWidth as number;
   const h = cfg.canvasHeight as number;
 
-  if (!isCtxFilterSupported()) {
-    // ctx.filter unsupported — render to OffscreenCanvas first, then composite
-    // via WebGLCompositor which applies blur/glow as WebGL post-fx.
+  if (!supportsCtxFilter()) {
+    // WKWebView: ctx.filter is a no-op. Render to an intermediate canvas then
+    // composite via WebGLCompositor which applies blur/bloom as WebGL post-fx.
     const compositor = getCompositor();
-    const off = new OffscreenCanvas(w, h);
-    const offCtx = off.getContext("2d") as OffscreenCanvasRenderingContext2D;
+
+    let off: HTMLCanvasElement | OffscreenCanvas;
+    if (supportsOffscreenCanvas()) {
+      off = new OffscreenCanvas(w, h);
+    } else {
+      off = document.createElement("canvas");
+      off.width = w;
+      off.height = h;
+    }
+
+    const offCtx = off.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
     offCtx.clearRect(0, 0, w, h);
-    evaluateScene(scene, time, offCtx as unknown as CanvasRenderingContext2D);
+    engineEvaluateScene(scene, time, offCtx as unknown as CanvasRenderingContext2D);
 
     if (compositor) {
       compositor.renderToContext(targetCtx, off, { blur: 0, bloom: 0, bloomThreshold: 0.6 });
     } else {
-      // WebGL also unsupported — draw flat (no blur/glow, best we can do)
+      // WebGL also unavailable — flat blit, no blur/bloom post-fx
       targetCtx.clearRect(0, 0, w, h);
-      targetCtx.drawImage(off, 0, 0);
+      targetCtx.drawImage(off as CanvasImageSource, 0, 0);
+    }
+
+    // Release DOM canvas backing store if OffscreenCanvas was unavailable
+    if (!(off instanceof OffscreenCanvas)) {
+      (off as HTMLCanvasElement).width = 0;
+      (off as HTMLCanvasElement).height = 0;
     }
     return;
   }
 
-  // ctx.filter is supported — evaluate directly onto the target context
+  // ctx.filter supported — evaluate directly onto the target context
   targetCtx.clearRect(0, 0, w, h);
-  evaluateScene(scene, time, targetCtx);
+  engineEvaluateScene(scene, time, targetCtx);
 }
 
-// textEffectConfigToScene is pure — cache by config identity to avoid rebuilding
-// on every animation frame.
+// textEffectConfigToScene is pure — cache by config object identity to avoid
+// rebuilding the full SceneDocument on every animation frame.
 const _sceneCache = new WeakMap<object, ReturnType<typeof textEffectConfigToScene>>();
 
 function getOrBuildScene(cfg: TextEffectConfig) {
@@ -76,61 +80,49 @@ function getOrBuildScene(cfg: TextEffectConfig) {
 }
 
 /**
- * Build the engine config from a TextEffectDefinition + runtime params.
- * Correctly maps width/height → canvasWidth/canvasHeight for the engine.
+ * Build a TextEffectConfig from a TextEffectDefinition + runtime params.
+ * Maps width/height (local engine keys) → canvasWidth/canvasHeight (engine keys).
  */
 function buildEngineConfig(effect: TextEffectDefinition, text: string, fontSize: number, canvasWidth: number, canvasHeight: number, time?: number, clipStartTime?: number, clipDuration?: number): TextEffectConfig {
   const builtCfg = _buildConfig(effect, text, fontSize, canvasWidth, canvasHeight, time, clipStartTime, clipDuration);
   return {
     ...engineDefaultConfig,
     ...builtCfg,
-    // _buildConfig writes to width/height (legacy local-engine keys).
-    // The published engine uses canvasWidth/canvasHeight for text centering.
     canvasWidth,
     canvasHeight,
   } as TextEffectConfig;
 }
 
 /**
- * Core Canvas 2D Text Effects Rendering Context Engine.
- * Renders full text layers onto any rendering context.
+ * Render a text effect onto any 2D canvas context.
  *
- * Uses evaluateScene (the correct full pipeline) for API-fetched effects so
- * that stroke blur (ctx.filter), glow compositing, bevel, and all other
- * post-fx are applied correctly.
+ * Uses the full @clypra/engine pipeline (evaluateScene) for API-fetched effects
+ * so stroke blur (ctx.filter), glow compositing, bevel, and all post-fx are
+ * applied correctly. Locally registered engines (studio-generated classes) are
+ * called via their drawFrame() method.
  */
 export const renderTextEffectToContext = (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, text: string, effect: TextEffectDefinition, fontSize: number, _x: number, _y: number, canvasWidth: number, canvasHeight: number, time?: number, clipStartTime?: number, clipDuration?: number) => {
-  // ── Locally registered engine (studio-generated class) ────────────────────
-  // These are registered via register() in registry.ts and handle their own
-  // animation interception internally.
   if (hasRegisteredEngine(effect?.id)) {
-    const originalFillText = ctx.fillText;
-    const originalStrokeText = ctx.strokeText;
+    const originalFillText = ctx.fillText.bind(ctx);
+    const originalStrokeText = ctx.strokeText.bind(ctx);
     renderRegisteredEffect(ctx, effect, text, fontSize, canvasWidth, canvasHeight, time, clipStartTime, clipDuration);
     ctx.fillText = originalFillText;
     ctx.strokeText = originalStrokeText;
     return;
   }
 
-  // ── @clypra/engine pipeline (all API-fetched effects) ─────────────────────
-  // Routes through drawScene which detects ctx.filter support and falls back
-  // to WebGLCompositor when running inside Tauri's WKWebView.
   const cfg = buildEngineConfig(effect, text, fontSize, canvasWidth, canvasHeight, time, clipStartTime, clipDuration);
   drawScene(ctx as CanvasRenderingContext2D, cfg, time ?? 0);
 };
 
 /**
  * Render a text effect to an HTMLCanvasElement synchronously.
- * Canvas must be sized correctly before calling.
- *
- * For preview use, prefer renderTextEffectAsync which waits for fonts first.
+ * For preview, prefer renderTextEffectAsync which waits for fonts first.
  */
 export const renderTextEffect = (canvas: HTMLCanvasElement, text: string, effect: TextEffectDefinition, fontSize: number, time?: number) => {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  // Size must be set before drawing — engine centers relative to canvas dimensions.
-  // Only reset if not already sized to avoid clearing a pre-sized canvas.
   if (canvas.width === 0 || canvas.height === 0) {
     canvas.width = 640;
     canvas.height = 360;
@@ -141,31 +133,26 @@ export const renderTextEffect = (canvas: HTMLCanvasElement, text: string, effect
 };
 
 /**
- * Render a text effect to an HTMLCanvasElement, waiting for fonts first.
+ * Render a text effect to an HTMLCanvasElement after ensuring fonts are loaded.
  *
- * This is the correct entry point for preview rendering. It:
+ * This is the correct entry point for preview rendering:
  * 1. Sets canvas dimensions
- * 2. Injects/Loads the required font if needed via FontLoader
- * 3. Waits for the font to load
- * 4. Draws via evaluateScene (full engine pipeline including ctx.filter)
- * 5. Re-draws after document.fonts.ready to catch any late-loading variants
+ * 2. Pre-loads the required font via FontLoader (deduped, cached)
+ * 3. Waits for document.fonts.ready
+ * 4. Draws via engineEvaluateScene (full pipeline incl. ctx.filter / WebGL fallback)
  */
 export const renderTextEffectAsync = async (canvas: HTMLCanvasElement, text: string, effect: TextEffectDefinition, fontSize: number, time?: number): Promise<void> => {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  // Step 1 — Set canvas dimensions before any drawing.
-  // Engine centers text relative to canvasWidth/canvasHeight.
   canvas.width = 640;
   canvas.height = 360;
 
   const cfg = buildEngineConfig(effect, text, fontSize, canvas.width, canvas.height, time);
 
-  // Step 2 — Injects/Loads the required font if needed.
   if (effect?.font?.family) {
     try {
-      const fontLoader = getFontLoader();
-      await fontLoader.ensureFont({
+      await getFontLoader().ensureFont({
         family: effect.font.family,
         weight: effect.font.weight,
         style: effect.font.style,
@@ -175,21 +162,15 @@ export const renderTextEffectAsync = async (canvas: HTMLCanvasElement, text: str
     }
   }
 
-  // Wait for document.fonts.ready to ensure all fonts are fully registered before
-  // the first draw, preventing fallback-font renders.
   if (typeof document !== "undefined" && document.fonts) {
     await document.fonts.ready;
   }
 
-  // Step 3 — Draw (routes through WebGLCompositor if ctx.filter unsupported)
-  const draw = () => drawScene(ctx, cfg, time ?? 0);
-
-  draw();
+  drawScene(ctx, cfg, time ?? 0);
 };
 
 /**
- * Renders the full text effect on a configurable offscreen canvas and returns
- * a high-resolution export PNG data URL.
+ * Render a text effect to a PNG data URL (export / thumbnail use).
  */
 export const renderTextEffectToDataURL = (text: string, effect: TextEffectDefinition, fontSize: number, width = 800, height = 400): string => {
   const offscreen = document.createElement("canvas");
