@@ -137,142 +137,64 @@ export const MobileEditorLayout: React.FC = () => {
   const hasSelectedClip = selectedClipIds.length > 0;
 
   return (
-    <div className="w-full h-full flex flex-col app-shell overflow-hidden p-1">
+    <div className="w-full h-full flex flex-col app-shell overflow-hidden p-1  pt-0">
       <TopBar />
 
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden gap-2">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden gap-1">
         {/* Top Section: Video Preview */}
         <div className="flex-1 min-h-[200px] flex flex-col overflow-hidden panel-shell">
           <PreviewPanel />
         </div>
 
         {/* Middle Section: Touch Action Toolbar */}
-        <div className="h-14 shrink-0 panel-shell flex items-center justify-between px-3 md:px-4 bg-surface/50 backdrop-blur-sm select-none">
-          {/* History Controls */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={undo}
-              disabled={!historyState.canUndo}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
-                historyState.canUndo
-                  ? "text-text-primary hover:bg-white/6 hover:text-accent"
-                  : "text-text-muted cursor-not-allowed"
-              }`}
-              title="Undo"
-              aria-label="Undo"
-            >
-              <Undo2 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={redo}
-              disabled={!historyState.canRedo}
-              className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
-                historyState.canRedo
-                  ? "text-text-primary hover:bg-white/6 hover:text-accent"
-                  : "text-text-muted cursor-not-allowed"
-              }`}
-              title="Redo"
-              aria-label="Redo"
-            >
-              <Redo2 className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="w-px h-6 bg-white/10" />
-
+        <div className="h-10 shrink-0 panel-shell flex items-center justify-between px-[3px] bg-surface/50 backdrop-blur-sm select-none gap-0.5 w-full" style={{ boxShadow: "none" }}>
           {/* Action Tabs */}
-          <div className="flex items-center gap-1.5 flex-1 justify-center max-w-sm overflow-x-auto scrollbar-none px-1">
-            <button
-              onClick={importMedia}
-              disabled={isImporting}
-              className="flex flex-col items-center justify-center w-11 h-11 rounded-lg hover:bg-white/6 text-text-primary active:bg-white/10 transition-colors cursor-pointer shrink-0"
-              title="Import Files"
-            >
-              <Plus className="w-4 h-4 text-accent-soft" />
-              <span className="text-[9px] font-medium mt-0.5">Import</span>
-            </button>
+          <button onClick={importMedia} disabled={isImporting} className="flex flex-col flex-1 items-center justify-center rounded-sm bg-white/6 text-text-primary active:bg-white/10 transition-colors cursor-pointer shrink-0" title="Import Files">
+            <Plus className="w-4 h-4 text-accent-soft" />
+            <span className="text-[9px] font-medium mt-0.5">Import</span>
+          </button>
 
-            <button
-              onClick={() => openLibraryWithTab("media")}
-              className="flex flex-col items-center justify-center w-11 h-11 rounded-lg hover:bg-white/6 text-text-primary active:bg-white/10 transition-colors cursor-pointer shrink-0"
-              title="Media Assets"
-            >
-              <LibraryIcon className="w-4 h-4" />
-              <span className="text-[9px] font-medium mt-0.5">Media</span>
-            </button>
+          <button onClick={() => openLibraryWithTab("media")} className="flex flex-col flex-1 items-center justify-center rounded-sm bg-white/6 text-text-primary active:bg-white/10 transition-colors cursor-pointer shrink-0" title="Media Assets">
+            <LibraryIcon className="w-4 h-4" />
+            <span className="text-[9px] font-medium mt-0.5">Media</span>
+          </button>
 
-            <button
-              onClick={() => openLibraryWithTab("text")}
-              className="flex flex-col items-center justify-center w-11 h-11 rounded-lg hover:bg-white/6 text-text-primary active:bg-white/10 transition-colors cursor-pointer shrink-0"
-              title="Add Text"
-            >
-              <Type className="w-4 h-4" />
-              <span className="text-[9px] font-medium mt-0.5">Text</span>
-            </button>
+          <button onClick={() => openLibraryWithTab("text")} className="flex flex-col flex-1 items-center justify-center rounded-sm bg-white/6 text-text-primary active:bg-white/10 transition-colors cursor-pointer shrink-0" title="Add Text">
+            <Type className="w-4 h-4" />
+            <span className="text-[9px] font-medium mt-0.5">Text</span>
+          </button>
 
-            <button
-              onClick={() => openLibraryWithTab("audio")}
-              className="flex flex-col items-center justify-center w-11 h-11 rounded-lg hover:bg-white/6 text-text-primary active:bg-white/10 transition-colors cursor-pointer shrink-0"
-              title="Add Audio"
-            >
-              <Music className="w-4 h-4" />
-              <span className="text-[9px] font-medium mt-0.5">Audio</span>
-            </button>
+          <button onClick={() => openLibraryWithTab("audio")} className="flex flex-col flex-1 items-center justify-center rounded-sm bg-white/6 text-text-primary active:bg-white/10 transition-colors cursor-pointer shrink-0" title="Add Audio">
+            <Music className="w-4 h-4" />
+            <span className="text-[9px] font-medium mt-0.5">Audio</span>
+          </button>
 
-            <button
-              onClick={() => openLibraryWithTab("transitions")}
-              className="flex flex-col items-center justify-center w-11 h-11 rounded-lg hover:bg-white/6 text-text-primary active:bg-white/10 transition-colors cursor-pointer shrink-0"
-              title="Transitions"
-            >
-              <Shuffle className="w-4 h-4" />
-              <span className="text-[9px] font-medium mt-0.5">Transitions</span>
-            </button>
-          </div>
+          <button onClick={() => openLibraryWithTab("transitions")} className="flex flex-col flex-1 items-center justify-center rounded-sm bg-white/6 text-text-primary active:bg-white/10 transition-colors cursor-pointer shrink-0" title="Transitions">
+            <Shuffle className="w-4 h-4" />
+            <span className="text-[9px] font-medium mt-0.5">Transitions</span>
+          </button>
 
-          <div className="w-px h-6 bg-white/10" />
-
-          {/* Properties Toggle */}
-          <button
-            onClick={() => setPropertiesSheetOpen(true)}
-            disabled={!hasSelectedClip}
-            className={`w-11 h-11 flex flex-col items-center justify-center rounded-lg transition-colors cursor-pointer shrink-0 ${
-              hasSelectedClip
-                ? "text-text-primary hover:bg-white/6 active:bg-white/10"
-                : "text-text-muted cursor-not-allowed"
-            }`}
-            title="Clip Properties"
-          >
+          <button onClick={() => setPropertiesSheetOpen(true)} disabled={!hasSelectedClip} className={`flex flex-col flex-1 items-center justify-center rounded-sm transition-colors cursor-pointer shrink-0 bg-white/6 active:bg-white/10 ${hasSelectedClip ? "text-text-primary" : "text-text-muted cursor-not-allowed"}`} title="Clip Properties">
             <Sliders className={`w-4 h-4 ${hasSelectedClip ? "text-accent-soft" : ""}`} />
             <span className="text-[9px] font-medium mt-0.5">Adjust</span>
           </button>
         </div>
 
         {/* Bottom Section: Compact Timeline */}
-        <div className="h-60 panel-shell overflow-hidden shrink-0">
+        <div className="h-80 panel-shell overflow-hidden shrink-0">
           <Timeline />
         </div>
       </div>
 
       {/* Library Bottom Sheet Drawer */}
-      <BottomSheet
-        title="Asset Library"
-        isOpen={mediaSheetOpen}
-        onClose={() => setMediaSheetOpen(false)}
-      >
+      <BottomSheet title="Asset Library" isOpen={mediaSheetOpen} onClose={() => setMediaSheetOpen(false)}>
         <div className="p-3 h-[50vh] flex flex-col">
-          <EnhancedMediaPanel
-            onAddToTimeline={handleAddToTimeline}
-            initialTab={activeMediaTab}
-          />
+          <EnhancedMediaPanel onAddToTimeline={handleAddToTimeline} initialTab={activeMediaTab} />
         </div>
       </BottomSheet>
 
       {/* Properties/Adjust Bottom Sheet Drawer */}
-      <BottomSheet
-        title="Clip Adjustments"
-        isOpen={propertiesSheetOpen}
-        onClose={() => setPropertiesSheetOpen(false)}
-      >
+      <BottomSheet title="Clip Adjustments" isOpen={propertiesSheetOpen} onClose={() => setPropertiesSheetOpen(false)}>
         <div className="p-3 h-[50vh] flex flex-col">
           <PropertiesPanel />
         </div>

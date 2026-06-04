@@ -56,6 +56,7 @@ export interface CreateTextClipOptions {
  * Create a text clip with sensible defaults.
  */
 export function createTextClip(options: CreateTextClipOptions): TextClip {
+  const defaultFontSize = options.styleId ? 96 : 48;
   const {
     trackId,
     startTime,
@@ -63,7 +64,7 @@ export function createTextClip(options: CreateTextClipOptions): TextClip {
     text = "Text",
     canvasWidth,
     canvasHeight,
-    fontSize = 48,
+    fontSize = defaultFontSize,
     fontFamily = "Inter, system-ui, sans-serif",
     color = "#ffffff",
     bold = false,

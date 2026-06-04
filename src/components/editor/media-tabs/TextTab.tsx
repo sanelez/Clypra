@@ -496,7 +496,7 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
             )}
 
             {/* Effects Display Grid */}
-            {activeTab === "effects" && <NewEffectGrid searchQuery={searchQuery} />}
+            {activeTab === "effects" && <NewEffectGrid searchQuery={searchQuery} onAddToTimeline={onAddToTimeline} />}
 
             {/* Templates Display Grid */}
             {activeTab === "templates" && (

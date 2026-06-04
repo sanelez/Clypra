@@ -11,9 +11,10 @@ const CATEGORIES = ["3d", "neon", "metallic", "glitch", "retro", "gradient", "gr
 
 interface EffectGridProps {
   searchQuery?: string;
+  onAddToTimeline?: (payload: any, type: any) => void;
 }
 
-export function EffectGrid({ searchQuery = "" }: EffectGridProps) {
+export function EffectGrid({ searchQuery = "", onAddToTimeline }: EffectGridProps) {
   const [activeCategory, setActiveCategory] = useState("3d");
   const { index, indexLoading, indexError, loadCategory } = useEffectsStore();
 
@@ -47,8 +48,22 @@ export function EffectGrid({ searchQuery = "" }: EffectGridProps) {
       setTimeout(() => {
         completeDownload(itemId, "effect");
 
-        // TODO: Add to timeline functionality
-        console.log("Apply effect to timeline:", fullEffect);
+        const targetEffect = fullEffect || item;
+        onAddToTimeline?.(
+          {
+            name: targetEffect.name,
+            text: targetEffect.text || "CLYPRA", // Use default text from full definition
+            presetType: "effect",
+            styleId: targetEffect.id,
+            fontFamily: targetEffect.font?.family,
+            color: targetEffect.fills?.[0]?.color,
+            fontWeight: targetEffect.font?.weight,
+            fontStyle: targetEffect.font?.style,
+            stroke: targetEffect.strokes?.[0] ? { color: targetEffect.strokes[0].color, width: targetEffect.strokes[0].width } : undefined,
+            shadow: targetEffect.shadows?.[0] ? { color: targetEffect.shadows[0].color, blur: targetEffect.shadows[0].blur, offsetX: targetEffect.shadows[0].offsetX ?? 0, offsetY: targetEffect.shadows[0].offsetY ?? 0 } : undefined,
+          },
+          "text",
+        );
       }, 850);
     } catch (err) {
       console.error("[EffectGrid] Failed to load effect:", err);

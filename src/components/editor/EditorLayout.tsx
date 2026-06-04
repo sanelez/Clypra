@@ -131,10 +131,10 @@ export const EditorLayout: React.FC = () => {
   };
 
   return (
-    <div className="w-full h-full flex flex-col app-shell overflow-hidden p-1">
+    <div className="w-full h-full flex flex-col app-shell overflow-hidden p-1 pt-0">
       <TopBar />
 
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden gap-2">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden gap-1">
         <div className="flex-1 min-h-0 flex overflow-hidden gap-2">
           <EnhancedMediaPanel onAddToTimeline={handleAddToTimeline} />
 
