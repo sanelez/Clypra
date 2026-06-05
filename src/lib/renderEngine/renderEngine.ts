@@ -133,6 +133,9 @@ export class RenderEngine {
       clipVersion: options.clipVersion ?? 0,
       transformGraphVersion: options.transformGraphVersion ?? 0,
     });
+
+    // Register active epoch immediately to prevent race conditions during mount
+    registerActiveEpoch(clipId, renderState.epochId);
   }
 
   unregisterClip(clipId: string): void {
@@ -180,7 +183,7 @@ export class RenderEngine {
       epochId,
       interactionState: this._currentInteractionState,
       visibleArtifacts: [], // Populated in Phase 3 by transport layer
-      isFallback: false,
+      isFallback: true,
     };
   }
 

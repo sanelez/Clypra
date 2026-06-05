@@ -274,6 +274,9 @@ export class ProjectSession {
    * Creates/destroys headless video/audio elements as needed.
    */
   syncPreviewMedia(clips: Clip[], assets: MediaAsset[], tracks: Array<{ id: string; type: string }>, syncState: PreviewSyncState): void {
+    if (this._state !== "active") {
+      return;
+    }
     if (!this._previewMediaPool) {
       console.error(`[ProjectSession] PreviewMediaPool is null!`);
       return;
@@ -456,7 +459,10 @@ class SessionRegistry {
    */
   async setActiveSession(session: ProjectSession | null): Promise<void> {
     if (this._activeSession && this._activeSession !== session) {
-      await this._activeSession.dispose();
+      const oldSession = this._activeSession;
+      this._activeSession = null;
+      this._notifyListeners();
+      await oldSession.dispose();
     }
     this._activeSession = session;
     this._notifyListeners();
@@ -505,7 +511,11 @@ export function getActiveSession(): ProjectSession {
  * Returns null if no session is active.
  */
 export function getActiveSessionOrNull(): ProjectSession | null {
-  return sessionRegistry.getActiveSession();
+  const session = sessionRegistry.getActiveSession();
+  if (!session || session.state !== "active") {
+    return null;
+  }
+  return session;
 }
 
 /**

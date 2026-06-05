@@ -5,16 +5,56 @@ const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in 
 
 /**
  * Tauri `invoke` / FFmpeg need a native filesystem path. The webview may use
- * `convertFileSrc` URLs or `file://` URLs elsewhere — normalize before calling Rust.
+ * `convertFileSrc` URLs (`asset://localhost/...`) or `file://` URLs elsewhere —
+ * normalize back to a native FS path before calling Rust.
  */
 export function normalizePathForTauriInvoke(inputPath: string): string {
   const p = inputPath.trim();
+
+  // Handle asset://localhost/<encoded-path> produced by convertFileSrc on macOS/Linux
+  if (p.startsWith("asset://localhost/") || p.startsWith("asset://localhost%2F")) {
+    try {
+      const url = new URL(p);
+      let pathname = decodeURIComponent(url.pathname.replace(/\+/g, " "));
+      if (pathname.startsWith("//")) {
+        pathname = pathname.replace(/^\/+/, "/");
+      }
+      // Windows: asset://localhost/C:/... → /C:/...
+      if (/^\/[A-Za-z]:/.test(pathname)) {
+        pathname = pathname.slice(1);
+      }
+      return pathname;
+    } catch {
+      return p;
+    }
+  }
+
+  // Handle asset://<encoded-path> (Windows variant: asset:///C:/...)
+  if (p.startsWith("asset://")) {
+    try {
+      const url = new URL(p);
+      let pathname = decodeURIComponent(url.pathname.replace(/\+/g, " "));
+      if (pathname.startsWith("//")) {
+        pathname = pathname.replace(/^\/+/, "/");
+      }
+      if (/^\/[A-Za-z]:/.test(pathname)) {
+        pathname = pathname.slice(1);
+      }
+      return pathname;
+    } catch {
+      return p;
+    }
+  }
+
   if (!p.startsWith("file://")) {
     return p;
   }
   try {
     const url = new URL(p);
     let pathname = decodeURIComponent(url.pathname.replace(/\+/g, " "));
+    if (pathname.startsWith("//")) {
+      pathname = pathname.replace(/^\/+/, "/");
+    }
     // Windows: file:///C:/Users/... → pathname often /C:/Users/...
     if (/^\/[A-Za-z]:/.test(pathname)) {
       pathname = pathname.slice(1);
@@ -33,12 +73,7 @@ export function normalizePathForTauriInvoke(inputPath: string): string {
  * ~20-50ms first frame, ~3-15ms subsequent frames.
  * Returns base64-encoded WebP data URL.
  */
-export async function decodeFrame(
-  videoPath: string,
-  timeSecs: number,
-  width: number,
-  height: number
-): Promise<string> {
+export async function decodeFrame(videoPath: string, timeSecs: number, width: number, height: number): Promise<string> {
   if (!isTauri()) {
     console.warn("[Tauri] decodeFrame bypassed: Non-Tauri environment.");
     return "data:image/png;base64,mockedDataURL";
@@ -54,15 +89,7 @@ export async function decodeFrame(
 /**
  * Extract multiple frames using the native decoder with streaming, instead of sidecar FFmpeg. Much faster for batch extractions.
  */
-export async function decodeFramesStreaming(
-  videoPath: string,
-  timestamps: number[],
-  density: DensityLevel,
-  width: number,
-  height: number,
-  duration: number,
-  onTile: (tile: ThumbnailTile) => void
-): Promise<void> {
+export async function decodeFramesStreaming(videoPath: string, timestamps: number[], density: DensityLevel, width: number, height: number, duration: number, onTile: (tile: ThumbnailTile) => void): Promise<void> {
   if (!isTauri()) {
     console.warn("[Tauri] decodeFramesStreaming bypassed: Non-Tauri environment.");
     return;

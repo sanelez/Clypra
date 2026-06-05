@@ -9,6 +9,7 @@
  */
 
 import { invoke, Channel, convertFileSrc } from "@tauri-apps/api/core";
+import { normalizePathForTauriInvoke } from "./tauri";
 import { getFrameScheduler } from "../core/scheduler/FrameScheduler";
 import { VideoElementPool } from "../core/resources/VideoElementPool";
 import type { Clip, Track, MediaAsset, Project } from "../types";
@@ -119,14 +120,12 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
 
   const startTimeMs = Date.now();
 
-  // Calculate frame times
-  const frameDuration = 1 / frameRate;
+  // Calculate frame times deterministically without floating-point accumulation
+  const totalFrames = Math.round((endTime - startTime) * frameRate);
   const frameTimes: number[] = [];
-  for (let time = startTime; time < endTime; time += frameDuration) {
-    frameTimes.push(time);
+  for (let i = 0; i < totalFrames; i++) {
+    frameTimes.push(startTime + (i / frameRate));
   }
-
-  const totalFrames = frameTimes.length;
 
   if (totalFrames === 0) {
     throw new Error("No frames to export");
@@ -171,7 +170,8 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
       const relativeDuration = overlapEnd - overlapStart;
       const relativeTrimIn = (clip.trimIn || 0) + (overlapStart - clipStart);
       return {
-        path: asset.path,
+        // Normalize to native FS path — asset.path may be an asset:// or file:// URL
+        path: normalizePathForTauriInvoke(asset.path),
         startTime: relativeStartTime,
         duration: relativeDuration,
         trimIn: relativeTrimIn,
@@ -260,6 +260,12 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
           "session-id": sessionId,
         },
       });
+
+      // Release video elements back to pool after frame is written
+      // This allows the pool to reuse elements for subsequent frames
+      for (const video of videoElements.values()) {
+        videoPool.releaseElement(video);
+      }
 
       completedFrames++;
     }

@@ -122,8 +122,25 @@ struct ExportSession {
 static EXPORT_SESSIONS: once_cell::sync::Lazy<Arc<Mutex<HashMap<String, ExportSession>>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
+/// Build an augmented PATH string that includes common Homebrew/system binary
+/// locations. Tauri apps on macOS launch with a stripped environment, so
+/// `ffmpeg` and `ffprobe` (typically in /opt/homebrew/bin or /usr/local/bin)
+/// may not be found with the default PATH.
+fn augmented_path() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    let extra = "/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin";
+    if current.is_empty() {
+        extra.to_string()
+    } else {
+        format!("{}:{}", current, extra)
+    }
+}
+
 fn has_audio_stream(path: &str) -> bool {
+    let path_env = augmented_path();
+
     let output = std::process::Command::new("ffprobe")
+        .env("PATH", &path_env)
         .args([
             "-v", "error",
             "-select_streams", "a",
@@ -132,17 +149,24 @@ fn has_audio_stream(path: &str) -> bool {
             path,
         ])
         .output();
-    
+
     match output {
         Ok(out) => {
             if out.status.success() {
                 let stdout = String::from_utf8_lossy(&out.stdout);
-                stdout.contains("audio")
+                let has_audio = stdout.contains("audio");
+                eprintln!("[has_audio_stream] {} → has_audio={}", path, has_audio);
+                has_audio
             } else {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                eprintln!("[has_audio_stream] ffprobe non-zero exit for {}: {}", path, stderr.trim());
                 false
             }
         }
-        Err(_) => false,
+        Err(e) => {
+            eprintln!("[has_audio_stream] Could not spawn ffprobe (PATH={}): {}", path_env, e);
+            false
+        }
     }
 }
 
@@ -159,6 +183,7 @@ pub async fn start_video_export(
     
     // Build FFmpeg command
     let mut cmd = Command::new("ffmpeg");
+    cmd.env("PATH", augmented_path());
     
     // Input 0: raw RGBA frames from stdin
     cmd.arg("-f")
@@ -439,6 +464,7 @@ pub async fn cancel_video_export(session_id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn check_ffmpeg_available() -> Result<bool, String> {
     let output = Command::new("ffmpeg")
+        .env("PATH", augmented_path())
         .arg("-version")
         .output()
         .await;
@@ -453,6 +479,7 @@ pub async fn check_ffmpeg_available() -> Result<bool, String> {
 #[tauri::command]
 pub async fn get_ffmpeg_version() -> Result<String, String> {
     let output = Command::new("ffmpeg")
+        .env("PATH", augmented_path())
         .arg("-version")
         .output()
         .await

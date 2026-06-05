@@ -44,6 +44,7 @@ export const FILMSTRIP_DENSITY_TIERS: Record<SpatialTier, FilmstripDensityTier> 
  */
 export interface FilmstripTileAddress {
   clipId: string;
+  videoPath?: string; // Optional for compatibility; defaults to clipId in keying
   zoomTier: SpatialTier;
   tileIndex: number;
   /** The exact timestamp this tile represents (seconds) */
@@ -58,6 +59,7 @@ export interface FilmstripTileAddress {
  */
 export function generateViewportTileAddresses(options: {
   clipId: string;
+  videoPath: string;
   zoomTier: SpatialTier;
   trimIn: number;
   trimOut: number;
@@ -70,6 +72,7 @@ export function generateViewportTileAddresses(options: {
 }): FilmstripTileAddress[] {
   const {
     clipId,
+    videoPath,
     zoomTier,
     trimIn,
     trimOut,
@@ -129,6 +132,7 @@ export function generateViewportTileAddresses(options: {
 
     addresses.push({
       clipId,
+      videoPath,
       zoomTier,
       tileIndex: tileIndex++,
       timestamp,
@@ -142,6 +146,9 @@ export function generateViewportTileAddresses(options: {
  * Get the tile key for a given address. Used for Map-based cache lookups.
  */
 export function getTileKey(address: FilmstripTileAddress): string {
+  if (address.videoPath) {
+    return `${address.videoPath}:${address.zoomTier}:${address.timestamp.toFixed(3)}`;
+  }
   return `${address.clipId}:${address.zoomTier}:${address.tileIndex}`;
 }
 

@@ -409,4 +409,234 @@ describe("FilmstripCache Aggressive Cheating", () => {
     expect(mockRequestProgressiveTiers).toHaveBeenCalledTimes(1);
     // Should request normally, not show stale tiles
   });
+
+  it("handles splitting a clip correctly without blank frames or request starvation", () => {
+    const onUpdate1 = vi.fn();
+    const onUpdate2 = vi.fn();
+    let capturedOnArtifact1: ((artifact: any) => void) | null = null;
+    let capturedOnArtifact2: ((artifact: any) => void) | null = null;
+
+    mockRequestProgressiveTiers.mockImplementation((opts: any) => {
+      if (opts.clipId === "clip-1") {
+        capturedOnArtifact1 = opts.onArtifact;
+      } else if (opts.clipId === "clip-2") {
+        capturedOnArtifact2 = opts.onArtifact;
+      }
+      return vi.fn();
+    });
+
+    // 1. Initial request for clip-1 (0 to 60s)
+    cache.requestFilmstrip({
+      clipId: "clip-1",
+      videoPath: "/test.mp4",
+      trimIn: 0,
+      trimOut: 60,
+      duration: 60,
+      clipStartTime: 0,
+      clipWidthPx: 600,
+      spatialTier: SpatialTier.L1,
+      epochId: eid("epoch-1"),
+      viewportScrollLeft: 0,
+      viewportWidth: 1920,
+      pixelsPerSecond: 10,
+      onUpdate: onUpdate1,
+    });
+
+    expect(mockRequestProgressiveTiers).toHaveBeenCalledTimes(1);
+
+    // 2. Split occurs:
+    // Left clip (clip-1) is trimmed: trimIn=0, trimOut=30, clipStartTime=0, clipWidthPx=300
+    // Right clip (clip-2) is created: trimIn=30, trimOut=60, clipStartTime=30, clipWidthPx=300
+    mockRequestProgressiveTiers.mockClear();
+
+    // Request left clip-1 (same epochId, updated bounds)
+    cache.requestFilmstrip({
+      clipId: "clip-1",
+      videoPath: "/test.mp4",
+      trimIn: 0,
+      trimOut: 30,
+      duration: 60,
+      clipStartTime: 0,
+      clipWidthPx: 300,
+      spatialTier: SpatialTier.L1,
+      epochId: eid("epoch-1"),
+      viewportScrollLeft: 0,
+      viewportWidth: 1920,
+      pixelsPerSecond: 10,
+      onUpdate: onUpdate1,
+    });
+
+    // Request right clip-2 (new epochId, since it has a different clipId)
+    cache.requestFilmstrip({
+      clipId: "clip-2",
+      videoPath: "/test.mp4",
+      trimIn: 30,
+      trimOut: 60,
+      duration: 60,
+      clipStartTime: 30,
+      clipWidthPx: 300,
+      spatialTier: SpatialTier.L1,
+      epochId: eid("epoch-2"),
+      viewportScrollLeft: 0,
+      viewportWidth: 1920,
+      pixelsPerSecond: 10,
+      onUpdate: onUpdate2,
+    });
+
+    // Both should trigger new requests
+    expect(mockRequestProgressiveTiers).toHaveBeenCalledTimes(2);
+  });
+
+  it("reuses matching artifacts and disposes non-matching ones during split/trim", () => {
+    const onUpdate = vi.fn();
+    let capturedOnArtifact: ((artifact: any) => void) | null = null;
+
+    mockRequestProgressiveTiers.mockImplementation((opts: any) => {
+      capturedOnArtifact = opts.onArtifact;
+      return vi.fn();
+    });
+
+    // 1. Initial request for clip-1 (0 to 60s)
+    cache.requestFilmstrip({
+      clipId: "clip-1",
+      videoPath: "/test.mp4",
+      trimIn: 0,
+      trimOut: 60,
+      duration: 60,
+      clipStartTime: 0,
+      clipWidthPx: 600,
+      spatialTier: SpatialTier.L1,
+      epochId: eid("epoch-1"),
+      viewportScrollLeft: 0,
+      viewportWidth: 1920,
+      pixelsPerSecond: 10,
+      onUpdate,
+    });
+
+    const art0 = makeArtifact(0);
+    const art5 = makeArtifact(5000);
+    const art10 = makeArtifact(10000);
+    const art15 = makeArtifact(15000);
+    const art20 = makeArtifact(20000);
+    const art25 = makeArtifact(25000);
+    const art30 = makeArtifact(30000);
+
+    emitArtifact(capturedOnArtifact, art0);
+    emitArtifact(capturedOnArtifact, art5);
+    emitArtifact(capturedOnArtifact, art10);
+    emitArtifact(capturedOnArtifact, art15);
+    emitArtifact(capturedOnArtifact, art20);
+    emitArtifact(capturedOnArtifact, art25);
+    emitArtifact(capturedOnArtifact, art30);
+
+    flushRaf();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate.mock.calls[0][0]).toHaveLength(7);
+
+    // 2. Trim/Split occurs:
+    mockRequestProgressiveTiers.mockClear();
+    onUpdate.mockClear();
+
+    cache.requestFilmstrip({
+      clipId: "clip-1",
+      videoPath: "/test.mp4",
+      trimIn: 0,
+      trimOut: 17,
+      duration: 60,
+      clipStartTime: 0,
+      clipWidthPx: 170,
+      spatialTier: SpatialTier.L1,
+      epochId: eid("epoch-1"),
+      viewportScrollLeft: 0,
+      viewportWidth: 1920,
+      pixelsPerSecond: 10,
+      onUpdate,
+    });
+
+    // Expect a new request to be started
+    expect(mockRequestProgressiveTiers).toHaveBeenCalledTimes(1);
+
+    // Matching tiles: 0s, 5s, 10s, 15s (kept)
+    expect(art0.bitmap.close).not.toHaveBeenCalled();
+    expect(art5.bitmap.close).not.toHaveBeenCalled();
+    expect(art10.bitmap.close).not.toHaveBeenCalled();
+    expect(art15.bitmap.close).not.toHaveBeenCalled();
+
+    // Non-matching tiles: 20s, 25s, 30s (disposed)
+    expect(art20.bitmap.close).toHaveBeenCalled();
+    expect(art25.bitmap.close).toHaveBeenCalled();
+    expect(art30.bitmap.close).toHaveBeenCalled();
+
+    // Verify cache entry contains kept artifacts immediately
+    const artifacts = cache.getArtifacts("clip-1");
+    expect(artifacts).toHaveLength(4);
+    expect(artifacts.map(a => a.timestampMs)).toEqual([0, 5000, 10000, 15000]);
+  });
+
+  it("shares cached tiles globally across clips referencing the same videoPath", () => {
+    const onUpdate1 = vi.fn();
+    const onUpdate2 = vi.fn();
+
+    // 1. Request for clip-1 on videoPath "/test.mp4"
+    let capturedOnArtifact: ((artifact: any) => void) | null = null;
+    mockRequestProgressiveTiers.mockImplementation((opts: any) => {
+      capturedOnArtifact = opts.onArtifact;
+      return vi.fn();
+    });
+
+    cache.requestFilmstrip({
+      clipId: "clip-1",
+      videoPath: "/test.mp4",
+      trimIn: 0,
+      trimOut: 10,
+      duration: 60,
+      clipStartTime: 0,
+      clipWidthPx: 100,
+      spatialTier: SpatialTier.L1,
+      epochId: eid("epoch-1"),
+      viewportScrollLeft: 0,
+      viewportWidth: 1920,
+      pixelsPerSecond: 10,
+      onUpdate: onUpdate1,
+    });
+
+    const art5 = {
+      frameId: "f-5",
+      contentHash: "h-5",
+      spatialTier: SpatialTier.L1,
+      bitmap: { width: 80, height: 45, close: vi.fn() } as unknown as ImageBitmap,
+      width: 80,
+      height: 45,
+      timestampMs: 5000,
+      epochId: eid("epoch-1"),
+      source: "fresh-decode" as const,
+    };
+
+    emitArtifact(capturedOnArtifact, art5);
+    flushRaf();
+
+    // 2. Request for clip-2 (new clip ID) on same videoPath "/test.mp4"
+    mockRequestProgressiveTiers.mockClear();
+    cache.requestFilmstrip({
+      clipId: "clip-2",
+      videoPath: "/test.mp4",
+      trimIn: 0,
+      trimOut: 10,
+      duration: 60,
+      clipStartTime: 10,
+      clipWidthPx: 100,
+      spatialTier: SpatialTier.L1,
+      epochId: eid("epoch-2"),
+      viewportScrollLeft: 0,
+      viewportWidth: 1920,
+      pixelsPerSecond: 10,
+      onUpdate: onUpdate2,
+    });
+
+    // Verify clip-2 received the cached artifact from tileCache instantly
+    expect(onUpdate2).toHaveBeenCalled();
+    const resolvedArtifacts = onUpdate2.mock.calls[0][0];
+    expect(resolvedArtifacts).toHaveLength(1);
+    expect(resolvedArtifacts[0].timestampMs).toBe(5000);
+  });
 });

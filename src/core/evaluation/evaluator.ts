@@ -43,11 +43,24 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
   const trackMap = new Map(tracks.map((track) => [track.id, track]));
   const assetMap = new Map(assets.map((asset) => [asset.id, asset]));
 
+  // Determine the max end time of all clips to identify the end of the active timeline
+  const maxEndTime = compositorClips.reduce((max, clip) => {
+    const clipEnd = clip.startTime + clip.duration;
+    return Math.max(max, clipEnd);
+  }, 0);
+
+  // If time is exactly at or slightly past the end of the active timeline (and not in a gap),
+  // clamp it slightly back (e.g., by 0.001s) so that the final frame remains active and rendered.
+  let evalTime = time;
+  if (maxEndTime > 0 && evalTime >= maxEndTime && evalTime < maxEndTime + 0.001) {
+    evalTime = Math.max(0, maxEndTime - 0.001);
+  }
+
   // ─── 1. Active Clip Resolution (Contract §1) ─────────────────────────────
 
   const activeClips = compositorClips.filter((clip) => {
     const clipEnd = getClipEndTime(clip);
-    const isInTimeBounds = clip.startTime <= time && time < clipEnd;
+    const isInTimeBounds = clip.startTime <= evalTime && evalTime < clipEnd;
     const track = trackMap.get(clip.trackId);
     const isVisible = track?.visible ?? true;
     return isInTimeBounds && isVisible;
@@ -72,7 +85,7 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
 
   for (let i = 0; i < sortedClips.length; i++) {
     const clip = sortedClips[i];
-    const offset = time - clip.startTime;
+    const offset = evalTime - clip.startTime;
     const kf = (clip as any).keyframes || {};
 
     const evalX = kf.x !== undefined ? evaluateProperty(kf.x, offset, clip.duration) : clip.x;
@@ -86,7 +99,7 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
 
     if (isTextClip) {
       const textClip = clip as unknown as TextClip;
-      const transitionState = evaluateTransitionState(clip, time, sortedClips);
+      const transitionState = evaluateTransitionState(clip, evalTime, sortedClips);
 
       const evalFontSize = kf.fontSize !== undefined ? evaluateProperty(kf.fontSize, offset, clip.duration) : textClip.fontSize || 48;
       const evalColor = kf.color !== undefined ? evaluateProperty(kf.color, offset, clip.duration) : textClip.color || "#ffffff";
@@ -94,12 +107,12 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
       const evalLineHeight = kf.lineHeight !== undefined ? evaluateProperty(kf.lineHeight, offset, clip.duration) : textClip.lineHeight || 1.2;
 
       const textLayer: EvaluatedTextLayer = {
-        layerId: `${clip.id}-${time}`,
+        layerId: `${clip.id}-${evalTime}`,
         clipId: clip.id,
         role: clip.role,
         zIndex: i,
         layerType: "text",
-        time,
+        time: evalTime,
         clipStartTime: clip.startTime,
         clipDuration: clip.duration,
         x: evalX,
@@ -136,14 +149,14 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
     const asset = assetMap.get(clip.mediaId);
     if (!asset || (asset.type !== "video" && asset.type !== "image")) continue;
 
-    const sourceTime = clip.trimIn + (time - clip.startTime);
+    const sourceTime = clip.trimIn + (evalTime - clip.startTime);
     const sourcePath = asset.path ? convertFileSrc(asset.path) : asset.posterFrame || "";
     if (!sourcePath) continue;
 
-    const transitionState = evaluateTransitionState(clip, time, sortedClips);
+    const transitionState = evaluateTransitionState(clip, evalTime, sortedClips);
 
     const mediaLayer: EvaluatedMediaLayer = {
-      layerId: `${clip.id}-${time}`,
+      layerId: `${clip.id}-${evalTime}`,
       clipId: clip.id,
       role: clip.role,
       zIndex: i,
@@ -179,12 +192,12 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
     if (!hasAudio || !asset) continue;
     if (track?.muted ?? false) continue;
 
-    const sourceTime = clip.trimIn + (time - clip.startTime);
+    const sourceTime = clip.trimIn + (evalTime - clip.startTime);
     const sourcePath = asset.path ? convertFileSrc(asset.path) : "";
     if (!sourcePath) continue;
 
     audioLayers.push({
-      layerId: `${clip.id}-audio-${time}`,
+      layerId: `${clip.id}-audio-${evalTime}`,
       clipId: clip.id,
       mediaId: clip.mediaId,
       sourcePath,
@@ -210,7 +223,7 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
     .join("|");
 
   const metadata: SceneMetadata = {
-    time,
+    time: evalTime,
     canvasWidth: project?.canvasWidth ?? 1920,
     canvasHeight: project?.canvasHeight ?? 1080,
     frameRate: project?.frameRate ?? 30,

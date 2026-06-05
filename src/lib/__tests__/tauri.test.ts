@@ -61,9 +61,14 @@ describe("normalizePathForTauriInvoke", () => {
     expect(normalizePathForTauriInvoke("  file:///home/video.mp4  ")).toBe("/home/video.mp4");
   });
 
-  it("handles asset:// URLs (passes through unchanged)", () => {
+  it("handles asset:// URLs (normalizes to native path)", () => {
     const url = "asset://localhost/test/video.mp4";
-    expect(normalizePathForTauriInvoke(url)).toBe(url);
+    expect(normalizePathForTauriInvoke(url)).toBe("/test/video.mp4");
+  });
+
+  it("handles asset:// URLs with encoded slashes on macOS/Linux", () => {
+    const url = "asset://localhost/%2Ftest%2Fvideo.mp4";
+    expect(normalizePathForTauriInvoke(url)).toBe("/test/video.mp4");
   });
 });
 

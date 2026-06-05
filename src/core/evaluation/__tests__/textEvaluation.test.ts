@@ -341,4 +341,49 @@ describe("Text Layer Evaluation", () => {
       expect(layer.letterSpacing).toBe(2);
     }
   });
+
+  it("resolves the clip at the exact end of the timeline (boundary condition)", () => {
+    const textClip: TextClip = {
+      id: "text-boundary",
+      trackId: "t1",
+      mediaId: "",
+      startTime: 0,
+      duration: 5,
+      trimIn: 0,
+      trimOut: 5,
+      x: 100,
+      y: 100,
+      width: 400,
+      height: 100,
+      opacity: 1.0,
+      rotation: 0,
+      text: "End Frame Text",
+      fontSize: 32,
+      fontFamily: "Inter",
+      color: "#ffffff",
+      fontWeight: "normal",
+      fontStyle: "normal",
+      align: "center",
+      valign: "middle",
+      lineHeight: 1.2,
+      letterSpacing: 0,
+      paddingX: 16,
+      paddingY: 16,
+    };
+
+    // Query at exact clipEnd time (5.0) which is also the maxEndTime of the timeline
+    const sceneAtEnd = evaluateScene(5.0, [textClip as any], tracks, [], project);
+    expect(sceneAtEnd.visualLayers).toHaveLength(1);
+    expect(sceneAtEnd.visualLayers[0].clipId).toBe("text-boundary");
+    expect(sceneAtEnd.metadata.time).toBeCloseTo(4.999, 3);
+
+    // Query slightly past the end time (e.g. 5.0005) - still within 1ms tolerance
+    const sceneSlightlyPast = evaluateScene(5.0005, [textClip as any], tracks, [], project);
+    expect(sceneSlightlyPast.visualLayers).toHaveLength(1);
+    expect(sceneSlightlyPast.metadata.time).toBeCloseTo(4.999, 3);
+
+    // Query significantly past the end time (e.g. 5.01) - should render blank
+    const sceneFarPast = evaluateScene(5.01, [textClip as any], tracks, [], project);
+    expect(sceneFarPast.visualLayers).toHaveLength(0);
+  });
 });
