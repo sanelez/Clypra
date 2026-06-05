@@ -150,6 +150,35 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
     }
   };
 
+  // Collect audio/video clips with audio streams for export mixing
+  const activeTracks = new Set(tracks.filter((t) => !t.muted).map((t) => t.id));
+  const audioClips = clips
+    .filter((clip) => {
+      if (!activeTracks.has(clip.trackId)) return false;
+      const asset = assets.find((a) => a.id === clip.mediaId);
+      if (!asset || (asset.type !== "audio" && asset.type !== "video")) return false;
+      const clipStart = clip.startTime;
+      const clipEnd = clip.startTime + clip.duration;
+      return clipStart < endTime && clipEnd > startTime;
+    })
+    .map((clip) => {
+      const asset = assets.find((a) => a.id === clip.mediaId)!;
+      const clipStart = clip.startTime;
+      const clipEnd = clip.startTime + clip.duration;
+      const overlapStart = Math.max(clipStart, startTime);
+      const overlapEnd = Math.min(clipEnd, endTime);
+      const relativeStartTime = overlapStart - startTime;
+      const relativeDuration = overlapEnd - overlapStart;
+      const relativeTrimIn = (clip.trimIn || 0) + (overlapStart - clipStart);
+      return {
+        path: asset.path,
+        startTime: relativeStartTime,
+        duration: relativeDuration,
+        trimIn: relativeTrimIn,
+        volume: 1.0,
+      };
+    });
+
   // Start FFmpeg export session
   const sessionId = await invoke<string>("start_video_export", {
     config: {
@@ -162,6 +191,7 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
       preset,
       crf,
       pixelFormat,
+      audioClips,
     },
     onProgress: progressChannel,
   });
