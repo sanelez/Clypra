@@ -8,7 +8,7 @@
  *   Timeline → Frame Scheduler → RGBA Frames → FFmpeg → MP4/MOV
  */
 
-import { invoke, Channel } from "@tauri-apps/api/core";
+import { invoke, Channel, convertFileSrc } from "@tauri-apps/api/core";
 import { getFrameScheduler } from "../core/scheduler/FrameScheduler";
 import { VideoElementPool } from "../core/resources/VideoElementPool";
 import type { Clip, Track, MediaAsset, Project } from "../types";
@@ -142,6 +142,14 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
     debug: false,
   });
 
+  // Create progress channel
+  const progressChannel = new Channel<VideoExportProgress>();
+  progressChannel.onmessage = (progress) => {
+    if (onProgress) {
+      onProgress(progress);
+    }
+  };
+
   // Start FFmpeg export session
   const sessionId = await invoke<string>("start_video_export", {
     config: {
@@ -155,6 +163,7 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
       crf,
       pixelFormat,
     },
+    onProgress: progressChannel,
   });
 
   let cancelled = false;
@@ -182,10 +191,13 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
         const trimIn = clip.trimIn || 0;
         const sourceTime = trimIn + clipLocalTime;
 
+        // Resolve path for Tauri webview context
+        const resolvedPath = asset.path.startsWith("asset://") ? asset.path : convertFileSrc(asset.path);
+
         // Acquire video element at exact frame time
         const key = `${clip.id}-${clip.mediaId}`;
         try {
-          const video = await videoPool.acquire(asset.path, sourceTime);
+          const video = await videoPool.acquire(resolvedPath, sourceTime);
           videoElements.set(key, video);
         } catch (error) {
           console.warn(`Failed to acquire video for ${key}:`, error);
@@ -212,19 +224,11 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
 
       const imageData = result.data;
 
-      // Create progress channel
-      const progressChannel = new Channel<VideoExportProgress>();
-      progressChannel.onmessage = (progress) => {
-        if (onProgress) {
-          onProgress(progress);
-        }
-      };
-
-      // Write frame to FFmpeg
-      await invoke("write_export_frame", {
-        sessionId,
-        frameData: Array.from(imageData.data),
-        onProgress: progressChannel,
+      // Write frame to FFmpeg using raw request payload and session-id header
+      await invoke("write_export_frame", new Uint8Array(imageData.data.buffer), {
+        headers: {
+          "session-id": sessionId,
+        },
       });
 
       completedFrames++;

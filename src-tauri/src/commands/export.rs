@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, Request, InvokeBody};
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
@@ -90,6 +90,9 @@ struct ExportSession {
     
     /// Start time
     start_time: std::time::Instant,
+
+    /// Channel for progress updates
+    on_progress: Channel<ExportProgress>,
 }
 
 /// Global export sessions (keyed by session ID).
@@ -100,7 +103,10 @@ static EXPORT_SESSIONS: once_cell::sync::Lazy<Arc<Mutex<HashMap<String, ExportSe
 ///
 /// Returns a session ID that can be used to write frames and finalize.
 #[tauri::command]
-pub async fn start_video_export(config: ExportConfig) -> Result<String, String> {
+pub async fn start_video_export(
+    config: ExportConfig,
+    on_progress: Channel<ExportProgress>,
+) -> Result<String, String> {
     // Generate session ID
     let session_id = uuid::Uuid::new_v4().to_string();
     
@@ -169,6 +175,7 @@ pub async fn start_video_export(config: ExportConfig) -> Result<String, String> 
         current_frame: 0,
         total_frames: config.total_frames,
         start_time: std::time::Instant::now(),
+        on_progress,
     };
     
     // Store session
@@ -184,13 +191,24 @@ pub async fn start_video_export(config: ExportConfig) -> Result<String, String> 
 
 /// Write a frame to the export session.
 ///
-/// Frame data should be raw RGBA bytes (width * height * 4).
+/// Frame data should be raw RGBA bytes (width * height * 4) sent as raw request payload.
 #[tauri::command]
 pub async fn write_export_frame(
-    session_id: String,
-    frame_data: Vec<u8>,
-    on_progress: Channel<ExportProgress>,
+    request: Request<'_>,
 ) -> Result<(), String> {
+    // Extract session-id from headers
+    let headers = request.headers();
+    let session_id = headers
+        .get("session-id")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "Missing session-id header".to_string())?
+        .to_string();
+
+    // Extract raw payload
+    let InvokeBody::Raw(frame_data) = request.body() else {
+        return Err("Expected raw binary payload".to_string());
+    };
+
     let mut sessions = EXPORT_SESSIONS.lock().await;
     
     let session = sessions
@@ -226,7 +244,7 @@ pub async fn write_export_frame(
         fps,
     };
     
-    let _ = on_progress.send(progress_update);
+    let _ = session.on_progress.send(progress_update);
     
     // Log progress periodically
     if session.current_frame % 30 == 0 || session.current_frame == session.total_frames {
