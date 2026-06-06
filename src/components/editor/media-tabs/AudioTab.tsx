@@ -146,7 +146,7 @@ const AudioItem: React.FC<AudioItemProps> = ({ item, onAddToTimeline }) => {
           <img src={item.coverArtUrl} alt={item.name} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-accent/20 to-accent/10">
-            <Music2 className="w-6 h-6 text-accent/60" />
+            <img src="/clypra.svg" alt="Clypra" className="w-8 h-8 object-contain opacity-60" />
           </div>
         )}
         {/* Play/Pause Overlay */}
