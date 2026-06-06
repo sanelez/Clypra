@@ -38,8 +38,20 @@ export class FilmstripTileCache {
   private currentMemoryBytes = 0;
   private generation = 0;
 
-  constructor(memoryBudgetMB: number = 100) {
+  private isArtifactActive?: (art: TransportArtifact) => boolean;
+
+  constructor(memoryBudgetMB: number = 100, isArtifactActive?: (art: TransportArtifact) => boolean) {
     this.memoryBudgetBytes = memoryBudgetMB * 1024 * 1024;
+    this.isArtifactActive = isArtifactActive;
+  }
+
+  private _safeClose(artifact: TransportArtifact): void {
+    if (this.isArtifactActive && this.isArtifactActive(artifact)) {
+      return;
+    }
+    try {
+      artifact.bitmap.close();
+    } catch (e) {}
   }
 
   /**
@@ -48,18 +60,22 @@ export class FilmstripTileCache {
    */
   setTile(address: FilmstripTileAddress, artifact: TransportArtifact): void {
     const key = getTileKey(address);
-    const sizeBytes = artifact.width * artifact.height * 4;
+    const existing = this.tiles.get(key);
 
+    if (existing) {
+      // Only replace if the new artifact is of higher or equal quality
+      if (artifact.spatialTier < existing.artifact.spatialTier) {
+        this._safeClose(artifact);
+        return;
+      }
+      this._safeClose(existing.artifact);
+      this.currentMemoryBytes -= existing.sizeBytes;
+    }
+
+    const sizeBytes = artifact.width * artifact.height * 4;
     // Enforce memory budget
     while (this.currentMemoryBytes + sizeBytes > this.memoryBudgetBytes && this.tiles.size > 0) {
       this._evictLRU();
-    }
-
-    // If replacing, close old bitmap and adjust memory
-    const existing = this.tiles.get(key);
-    if (existing) {
-      existing.artifact.bitmap.close();
-      this.currentMemoryBytes -= existing.sizeBytes;
     }
 
     this.tiles.set(key, {
@@ -119,6 +135,18 @@ export class FilmstripTileCache {
   }
 
   /**
+   * Check if a specific artifact is currently stored in the tile cache.
+   */
+  isArtifactCached(artifact: TransportArtifact): boolean {
+    for (const entry of this.tiles.values()) {
+      if (entry.artifact === artifact) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Get all tile addresses for a clip at a specific zoom tier.
    */
   getTilesForClip(clipId: string, zoomTier: SpatialTier, videoPath?: string): TileCacheEntry[] {
@@ -156,7 +184,7 @@ export class FilmstripTileCache {
     for (const key of toDelete) {
       const entry = this.tiles.get(key);
       if (entry) {
-        entry.artifact.bitmap.close();
+        this._safeClose(entry.artifact);
         this.currentMemoryBytes -= entry.sizeBytes;
         this.tiles.delete(key);
       }
@@ -176,7 +204,7 @@ export class FilmstripTileCache {
    */
   clear(): void {
     for (const entry of this.tiles.values()) {
-      entry.artifact.bitmap.close();
+      this._safeClose(entry.artifact);
     }
     this.tiles.clear();
     this.currentMemoryBytes = 0;
@@ -214,7 +242,7 @@ export class FilmstripTileCache {
 
     if (oldestKey) {
       const entry = this.tiles.get(oldestKey)!;
-      entry.artifact.bitmap.close();
+      this._safeClose(entry.artifact);
       this.currentMemoryBytes -= entry.sizeBytes;
       this.tiles.delete(oldestKey);
     }
