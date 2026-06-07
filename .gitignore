@@ -23,6 +23,7 @@ scratch/
 .idea/
 *.swp
 *.swo
+.kiro/
 
 # System files
 .DS_Store

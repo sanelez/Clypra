@@ -113,7 +113,7 @@ export const MediaTab: React.FC<MediaTabProps> = ({ onAddToTimeline }) => {
         {mediaAssets.length === 0 ? (
           <EmptyState icon={CloudUpload} title="No media imported" description="Import videos, audio, or images to get started" />
         ) : (
-          <div className="grid grid-cols-2 gap-2 p-3">
+          <div className="grid grid-cols-2 gap-2 p-1">
             {mediaAssets.map((asset) => (
               <MediaCard
                 key={asset.id}
