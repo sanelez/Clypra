@@ -195,7 +195,10 @@ pub async fn start_video_export(
         .arg("-framerate")
         .arg(config.frame_rate.to_string())
         .arg("-i")
-        .arg("pipe:0");
+        .arg("pipe:0")
+        // Force constant frame rate (no frame dropping/duplication)
+        .arg("-vsync")
+        .arg("cfr");
 
     // Filter out and collect audio clips that actually contain audio streams
     let mut valid_audio_clips = Vec::new();
@@ -263,17 +266,29 @@ pub async fn start_video_export(
             cmd.arg("-preset").arg(&config.preset);
             cmd.arg("-crf").arg(config.crf.to_string());
             cmd.arg("-pix_fmt").arg(&config.pixel_format);
+            // Set GOP size to 2 seconds worth of frames (minimum for seekability)
+            let gop_size = (config.frame_rate * 2.0).round() as i32;
+            cmd.arg("-g").arg(gop_size.to_string());
+            cmd.arg("-keyint_min").arg(gop_size.to_string());
+            // Force IDR frames at every keyframe for maximum compatibility
+            cmd.arg("-x264-params").arg("scenecut=0:open_gop=0");
         }
         "h265" => {
             cmd.arg("-c:v").arg("libx265");
             cmd.arg("-preset").arg(&config.preset);
             cmd.arg("-crf").arg(config.crf.to_string());
             cmd.arg("-pix_fmt").arg(&config.pixel_format);
+            // Set GOP size to 2 seconds worth of frames
+            let gop_size = (config.frame_rate * 2.0).round() as i32;
+            cmd.arg("-g").arg(gop_size.to_string());
+            cmd.arg("-keyint_min").arg(gop_size.to_string());
+            cmd.arg("-x265-params").arg("scenecut=0:open-gop=0");
         }
         "prores" => {
             cmd.arg("-c:v").arg("prores_ks");
             cmd.arg("-profile:v").arg("3"); // ProRes 422 HQ
             cmd.arg("-pix_fmt").arg("yuv422p10le");
+            // ProRes is all-intra (every frame is a keyframe), no GOP setting needed
         }
         _ => {
             return Err(format!("Unsupported codec: {}", config.codec));
@@ -289,6 +304,9 @@ pub async fn start_video_export(
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    
+    // Log the full FFmpeg command for debugging
+    eprintln!("[start_video_export] FFmpeg command: {:?}", cmd);
     
     let mut child = cmd
         .spawn()
@@ -352,6 +370,14 @@ pub async fn write_export_frame(
         .write_all(frame_data)
         .await
         .map_err(|e| format!("Failed to write frame: {}", e))?;
+    
+    // Flush stdin buffer after each frame to ensure FFmpeg processes it immediately
+    // This prevents PTS discontinuities from buffering delays
+    session
+        .stdin
+        .flush()
+        .await
+        .map_err(|e| format!("Failed to flush frame: {}", e))?;
     
     session.current_frame += 1;
     

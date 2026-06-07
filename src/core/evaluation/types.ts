@@ -105,6 +105,9 @@ export interface EvaluatedMediaLayer extends BaseVisualLayer {
 
   /** Time within source media (accounting for trim + playback position) */
   readonly sourceTime: number;
+
+  /** Source media rotation from container metadata (0, 90, 180, 270) */
+  readonly sourceRotation?: number;
 }
 
 /**
@@ -124,7 +127,6 @@ export interface EvaluatedTextLayer extends BaseVisualLayer {
   readonly clipDuration?: number;
 
   // ─── Text Content ─────────────────────────────────────────────────────────
-
 
   /** Text content to render */
   readonly text: string;

@@ -227,7 +227,8 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
       if (video) {
         if (video.readyState >= 2) {
           // HAVE_CURRENT_DATA — element is loaded, draw it
-          ctx.drawImage(video, -width / 2, -height / 2, width, height);
+          // Apply source rotation BEFORE drawing (critical for export)
+          drawMediaWithSourceRotation(ctx, video, width, height, layer.sourceRotation);
           return;
         }
         // Element exists but still loading — draw silent placeholder (no error)
@@ -275,8 +276,8 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
       imageBitmap = await createImageBitmap(blob);
     }
 
-    // Draw centered (after rotation transform)
-    ctx.drawImage(imageBitmap, -width / 2, -height / 2, width, height);
+    // Draw centered (after rotation transform) with source rotation applied
+    drawMediaWithSourceRotation(ctx, imageBitmap, width, height, layer.sourceRotation);
 
     // Only close if we created it (not from resource manager)
     if (!layer.resourceHandle && imageBitmap) {
@@ -315,6 +316,49 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
 function drawLoadingPlaceholder(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number): void {
   ctx.fillStyle = "#0a0a0a";
   ctx.fillRect(-width / 2, -height / 2, width, height);
+}
+
+/**
+ * Draw media (video element or ImageBitmap) with source rotation applied.
+ *
+ * CRITICAL: This handles container metadata rotation (e.g., iPhone portrait videos
+ * encoded as 1280×720 with rotation=270° → display as 720×1280 portrait).
+ *
+ * The HTML5 video element and ImageBitmap APIs return pixels in the ENCODED
+ * orientation, NOT display orientation. We must apply the rotation transform
+ * to draw pixels correctly before they are piped to FFmpeg as raw RGBA.
+ *
+ * @param ctx - Canvas context (already translated to layer center)
+ * @param source - Video element or ImageBitmap to draw
+ * @param width - Target width (layer width in canvas)
+ * @param height - Target height (layer height in canvas)
+ * @param sourceRotation - Rotation from container metadata (0, 90, 180, 270)
+ */
+function drawMediaWithSourceRotation(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, source: HTMLVideoElement | ImageBitmap, width: number, height: number, sourceRotation?: number): void {
+  if (!sourceRotation || sourceRotation === 0) {
+    // No rotation - draw normally
+    ctx.drawImage(source, -width / 2, -height / 2, width, height);
+    return;
+  }
+
+  // Apply source rotation correction
+  // The context is already at the layer center (from rasterizeLayer)
+  // and has the user's clip rotation applied. Now we add source rotation.
+  ctx.save();
+
+  // Rotate around the drawing origin (layer center)
+  ctx.rotate((sourceRotation * Math.PI) / 180);
+
+  // For 90° and 270° rotations, the source aspect ratio is transposed
+  // Example: source is 1280×720 encoded, but displays as 720×1280 portrait
+  // We need to draw at transposed dimensions so the rotated result fits correctly
+  const isTransposed = sourceRotation === 90 || sourceRotation === 270;
+  const drawWidth = isTransposed ? height : width;
+  const drawHeight = isTransposed ? width : height;
+
+  ctx.drawImage(source, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+
+  ctx.restore();
 }
 
 /**

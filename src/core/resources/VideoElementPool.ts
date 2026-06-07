@@ -148,21 +148,47 @@ export class VideoElementPool {
     const video = pooledVideo.element;
     if (Math.abs(video.currentTime - seekTime) > 0.001) {
       try {
+        // waits for frame to be compositor-ready
         await new Promise<void>((resolve, reject) => {
+          let resolved = false;
+
           const timeout = setTimeout(() => {
-            reject(new Error(`Video seek timeout: ${sourceUrl} @ ${seekTime}s`));
+            if (!resolved) {
+              resolved = true;
+              cleanup();
+              reject(new Error(`Video seek timeout: ${sourceUrl} @ ${seekTime}s`));
+            }
           }, 5000);
 
-          const onSeeked = () => {
+          const settle = () => {
+            if (resolved) return;
+            resolved = true;
             clearTimeout(timeout);
             cleanup();
+            pooledVideo.lastSeekTime = seekTime;
             resolve();
           };
 
+          const onSeeked = () => {
+            // 'seeked' = seek scheduled, NOT frame in compositor.
+            // On M1/VideoToolbox there is a GPU upload step after this.
+            // requestVideoFrameCallback() is the only reliable signal that
+            // pixel data is actually ready for ctx.drawImage().
+            if (typeof (video as any).requestVideoFrameCallback === "function") {
+              (video as any).requestVideoFrameCallback(settle);
+            } else {
+              // Fallback for older browsers: two rAF ticks gives GPU time to upload
+              requestAnimationFrame(() => requestAnimationFrame(settle));
+            }
+          };
+
           const onError = () => {
-            clearTimeout(timeout);
-            cleanup();
-            reject(new Error(`Video seek error: ${sourceUrl} @ ${seekTime}s`));
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              cleanup();
+              reject(new Error(`Video seek error: ${sourceUrl} @ ${seekTime}s`));
+            }
           };
 
           const cleanup = () => {
@@ -170,14 +196,11 @@ export class VideoElementPool {
             video.removeEventListener("error", onError);
           };
 
-          video.addEventListener("seeked", onSeeked);
-          video.addEventListener("error", onError);
-
-          // Set currentTime AFTER registering event listeners to prevent race condition
+          // Register BEFORE setting currentTime — avoid missing the event
+          video.addEventListener("seeked", onSeeked, { once: true });
+          video.addEventListener("error", onError, { once: true });
           video.currentTime = seekTime;
         });
-
-        pooledVideo.lastSeekTime = seekTime;
       } catch (error) {
         this.releaseVideo(pooledVideo);
         throw error;

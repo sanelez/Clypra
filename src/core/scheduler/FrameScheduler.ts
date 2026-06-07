@@ -594,7 +594,7 @@ export class FrameScheduler {
                 job.abortController.signal.addEventListener("abort", onReady, { once: true });
 
                 // Safety timeout: don't wait forever, let rasterizer handle fallback if it takes too long
-                setTimeout(onReady, 500);
+                // setTimeout(onReady, 500);
               });
               loadPromises.push(waitPromise);
             }

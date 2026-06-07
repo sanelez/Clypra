@@ -170,6 +170,7 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
       sourcePath,
       posterFrame: asset.posterFrame,
       sourceTime,
+      sourceRotation: asset.rotation,
       x: evalX,
       y: evalY,
       width: evalW,
