@@ -76,9 +76,9 @@ interface UIStore {
   markSourceOut: (time: number | null) => void;
 }
 
-const PREVIEW_ZOOM_MIN = 0.1;
-const PREVIEW_ZOOM_MAX = 5.0;
-const PREVIEW_ZOOM_SNAP_EPSILON = 0.005; // tight band so wheel remains responsive
+// const PREVIEW_ZOOM_MIN = 0.1;
+// const PREVIEW_ZOOM_MAX = 5.0;
+// const PREVIEW_ZOOM_SNAP_EPSILON = 0.005; // tight band so wheel remains responsive
 
 export const useUIStore = create<UIStore>((set, get) => ({
   selectedClipIds: [],

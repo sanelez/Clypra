@@ -7,7 +7,7 @@ import { useUIStore } from "@/store/uiStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { getFrameScheduler } from "@/core/scheduler/FrameScheduler";
 import { getActiveSessionOrNull, subscribeToSessionChanges } from "@/core/runtime/ProjectSession";
-import { getViewportController } from "@/core/interactions";
+import { useViewportState } from "@/hooks/useViewportController";
 import { PreviewTransport } from "./PreviewTransport";
 import { TransformOverlayMemoized as TransformOverlay } from "../transform/TransformOverlay";
 import { SafeOverlay } from "../viewport/SafeOverlay";
@@ -46,12 +46,8 @@ export const ProgramPreview: React.FC = () => {
   const epoch = useTimelineStore((s) => s.epoch);
   const clearSelection = useUIStore((s) => s.clearSelection);
 
-  // Get viewport controller for imperative reads (no React re-renders)
-  const viewportController = getViewportController();
-  const viewport = viewportController.getViewport();
-
-  // Memoize viewport for stable reference (only updates when values actually change)
-  const viewportStable = useMemo(() => viewport, [viewport.panX, viewport.panY, viewport.zoom]);
+  // Get viewport state from controller (throttled to 10fps to prevent render storms)
+  const viewport = useViewportState();
 
   const activeSession = useSyncExternalStore(subscribeToSessionChanges, getActiveSessionOrNull, () => null);
 
@@ -94,9 +90,9 @@ export const ProgramPreview: React.FC = () => {
     clipsLength: clips.length,
     transitionsLength: transitions.length,
     epoch,
-    previewViewportPanX: viewportStable.panX,
-    previewViewportPanY: viewportStable.panY,
-    previewViewportZoom: viewportStable.zoom,
+    previewViewportPanX: viewport.panX,
+    previewViewportPanY: viewport.panY,
+    previewViewportZoom: viewport.zoom,
     clockTime: clockState.time,
     clockState: clockState.state,
     clockSpeed: clockState.speed,
@@ -185,8 +181,8 @@ export const ProgramPreview: React.FC = () => {
   // 6. DERIVED MEMOIZED VALUES (useMemo)
   // =========================================================================
   const displayTransform = useMemo(() => {
-    return calculateDisplayTransform({ width: canvasWidth, height: canvasHeight }, viewportStable, dimensions.width, dimensions.height, previewScaleMode);
-  }, [canvasWidth, canvasHeight, viewportStable, dimensions.width, dimensions.height, previewScaleMode]);
+    return calculateDisplayTransform({ width: canvasWidth, height: canvasHeight }, viewport, dimensions.width, dimensions.height, previewScaleMode);
+  }, [canvasWidth, canvasHeight, viewport.panX, viewport.panY, viewport.zoom, dimensions.width, dimensions.height, previewScaleMode]);
 
   const { scale, offsetX, offsetY, displayWidth, displayHeight } = displayTransform;
 
@@ -566,7 +562,7 @@ export const ProgramPreview: React.FC = () => {
               />
 
               {/* Transform overlay for selected clips */}
-              <TransformOverlay canvasWidth={canvasWidth} canvasHeight={canvasHeight} scale={scale} viewport={viewportStable} displayOffset={{ x: offsetX, y: offsetY }} displayWidth={displayWidth} displayHeight={displayHeight} currentTime={currentTime} />
+              <TransformOverlay canvasWidth={canvasWidth} canvasHeight={canvasHeight} scale={scale} viewport={viewport} displayOffset={{ x: offsetX, y: offsetY }} displayWidth={displayWidth} displayHeight={displayHeight} currentTime={currentTime} />
 
               {/* Title & Action Safe Areas Overlay */}
               <SafeOverlay visible={showSafeOverlay} displayWidth={displayWidth} displayHeight={displayHeight} displayOffset={{ x: offsetX, y: offsetY }} />

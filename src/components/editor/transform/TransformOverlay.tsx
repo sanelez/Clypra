@@ -27,8 +27,8 @@ const traceSelect = (...args: unknown[]) => {
   if (!SELECT_TRACE) return;
   console.log("[SelectTrace][TransformOverlay]", ...args);
 };
-const CENTER_GUIDE_SNAP_PX = 8;
-const CENTER_MAGNET_SNAP_PX = 12;
+// const CENTER_GUIDE_SNAP_PX = 8;
+// const CENTER_MAGNET_SNAP_PX = 12;
 
 export function shouldScaleTextFontForHandle(handle: TransformHandle): boolean {
   return handle === "nw" || handle === "ne" || handle === "sw" || handle === "se";
