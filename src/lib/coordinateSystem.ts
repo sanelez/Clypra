@@ -57,11 +57,6 @@
  * Step 3 — Clip Transform
  * Each clip transforms INSIDE canvas.
  * canvas ← clip transform ← media
- *
- * THE BIGGEST MISTAKE BEGINNERS MAKE:
- * They combine viewport zoom with clip scale.
- * This causes: export bugs, selection bugs, transform drift, coordinate hell.
- * DO NOT DO THAT.
  */
 
 /**

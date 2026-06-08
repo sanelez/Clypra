@@ -181,16 +181,23 @@ export function useTimelineDrag(containerRef: RefObject<HTMLDivElement | null>) 
 
       const originalLeftPx = Math.round(clip.startTime * pps);
 
-      // Calculate what the visual offset would be if we moved clip to tail
-      // WITHOUT actually moving it yet - this is preview-only state
-      const otherClips = trackClips.filter((c) => c.id !== clipId);
-      let tailTime = 0;
-      otherClips.forEach((c) => {
-        tailTime += c.duration;
-      });
+      // Calculate anchor delta for insert/ripple modes only
+      // In free mode, clips don't shift - visualLeftAnchorDelta should be 0
+      // In insert/ripple modes, clips shift to create gaps - calculate offset
+      const { clipDragMode: dragMode } = useTimelineStore.getState();
+      let visualLeftAnchorDelta = 0;
 
-      const leftNewPx = Math.round(tailTime * pps);
-      const visualLeftAnchorDelta = originalLeftPx - leftNewPx;
+      if (dragMode === "insert" || dragMode === "ripple") {
+        // Calculate what the visual offset would be if we moved clip to tail
+        // WITHOUT actually moving it yet - this is preview-only state
+        const otherClips = trackClips.filter((c) => c.id !== clipId);
+        let tailTime = 0;
+        otherClips.forEach((c) => {
+          tailTime += c.duration;
+        });
+        const leftNewPx = Math.round(tailTime * pps);
+        visualLeftAnchorDelta = originalLeftPx - leftNewPx;
+      }
 
       const container = containerRef.current;
       let pointerXContentStart = startX;
@@ -203,7 +210,7 @@ export function useTimelineDrag(containerRef: RefObject<HTMLDivElement | null>) 
       const nextDragState: DragState = {
         draggingClipId: clipId,
         draggedClipIds,
-        offsetX: visualLeftAnchorDelta,
+        offsetX: 0, // Start at original position - clip stays under cursor
         offsetY: 0,
         pointerXContentStart,
         pointerClientYStart,
