@@ -6,12 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 import { SpatialTier } from "../../renderEngine/types";
-import {
-  FILMSTRIP_DENSITY_TIERS,
-  generateViewportTileAddresses,
-  findNearestTileAddress,
-  getTileKey,
-} from "../filmstripTiers";
+import { FILMSTRIP_DENSITY_TIERS, generateViewportTileAddresses, findNearestTileAddress, getTileKey } from "../filmstripTiers";
 
 describe("FILMSTRIP_DENSITY_TIERS", () => {
   it("has fixed intervals per spatial tier", () => {
@@ -159,6 +154,60 @@ describe("generateViewportTileAddresses", () => {
     for (const t of l1Timestamps) {
       expect(l2Timestamps).toContain(t);
     }
+  });
+
+  it("clamps timestamps to video duration when provided", () => {
+    // Test short video (3 seconds) with L0 tier (30s interval)
+    const addresses = generateViewportTileAddresses({
+      clipId: "clip-1",
+      videoPath: "/short.mp4",
+      zoomTier: SpatialTier.L0, // 30s interval
+      trimIn: 0,
+      trimOut: 60, // Trim allows up to 60s
+      clipStartTime: 0,
+      clipWidthPx: 3000,
+      viewportScrollLeft: 0,
+      viewportWidth: 1920,
+      pixelsPerSecond: 50,
+      overscanFactor: 1.0,
+      videoDuration: 3.0, // But actual video is only 3s
+    });
+
+    // Should not request frames beyond 3 seconds
+    for (const addr of addresses) {
+      expect(addr.timestamp).toBeLessThanOrEqual(3.0);
+    }
+
+    // Should have at least one tile at timestamp 0
+    expect(addresses.length).toBeGreaterThan(0);
+    expect(addresses[0].timestamp).toBe(0);
+  });
+
+  it("respects video duration even when trimOut is larger", () => {
+    const addresses = generateViewportTileAddresses({
+      clipId: "clip-1",
+      videoPath: "/medium.mp4",
+      zoomTier: SpatialTier.L1, // 5s interval
+      trimIn: 0,
+      trimOut: 100, // Trim says 100s
+      clipStartTime: 0,
+      clipWidthPx: 5000,
+      viewportScrollLeft: 0,
+      viewportWidth: 1920,
+      pixelsPerSecond: 50,
+      overscanFactor: 1.0,
+      videoDuration: 15.0, // But video is only 15s
+    });
+
+    // All timestamps should be <= 15s
+    for (const addr of addresses) {
+      expect(addr.timestamp).toBeLessThanOrEqual(15.0);
+    }
+
+    // Should have tiles at 0, 5, 10, 15 (or subset depending on viewport)
+    const timestamps = addresses.map((a) => a.timestamp);
+    expect(timestamps).toContain(0);
+    expect(timestamps.some((t) => t > 15.0)).toBe(false);
   });
 });
 

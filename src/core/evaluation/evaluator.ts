@@ -321,6 +321,10 @@ function evaluateTransitionState(clip: Clip, transitionWindows: ActiveTransition
 
 // ─── Cached variant ───────────────────────────────────────────────────────────
 
+// Throttle cache hit logging to reduce console spam
+let lastCacheHitLogTime = 0;
+const CACHE_HIT_LOG_INTERVAL = 1000; // Log at most once per second
+
 /**
  * Evaluate the NLE timeline with LRU caching and epoch-based invalidation.
  * This is the recommended entry point for all preview/render paths.
@@ -332,7 +336,11 @@ export function evaluateTimelineSceneCached(time: number, clips: Clip[], tracks:
 
   const cached = cache.get(cacheKey);
   if (cached) {
-    console.log(`[evaluateTimelineSceneCached] CACHE HIT - ${cached.visualLayers.length} layers`);
+    const now = performance.now();
+    if (now - lastCacheHitLogTime > CACHE_HIT_LOG_INTERVAL) {
+      console.log(`[evaluateTimelineSceneCached] CACHE HIT - ${cached.visualLayers.length} layers`);
+      lastCacheHitLogTime = now;
+    }
     return cached;
   }
 
@@ -340,11 +348,6 @@ export function evaluateTimelineSceneCached(time: number, clips: Clip[], tracks:
   const scene = evaluateTimelineScene(time, clips, tracks, assets, project, transitions);
   cache.set(cacheKey, scene);
   console.log(`[evaluateTimelineSceneCached] Created scene with ${scene.visualLayers.length} visual layers`);
-  return scene;
-}
-
-  const scene = evaluateTimelineScene(time, clips, tracks, assets, project, transitions);
-  cache.set(cacheKey, scene);
   return scene;
 }
 

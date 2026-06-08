@@ -5,7 +5,10 @@ import { useUIStore } from "@/store/uiStore";
  * Hook for viewport keyboard shortcuts
  */
 export function useViewportKeyboardShortcuts(canvasWidth: number, canvasHeight: number, containerWidth: number, containerHeight: number) {
-  const { previewViewport, setPreviewZoom, resetPreviewViewport, zoomPreviewToFit } = useUIStore();
+  const previewViewport = useUIStore((s) => s.previewViewport);
+  const setPreviewZoom = useUIStore((s) => s.setPreviewZoom);
+  const resetPreviewViewport = useUIStore((s) => s.resetPreviewViewport);
+  const zoomPreviewToFit = useUIStore((s) => s.zoomPreviewToFit);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

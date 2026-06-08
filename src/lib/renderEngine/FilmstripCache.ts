@@ -311,9 +311,9 @@ export class FilmstripCache {
    * Viewport-bounded, epoch-gated, tile-addressable, aggressive cheating.
    */
   requestFilmstrip(options: { clipId: string; videoPath: string; trimIn: number; trimOut: number; duration: number; clipStartTime: number; clipWidthPx: number; spatialTier: SpatialTier; epochId: RenderEpochId; viewportScrollLeft: number; viewportWidth: number; pixelsPerSecond: number; onUpdate: (artifacts: readonly TransportArtifact[]) => void }): void {
-    const { clipId, epochId, onUpdate, videoPath, spatialTier } = options;
+    const { clipId, epochId, onUpdate, videoPath, spatialTier, duration } = options;
 
-    console.log(`[FilmstripCache DEBUG] requestFilmstrip clipId=${clipId} epochId=${epochId} videoPath=${videoPath} spatialTier=${spatialTier}`);
+    console.log(`[FilmstripCache DEBUG] requestFilmstrip clipId=${clipId} epochId=${epochId} videoPath=${videoPath} spatialTier=${spatialTier} duration=${duration}`);
 
     // Generate tile addresses using FIXED grid (not dynamic timestamps)
     const tileAddresses = generateViewportTileAddresses({
@@ -328,9 +328,13 @@ export class FilmstripCache {
       viewportWidth: options.viewportWidth,
       pixelsPerSecond: options.pixelsPerSecond,
       overscanFactor: 2.0,
+      videoDuration: duration,
     });
 
-    console.log(`[FilmstripCache DEBUG] generated ${tileAddresses.length} tile addresses for clipId=${clipId}`, tileAddresses.map(a => ({ idx: a.tileIndex, ts: a.timestamp })));
+    console.log(
+      `[FilmstripCache DEBUG] generated ${tileAddresses.length} tile addresses for clipId=${clipId}`,
+      tileAddresses.map((a) => ({ idx: a.tileIndex, ts: a.timestamp })),
+    );
 
     let keptArtifacts: TransportArtifact[] = [];
     const existing = this.entries.get(clipId);
@@ -342,9 +346,7 @@ export class FilmstripCache {
         existing.cancelFn?.();
         const disposedArtifacts: TransportArtifact[] = [];
         for (const art of existing.artifacts) {
-          const isMatched = tileAddresses.some(
-            (addr) => Math.abs(addr.timestamp * 1000 - art.timestampMs) < 1
-          );
+          const isMatched = tileAddresses.some((addr) => Math.abs(addr.timestamp * 1000 - art.timestampMs) < 1);
           if (isMatched) {
             keptArtifacts.push(art);
           } else {
@@ -357,14 +359,7 @@ export class FilmstripCache {
         this.currentMemoryBytes -= disposedMemory;
         this.entries.delete(clipId);
       } else {
-        const sameAddresses =
-          existing.tileAddresses.length === tileAddresses.length &&
-          existing.tileAddresses.every(
-            (addr, i) =>
-              addr.zoomTier === tileAddresses[i].zoomTier &&
-              addr.tileIndex === tileAddresses[i].tileIndex &&
-              Math.abs(addr.timestamp - tileAddresses[i].timestamp) < 0.001
-          );
+        const sameAddresses = existing.tileAddresses.length === tileAddresses.length && existing.tileAddresses.every((addr, i) => addr.zoomTier === tileAddresses[i].zoomTier && addr.tileIndex === tileAddresses[i].tileIndex && Math.abs(addr.timestamp - tileAddresses[i].timestamp) < 0.001);
 
         console.log(`[FilmstripCache DEBUG] same epoch. sameAddresses=${sameAddresses} sameSpatialTier=${existing.spatialTier === spatialTier}`);
 
@@ -390,9 +385,7 @@ export class FilmstripCache {
         // Separate artifacts to prevent memory leak and reuse valid ones
         const disposedArtifacts: TransportArtifact[] = [];
         for (const art of existing.artifacts) {
-          const isMatched = tileAddresses.some(
-            (addr) => Math.abs(addr.timestamp * 1000 - art.timestampMs) < 1
-          );
+          const isMatched = tileAddresses.some((addr) => Math.abs(addr.timestamp * 1000 - art.timestampMs) < 1);
           if (isMatched) {
             keptArtifacts.push(art);
           } else {

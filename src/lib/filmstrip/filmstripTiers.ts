@@ -69,20 +69,10 @@ export function generateViewportTileAddresses(options: {
   viewportWidth: number;
   pixelsPerSecond: number;
   overscanFactor: number;
+  /** Optional: actual video duration to prevent requesting frames beyond video end */
+  videoDuration?: number;
 }): FilmstripTileAddress[] {
-  const {
-    clipId,
-    videoPath,
-    zoomTier,
-    trimIn,
-    trimOut,
-    clipStartTime,
-    clipWidthPx,
-    viewportScrollLeft,
-    viewportWidth,
-    pixelsPerSecond,
-    overscanFactor,
-  } = options;
+  const { clipId, videoPath, zoomTier, trimIn, trimOut, clipStartTime, clipWidthPx, viewportScrollLeft, viewportWidth, pixelsPerSecond, overscanFactor, videoDuration } = options;
 
   const interval = FILMSTRIP_DENSITY_TIERS[zoomTier].thumbnailIntervalSeconds;
 
@@ -112,9 +102,10 @@ export function generateViewportTileAddresses(options: {
   const visibleStartTime = (visibleClipStartPx - clipStartPx) / pixelsPerSecond + trimIn;
   const visibleEndTime = (visibleClipEndPx - clipStartPx) / pixelsPerSecond + trimIn;
 
-  // Clamp to trim range
-  const start = Math.max(trimIn, Math.min(visibleStartTime, trimOut));
-  const end = Math.max(trimIn, Math.min(visibleEndTime, trimOut));
+  // Clamp to trim range (and video duration if provided)
+  const effectiveEnd = videoDuration !== undefined ? Math.min(trimOut, videoDuration) : trimOut;
+  const start = Math.max(trimIn, Math.min(visibleStartTime, effectiveEnd));
+  const end = Math.max(trimIn, Math.min(visibleEndTime, effectiveEnd));
 
   if (end <= start) return [];
 
@@ -126,7 +117,8 @@ export function generateViewportTileAddresses(options: {
   const gridStart = Math.floor(start / interval) * interval;
 
   for (let t = gridStart; t < end; t += interval) {
-    const timestamp = Math.min(Math.max(t, trimIn), trimOut);
+    // Clamp timestamp to effective range (respecting video duration)
+    const timestamp = Math.min(Math.max(t, trimIn), effectiveEnd);
     if (timestamp < start) continue; // Skip tiles before visible region
     if (timestamp >= end) break;
 
@@ -157,11 +149,7 @@ export function getTileKey(address: FilmstripTileAddress): string {
  * Used for "aggressive cheating" — showing a slightly wrong tile is better
  * than showing nothing during scroll.
  */
-export function findNearestTileAddress(
-  targetTimestamp: number,
-  addresses: FilmstripTileAddress[],
-  toleranceSeconds: number = 0.5,
-): FilmstripTileAddress | null {
+export function findNearestTileAddress(targetTimestamp: number, addresses: FilmstripTileAddress[], toleranceSeconds: number = 0.5): FilmstripTileAddress | null {
   let nearest: FilmstripTileAddress | null = null;
   let nearestDelta = Infinity;
 
