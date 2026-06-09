@@ -61,7 +61,9 @@ export const PropertiesPanel: React.FC = () => {
   const selectedAsset = mediaAssets.find((a) => a.id === selectedClip?.mediaId);
   const isVisualClip = selectedAsset?.type === "video" || selectedAsset?.type === "image";
   const isAudioClip = selectedAsset?.type === "audio";
+  const isVideoClip = selectedAsset?.type === "video"; // Video clips have audio tracks
   const isTextClip = selectedClip && "text" in selectedClip;
+  const hasAudioTrack = isAudioClip || isVideoClip; // Both audio clips and video clips have audio
 
   if (!selectedClipId || !selectedClip) {
     return <EmptyPropertiesState />;
@@ -175,14 +177,14 @@ export const PropertiesPanel: React.FC = () => {
 
       {/* Property Contents */}
       <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-6">
-        {/* Render Audio properties if audio clip is selected */}
-        {isAudioClip && <AudioSection selectedClip={selectedClip} handleUpdate={handleUpdate} />}
+        {/* Render Audio properties if clip has audio (audio clips or video clips) */}
+        {hasAudioTrack && <AudioSection selectedClip={selectedClip} handleUpdate={handleUpdate} />}
 
         {/* Render Text Styling studio if text clip is selected and active tab is text */}
         {isTextClip && activePropertyTab === "text" && <TextStyleSection textClip={textClip} presets={presets} newPresetName={newPresetName} setNewPresetName={setNewPresetName} handleUpdate={handleUpdate} handleUpdateMultiple={handleUpdateMultiple} handleApplyPreset={handleApplyPreset} savePreset={savePreset} deletePreset={deletePreset} />}
 
-        {/* Video Transform properties (rendered for non-text or if transform tab is selected) */}
-        {(!isTextClip || activePropertyTab === "transform") && !isAudioClip && <TransformSection selectedClip={selectedClip} isVisualClip={isVisualClip} handleUpdate={handleUpdate} handleApplyFit={handleApplyFit} />}
+        {/* Video Transform properties (rendered for visual clips or if transform tab is selected for text) */}
+        {(isVisualClip || (isTextClip && activePropertyTab === "transform")) && <TransformSection selectedClip={selectedClip} isVisualClip={isVisualClip} handleUpdate={handleUpdate} handleApplyFit={handleApplyFit} />}
       </div>
     </div>
   );
