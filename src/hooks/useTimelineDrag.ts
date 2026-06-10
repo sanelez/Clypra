@@ -583,6 +583,7 @@ export function useTimelineDrag(containerRef: RefObject<HTMLDivElement | null>) 
 
       const dropTarget = dragSnapshot.dropTarget;
       const preview = dragSnapshot.placementPreview;
+      const sourceTrackId = dragSnapshot.originalTrackId;
 
       switch (dropTarget.type) {
         case "insert": {
@@ -603,8 +604,18 @@ export function useTimelineDrag(containerRef: RefObject<HTMLDivElement | null>) 
             });
           });
 
-          // Always normalize track to close gaps
-          normalizeTrack(dragSnapshot.targetTrackId);
+          // DON'T call normalizeTrack() - gaps preserved automatically!
+          // The prefix-sum algorithm closes departure gap naturally.
+
+          // Detect and sync gaps after drag operation
+          const store = useTimelineStore.getState();
+          if (sourceTrackId !== dragSnapshot.targetTrackId) {
+            // Cross-track: detect gaps on source track (departure gap)
+            store.detectAndSyncGaps(sourceTrackId);
+          }
+          // Also sync target track gaps
+          store.detectAndSyncGaps(dragSnapshot.targetTrackId);
+
           break;
         }
 
@@ -682,6 +693,15 @@ export function useTimelineDrag(containerRef: RefObject<HTMLDivElement | null>) 
             });
           });
 
+          // Detect and sync gaps after free positioning
+          const store = useTimelineStore.getState();
+          if (sourceTrackId !== dragSnapshot.targetTrackId) {
+            // Cross-track: detect gaps on source track
+            store.detectAndSyncGaps(sourceTrackId);
+          }
+          // Also sync target track gaps
+          store.detectAndSyncGaps(dragSnapshot.targetTrackId);
+
           break;
         }
       }
@@ -692,7 +712,7 @@ export function useTimelineDrag(containerRef: RefObject<HTMLDivElement | null>) 
       clearQueuedDragMove();
       resumeAutoSave();
     },
-    [flushQueuedClipDragMove, clearQueuedDragMove, updateClip, insertClipAtIndex, normalizeTrack, removeEmptyNonMainTracks, withBatch, clearSnapGuides],
+    [flushQueuedClipDragMove, clearQueuedDragMove, updateClip, insertClipAtIndex, removeEmptyNonMainTracks, withBatch, clearSnapGuides],
   );
 
   // Handle ESC key to cancel drag

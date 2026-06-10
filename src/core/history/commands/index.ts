@@ -12,3 +12,4 @@ export { SplitClipCommand } from "./SplitClipCommand";
 export { UpdateClipCommand } from "./UpdateClipCommand";
 export { AddTrackCommand, DeleteTrackCommand, ToggleTrackPropertyCommand } from "./TrackCommands";
 export { TransformClipCommand } from "./TransformCommand";
+export { InsertGapCommand, RemoveGapCommand, ResizeGapCommand, ToggleGapProtectionCommand } from "./GapCommands";
