@@ -1040,8 +1040,12 @@ export const useTimelineStore = create<TimelineStore>(
       }
 
       set((state) => {
+        // Merge remaining gaps from this track with gaps from other tracks
+        const otherTrackGaps = state.gaps.filter((g) => g.trackId !== trackId);
+        const allRemainingGaps = [...otherTrackGaps, ...result.remainingGaps];
+
         const next: Partial<TimelineStore> = {
-          gaps: result.remainingGaps,
+          gaps: allRemainingGaps,
           clips: state.clips.map((c) => (repositionedClips.has(c.id) ? { ...c, startTime: repositionedClips.get(c.id)! } : c)),
         };
 
