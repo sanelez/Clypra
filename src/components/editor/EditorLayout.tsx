@@ -16,6 +16,7 @@ import { MobileEditorLayout } from "./MobileEditorLayout";
 import type { MediaAsset } from "@/types";
 import { useUIStore } from "@/store/uiStore";
 import { useAudioLibraryStore } from "@/features/audio-library/store/audioLibraryStore";
+import { useStickersStore } from "@/features/stickers/store/stickersStore";
 
 export const EditorLayout: React.FC = () => {
   const { width } = useWindowSize();
@@ -204,6 +205,75 @@ export const EditorLayout: React.FC = () => {
         );
       })().catch((error) => {
         console.error("[EditorLayout] Failed to add audio to timeline:", error);
+      });
+    } else if (type === "stickers") {
+      const cachedSticker = useStickersStore.getState().getCachedSticker(item.id);
+      if (!cachedSticker) {
+        console.error("[EditorLayout] Sticker not downloaded yet:", item.id);
+        return;
+      }
+
+      (async () => {
+        const { appCacheDir, join } = await import("@tauri-apps/api/path");
+        const appCache = await appCacheDir();
+        
+        let relativePath = "";
+        if (cachedSticker.format === "lottie") {
+          relativePath = cachedSticker.localImagePath || "";
+        } else if (cachedSticker.format === "gif") {
+          relativePath = cachedSticker.localAnimationPath || "";
+        } else {
+          relativePath = cachedSticker.localImagePath || "";
+        }
+
+        if (!relativePath) {
+          console.error("[EditorLayout] Missing path for sticker:", item.id);
+          return;
+        }
+
+        const absolutePath = await join(appCache, relativePath);
+
+        const mediaAsset: MediaAsset = {
+          id: `sticker-${item.id}`,
+          name: item.name || "Sticker",
+          path: absolutePath,
+          type: "image",
+          duration: 3.0,
+          size: 0,
+        };
+
+        addMediaAsset(mediaAsset);
+
+        const latestTracks = useTimelineStore.getState().tracks;
+        const latestClips = useTimelineStore.getState().clips;
+        const placement = resolveAddToTimelinePlacement({
+          asset: mediaAsset,
+          tracks: latestTracks,
+          clips: latestClips,
+          playheadTime: getPlaybackClock().time,
+          sequenceEndTime: getTimelineEndTime(),
+        });
+        
+        let targetTrackId = placement.targetTrackId;
+        if (placement.shouldCreateTrack || !targetTrackId) {
+          const insertIndex = getInsertIndexForNewTrack(useTimelineStore.getState().tracks, "video");
+          targetTrackId = insertTrackAt("video", insertIndex);
+        }
+
+        if (!targetTrackId) return;
+
+        addClip(
+          createClipFromAsset({
+            asset: mediaAsset,
+            trackId: targetTrackId,
+            startTime: placement.startTime,
+            width: project?.canvasWidth || 1920,
+            height: project?.canvasHeight || 1080,
+            fitMode: resolveDefaultFitModeForAsset(mediaAsset),
+          }),
+        );
+      })().catch((error) => {
+        console.error("[EditorLayout] Failed to add sticker to timeline:", error);
       });
     } else if (type === "transitions") {
       const selectedPair = selectedClipIds.length === 2 ? ([selectedClipIds[0], selectedClipIds[1]] as const) : null;

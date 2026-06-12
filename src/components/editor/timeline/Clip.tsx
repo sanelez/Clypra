@@ -5,6 +5,14 @@ import { usePlaybackClock } from "@/hooks/usePlaybackClock";
 import type { Clip as ClipType, MediaAsset } from "@/types";
 import { ClipFilmstrip } from "./ClipFilmstrip";
 import { TimelineWaveform } from "./TimelineWaveform";
+import { convertFileSrc } from "@tauri-apps/api/core";
+
+const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
+
+const resolveMediaSrc = (path: string) => {
+  if (!path) return "";
+  return isExternalOrDataUrl(path) ? path : convertFileSrc(path);
+};
 
 /** Movement past this (px) starts a clip drag; below it, release is still a click (selection set on pointerDown). */
 const DRAG_THRESHOLD_PX = 6;
@@ -489,10 +497,11 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
     return `00:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}:00`;
   };
 
+  const isSticker = clip.mediaId.startsWith("sticker-") || mediaAsset?.id.startsWith("sticker-");
   const isClipText = "text" in clip;
-  const isClipAudio = mediaAsset?.type === "audio";
-  const isClipVideo = mediaAsset?.type === "video";
-  const isClipImage = mediaAsset?.type === "image";
+  const isClipAudio = mediaAsset?.type === "audio" && !isSticker;
+  const isClipVideo = mediaAsset?.type === "video" && !isSticker;
+  const isClipImage = mediaAsset?.type === "image" && !isSticker;
 
   // Check if text clip is a caption or title
   const textClip = isClipText ? (clip as any) : null;
@@ -501,6 +510,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
   const isTitle = textRole === "title";
 
   const getClipStyle = () => {
+    if (isSticker) return "bg-[#d97706] text-white"; // Orange-amber for stickers
     if (isClipText) {
       // Differentiate captions (purple) from titles (orange)
       if (isCaption) {
@@ -516,6 +526,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
   };
 
   const getClipBackgroundStyle = () => {
+    if (isSticker) return { backgroundColor: "#d97706" }; // Amber/yellow tone matching user screenshot
     if (isClipText) return {}; // Text clips use className colors
     if (isClipAudio) return { backgroundColor: "var(--color-timeline-clip-audio)" };
     if (isClipVideo) return { backgroundColor: "var(--color-accent)" };
@@ -603,6 +614,22 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
           {/* Icon badge for text role differentiation */}
           {(isCaption || isTitle) && <div className="absolute left-1 top-1 flex items-center justify-center rounded bg-black/30 px-1.5 py-0.5 text-[9px] font-semibold text-white backdrop-blur-sm">{isCaption ? "CC" : "T"}</div>}
           <div className="text-[12px] text-white/95 font-medium tracking-[0.01em] truncate max-w-full select-none pointer-events-none">{(clip as any).text || "Default text"}</div>
+        </div>
+      ) : isSticker ? (
+        <div className="relative flex h-full w-full items-center px-2 select-none pointer-events-none gap-2">
+          {mediaAsset?.path ? (
+            <img
+              src={resolveMediaSrc(mediaAsset.path)}
+              alt=""
+              className="w-5 h-5 object-contain filter brightness-0 invert opacity-90 shrink-0"
+              draggable={false}
+            />
+          ) : (
+            <div className="w-5 h-5 flex items-center justify-center text-xs shrink-0">🎨</div>
+          )}
+          <span className="text-[10px] font-bold text-white/90 truncate">
+            {mediaAsset?.name || "Sticker"}
+          </span>
         </div>
       ) : (
         <div className="flex h-full min-h-0 w-full flex-col gap-1 overflow-hidden px-1 py-1">

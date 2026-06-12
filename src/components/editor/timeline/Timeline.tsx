@@ -27,6 +27,7 @@ const traceSelect = (...args: unknown[]) => {
 
 export const Timeline: React.FC = () => {
   const { tracks, clips, pixelsPerSecond, scrollLeft, setScrollLeft, getTimelineEndTime, setViewportWidth, snapGuides } = useTimelineStore();
+  const hasClips = clips.length > 0;
 
   const { previewMode, clearSelection } = useUIStore();
   const { exitSourceMode } = usePreviewMode();
@@ -36,6 +37,7 @@ export const Timeline: React.FC = () => {
   const duration = clockState.duration;
   const isPlaying = clockState.state === "playing";
   const containerRef = useRef<HTMLDivElement>(null);
+  const wasPlayingRef = useRef(false);
   const runtime = useRenderRuntime();
 
   // Consume extracted hooks
@@ -79,7 +81,7 @@ export const Timeline: React.FC = () => {
 
   // ── Clamp playhead to sequence bounds ──────────────────────────────────────
   useEffect(() => {
-    if (currentTime > duration) {
+    if (duration > 0 && currentTime > duration) {
       seek(duration);
     }
   }, [duration, currentTime, seek]);
@@ -87,28 +89,52 @@ export const Timeline: React.FC = () => {
   // Auto-scroll during playback: viewport tracking
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || !isPlaying) return;
+    if (!container || !isPlaying) {
+      wasPlayingRef.current = isPlaying;
+      return;
+    }
 
+    const labelColumnWidth = hasClips ? 160 : 0;
     const viewportWidth = container.clientWidth;
+    const effectiveViewportWidth = viewportWidth - labelColumnWidth;
     const contentWidthActual = container.scrollWidth;
     const maxScrollLeft = Math.max(0, contentWidthActual - viewportWidth);
 
     const playheadX = Math.round(currentTime * pixelsPerSecond);
     let newScrollLeft = container.scrollLeft;
 
+    // Bug 1 fix: On play-start transition, if playhead is outside viewport, snap to it
+    const justStartedPlaying = !wasPlayingRef.current && isPlaying;
+    wasPlayingRef.current = isPlaying;
+
+    if (justStartedPlaying) {
+      const leftEdge = container.scrollLeft;
+      const rightEdge = leftEdge + effectiveViewportWidth;
+
+      if (playheadX < leftEdge || playheadX > rightEdge) {
+        // Place playhead at 15% from left edge ("look-ahead" position)
+        const centered = Math.max(0, playheadX - effectiveViewportWidth * 0.15);
+        newScrollLeft = Math.min(centered, maxScrollLeft);
+        container.scrollLeft = newScrollLeft;
+        setScrollLeft(newScrollLeft);
+        return;
+      }
+    }
+
     const isAtAbsoluteEnd = currentTime >= duration - 0.01;
 
     if (isAtAbsoluteEnd) {
       newScrollLeft = maxScrollLeft;
     } else {
-      const bufferPx = viewportWidth * 0.1;
-      const rightEdge = newScrollLeft + viewportWidth;
+      // Bug 4 fix: Use effective viewport width (minus label column)
+      const bufferPx = effectiveViewportWidth * 0.1;
+      const rightEdge = newScrollLeft + effectiveViewportWidth;
 
       if (playheadX >= rightEdge - bufferPx) {
         newScrollLeft = playheadX;
       }
 
-      const currentRightEdge = newScrollLeft + viewportWidth;
+      const currentRightEdge = newScrollLeft + effectiveViewportWidth;
       if (playheadX > currentRightEdge) {
         newScrollLeft = Math.min(playheadX, maxScrollLeft);
       }
@@ -125,7 +151,7 @@ export const Timeline: React.FC = () => {
       container.scrollLeft = newScrollLeft;
       setScrollLeft(newScrollLeft);
     }
-  }, [currentTime, pixelsPerSecond, isPlaying, duration, setScrollLeft]);
+  }, [currentTime, pixelsPerSecond, isPlaying, duration, setScrollLeft, hasClips]);
 
   // Handle keyboard shortcuts for timeline operations
   useEffect(() => {
@@ -257,7 +283,6 @@ export const Timeline: React.FC = () => {
   const viewportEnd = getTimelineViewportEnd(contentEnd);
   const contentWidth = Math.round(viewportEnd * pixelsPerSecond);
 
-  const hasClips = clips.length > 0;
 
   const seekFromPointer = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -475,7 +500,7 @@ export const Timeline: React.FC = () => {
 
               {/* Snap Guides - Vertical alignment indicators */}
               {snapGuides.map((guide, index) => {
-                const guideLeft = guide.time * pixelsPerSecond + 160; // offset by label column width
+                const guideLeft = guide.time * pixelsPerSecond + (hasClips ? 160 : 0); // offset by label column width
                 const guideColor = guide.type === "playhead" ? "var(--color-timeline-drop-indicator)" : "var(--color-snap-guide-clip)";
 
                 return (

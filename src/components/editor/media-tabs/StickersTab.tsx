@@ -1,6 +1,10 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Search, Smile, Download, Loader2, Sparkles, AlertCircle } from "lucide-react";
+import { Search, Smile, Download, Loader2, Sparkles, AlertCircle, CheckCircle, Plus } from "lucide-react";
 import { NetworkError } from "@/components/ui/NetworkError";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
+import { useStickersStore } from "@/features/stickers/store/stickersStore";
+import { useUIStore } from "@/store/uiStore";
+import type { MediaAsset } from "@/types";
 import type { TabProps } from "./types";
 import { STICKER_CATEGORIES, ClypraStickersApi, type StickerCategory, type StickerItem } from "@/features/stickers/api/clypraStickersApi";
 
@@ -11,6 +15,11 @@ export const StickersTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isNetworkError, setIsNetworkError] = useState(false);
+
+  // Initialize stickers cache
+  useEffect(() => {
+    useStickersStore.getState().initializeCache();
+  }, []);
 
   // Fetch stickers from API by category
   const fetchStickers = () => {
@@ -127,9 +136,9 @@ export const StickersTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
         )}
 
         {!loading && !error && filteredStickers.length > 0 && (
-          <div className="grid grid-cols-3 gap-2 p-2">
+          <div className="grid grid-cols-3 gap-1.5">
             {filteredStickers.map((sticker) => (
-              <StickerCard key={sticker.id} sticker={sticker} onAddToTimeline={() => onAddToTimeline?.(sticker, "stickers")} />
+              <StickerCard key={sticker.id} sticker={sticker} onAddToTimeline={onAddToTimeline} />
             ))}
           </div>
         )}
@@ -139,25 +148,67 @@ export const StickersTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
 };
 
 // StickerCard Component - Following AudioItem pattern with animation support
-const StickerCard: React.FC<{ sticker: StickerItem; onAddToTimeline: () => void }> = ({ sticker, onAddToTimeline }) => {
+const StickerCard: React.FC<{ sticker: StickerItem; onAddToTimeline?: (item: any, type: any) => void }> = ({ sticker, onAddToTimeline }) => {
   const [imageError, setImageError] = useState(false);
   const [showAnimation, setShowAnimation] = useState(false);
+
+  const { getDownloadState, startDownload, isDownloaded } = useStickersStore();
+  const { previewAsset } = useUIStore();
+
+  const downloadState = getDownloadState(sticker.id);
+  const isDownloadedFlag = isDownloaded(sticker.id);
+
+  const isDownloading = downloadState?.status === "downloading";
+  const hasError = downloadState?.status === "error";
 
   // Use animated version on hover if available
   const displayUrl = showAnimation && sticker.animatedUrl ? sticker.animatedUrl : sticker.thumbnailUrl;
 
-  return (
-    <div className="group relative aspect-square bg-surface-raised hover:bg-surface-raised/60 rounded-lg overflow-hidden transition-all border border-border hover:border-accent/30 cursor-pointer" onClick={onAddToTimeline} onMouseEnter={() => setShowAnimation(true)} onMouseLeave={() => setShowAnimation(false)}>
-      {/* Animation Badge */}
-      {sticker.isAnimated && (
-        <div className="absolute top-2 right-2 z-10">
-          <div className="bg-blue-500 rounded-full px-1.5 py-0.5">
-            <span className="text-[10px] text-white font-semibold">{sticker.format === "lottie" ? "ANIM" : sticker.format === "gif" ? "GIF" : "ANIM"}</span>
-          </div>
-        </div>
-      )}
+  const handlePreview = async () => {
+    try {
+      const cachedFile = await startDownload(sticker);
+      const appCache = await import("@tauri-apps/api/path").then((m) => m.appCacheDir());
+      
+      const targetPath = cachedFile.format === "lottie"
+        ? cachedFile.localAnimationPath
+        : cachedFile.format === "gif"
+        ? cachedFile.localAnimationPath
+        : cachedFile.localImagePath;
 
-      {/* Premium Badge - Same position as download indicator in AudioTab */}
+      if (!targetPath) {
+        throw new Error("Missing cached file path");
+      }
+
+      const absolutePath = await import("@tauri-apps/api/path").then((m) => m.join(appCache, targetPath));
+
+      const mediaAsset: MediaAsset = {
+        id: `sticker-${sticker.id}`,
+        name: sticker.name || "Sticker",
+        path: absolutePath,
+        type: "image",
+        duration: 0,
+        size: 0,
+      };
+
+      previewAsset(mediaAsset);
+    } catch (error) {
+      console.error("[StickerCard] Preview failed:", error);
+    }
+  };
+
+  const handleAddToTimeline = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await startDownload(sticker);
+      onAddToTimeline?.(sticker, "stickers");
+    } catch (error) {
+      console.error("[StickerCard] Add to timeline failed:", error);
+    }
+  };
+
+  return (
+    <div className="group relative aspect-square bg-surface-raised hover:bg-surface-raised/60 rounded-lg overflow-hidden transition-all border border-border hover:border-accent/30 cursor-pointer" onClick={handlePreview} onMouseEnter={() => setShowAnimation(true)} onMouseLeave={() => setShowAnimation(false)}>
+      {/* Premium Badge */}
       {sticker.isPremium && (
         <div className="absolute top-2 left-2 z-10">
           <div className="bg-linear-to-r from-purple-500 to-pink-500 rounded-full p-1">
@@ -166,21 +217,52 @@ const StickerCard: React.FC<{ sticker: StickerItem; onAddToTimeline: () => void 
         </div>
       )}
 
+      {/* Cached Indicator */}
+      {isDownloadedFlag && !isDownloading && (
+        <div className="absolute top-2 right-2 z-10">
+          <div className="bg-green-500 rounded-full p-0.5 shadow-md">
+            <CheckCircle className="w-3 h-3 text-white" />
+          </div>
+        </div>
+      )}
+
+      {/* Downloading Overlay */}
+      {isDownloading && (
+        <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center gap-1">
+          <Loader2 className="w-5 h-5 text-accent animate-spin" />
+          <span className="text-[10px] text-accent font-semibold">{downloadState?.progress || 0}%</span>
+        </div>
+      )}
+
+      {/* Error Overlay */}
+      {hasError && (
+        <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center gap-1 text-red-400">
+          <AlertCircle className="w-5 h-5" />
+          <span className="text-[10px] font-semibold">Failed</span>
+        </div>
+      )}
+
       {/* Image or Fallback */}
       {displayUrl && !imageError ? (
         <img src={displayUrl} alt={sticker.name} className="w-full h-full object-contain p-3" onError={() => setImageError(true)} />
       ) : (
         <div className="w-full h-full flex items-center justify-center text-5xl">
-          {/* Fallback emoji based on name */}
           {sticker.name.includes("Heart") ? "❤️" : sticker.name.includes("Star") ? "⭐" : sticker.name.includes("Circle") ? "⭕" : "🎨"}
         </div>
       )}
 
-      {/* Download Icon on Hover - Same as AudioTab's plus icon */}
-      <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <div className="bg-accent rounded-full p-1.5">
-          <Download className="w-4 h-4 text-white" />
-        </div>
+      {/* Add to Timeline Button on Hover */}
+      <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button onClick={handleAddToTimeline} disabled={isDownloading} className="bg-accent hover:bg-accent/80 cursor-pointer rounded-full p-1.5 shadow-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              <Plus className="w-4 h-4 text-white" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>{isDownloadedFlag ? "Add to Timeline" : "Download & Add"}</p>
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Hover Overlay */}

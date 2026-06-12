@@ -6,9 +6,10 @@ import { useTimelineStore } from "../store/timelineStore";
 export function useTimelineAutoScroll(containerRef: RefObject<HTMLDivElement | null>) {
   const rafRef = useRef<number | null>(null);
   const speedRef = useRef(0);
+  const clientXRef = useRef<number | null>(null);
+  const hasDndContext = useRef(true);
 
   let isDragging = false;
-  let clientOffset: { x: number; y: number } | null = null;
 
   try {
     // useDragLayer requires DndProvider context - wrap in try/catch for tests
@@ -17,15 +18,18 @@ export function useTimelineAutoScroll(containerRef: RefObject<HTMLDivElement | n
       clientOffset: monitor.getClientOffset(),
     }));
     isDragging = dragState.isDragging;
-    clientOffset = dragState.clientOffset;
+    // Store client X as a stable primitive instead of object reference
+    clientXRef.current = dragState.clientOffset?.x ?? null;
   } catch (e) {
-    // No DndProvider context (e.g., in tests) - skip auto-scroll
-    return;
+    // No DndProvider context (e.g., in tests) - mark as unavailable
+    hasDndContext.current = false;
   }
 
+  // Bug 2 fix: useEffect always runs (no conditional return before hooks)
+  // Bug 3 fix: removed clientOffset from deps — we read from clientXRef instead
   useEffect(() => {
-    const container = containerRef.current;
-    if (!isDragging || !clientOffset || !container) {
+    // Skip if no DndProvider or not dragging
+    if (!hasDndContext.current || !isDragging || clientXRef.current === null) {
       speedRef.current = 0;
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
@@ -34,13 +38,16 @@ export function useTimelineAutoScroll(containerRef: RefObject<HTMLDivElement | n
       return;
     }
 
+    const container = containerRef.current;
+    if (!container) return;
+
     const ZONE = 80; // px from edge triggers scroll
     const MAX = 16; // px/frame max speed
     const MIN = 2; // px/frame min speed
 
     const rect = container.getBoundingClientRect();
-    const distRight = rect.right - clientOffset.x;
-    const distLeft = clientOffset.x - rect.left;
+    const distRight = rect.right - (clientXRef.current ?? 0);
+    const distLeft = (clientXRef.current ?? 0) - rect.left;
 
     if (distRight < ZONE && distRight > 0) {
       const t = 1 - distRight / ZONE; // 0→1 as cursor approaches edge
@@ -70,5 +77,5 @@ export function useTimelineAutoScroll(containerRef: RefObject<HTMLDivElement | n
         rafRef.current = null;
       }
     };
-  }, [isDragging, clientOffset, containerRef]);
+  }, [isDragging, containerRef]);
 }

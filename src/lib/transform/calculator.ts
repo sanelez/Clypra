@@ -138,8 +138,8 @@ function handleMove(clip: Clip, delta: { x: number; y: number }, constraints: Tr
  */
 function handleCornerDrag(clip: Clip, handle: "nw" | "ne" | "sw" | "se", delta: { x: number; y: number }, constraints: TransformConstraints): Partial<Clip> {
   const aspectRatio = clip.sourceAspectRatio ?? clip.width / clip.height;
-  // Symmetrical uniform scaling is always enforced for corner handles in modern NLEs
-  const isLocked = true;
+  // Respect the aspect-ratio lock setting from the user's toggle
+  const isLocked = constraints.aspectRatioLocked;
   // Professional NLE feel: corner resize scales around the clip center.
   // Corner drag direction still controls whether size grows or shrinks,
   // but geometry expands/contracts symmetrically on both sides.
@@ -148,8 +148,12 @@ function handleCornerDrag(clip: Clip, handle: "nw" | "ne" | "sw" | "se", delta: 
   const dirX = handle === "ne" || handle === "se" ? 1 : -1;
   const dirY = handle === "sw" || handle === "se" ? 1 : -1;
   const primaryDelta = Math.abs(delta.x) >= Math.abs(delta.y) ? delta.x * dirX : delta.y * dirY;
-  let newWidth = clip.width + primaryDelta * 2;
-  let newHeight = clip.height + primaryDelta * 2;
+  // Proportional scaling: derive a scale factor from the dominant axis to avoid
+  // additive delta fighting the aspect-ratio correction (eliminates stutter).
+  const refDim = Math.max(1, Math.max(clip.width, clip.height));
+  const scaleFactor = 1 + (primaryDelta * 2) / refDim;
+  let newWidth = clip.width * scaleFactor;
+  let newHeight = clip.height * scaleFactor;
 
   const clamped = clampDimensions(newWidth, newHeight, clip, constraints, isLocked);
   newWidth = clamped.width;
@@ -232,6 +236,7 @@ function handleEdgeDrag(clip: Clip, handle: "n" | "s" | "e" | "w", delta: { x: n
     case "w":
       newWidth = clip.width - delta.x;
       newWidth = Math.max(constraints.minWidth, newWidth);
+      newX = clip.x + (clip.width - newWidth);
       if ("text" in clip) {
         const textClip = clip as any;
         const isBold = textClip.fontWeight === "bold" || textClip.bold === true;
@@ -243,9 +248,10 @@ function handleEdgeDrag(clip: Clip, handle: "n" | "s" | "e" | "w", delta: { x: n
           newWidth,
           textClip.lineHeight || 1.2
         );
-        newY = clip.y + (clip.height - newHeight) / 2;
+        // Center Y relative to original clip center to prevent vertical jump during reflow
+        const clipCenterY = clip.y + clip.height / 2;
+        newY = clipCenterY - newHeight / 2;
       }
-      newX = clip.x + (clip.width - newWidth);
       break;
   }
 

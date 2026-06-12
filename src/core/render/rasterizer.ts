@@ -22,6 +22,17 @@ import { useEffectsStore } from "../../features/text-effects/store/effectsStore"
 import { invalidateEvaluationCache } from "../evaluation/evaluator";
 import { useTimelineStore } from "../../store/timelineStore";
 import { effectBleed } from "../../lib/textClip";
+import lottie from "lottie-web";
+import { useStickersStore } from "../../features/stickers/store/stickersStore";
+
+interface LottieAnimationCacheEntry {
+  anim: any;
+  canvas: HTMLCanvasElement;
+  container: HTMLDivElement;
+  stickerId: string;
+}
+
+const lottieRenderCache = new Map<string, LottieAnimationCacheEntry>();
 
 /**
  * Raster target configuration.
@@ -221,6 +232,74 @@ const VIDEO_WARN_INTERVAL_MS = 5000;
 
 async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, layer: EvaluatedMediaLayer, width: number, height: number, target: RasterTarget): Promise<void> {
   try {
+    if (layer.mediaId.startsWith("sticker-")) {
+      const stickerId = layer.mediaId.replace("sticker-", "");
+      let cachedSticker = useStickersStore.getState().getCachedSticker(stickerId);
+      if (!cachedSticker) {
+        await useStickersStore.getState().initializeCache();
+        cachedSticker = useStickersStore.getState().getCachedSticker(stickerId);
+      }
+      
+      if (cachedSticker && cachedSticker.format === "lottie") {
+        let cacheEntry = lottieRenderCache.get(layer.clipId);
+        
+        if (!cacheEntry || cacheEntry.stickerId !== stickerId) {
+          if (cacheEntry) {
+            cacheEntry.anim.destroy();
+            cacheEntry.container.remove();
+          }
+          
+          try {
+            const { stickerCacheManager } = await import("@/lib/stickerCache");
+            const { appCacheDir, join } = await import("@tauri-apps/api/path");
+            const appCache = await appCacheDir();
+            const absoluteLottiePath = await join(appCache, cachedSticker.localAnimationPath!);
+            
+            const lottieData = await stickerCacheManager.readLottieJson(absoluteLottiePath);
+            
+            const container = document.createElement("div");
+            container.style.width = `${width}px`;
+            container.style.height = `${height}px`;
+            container.style.position = "absolute";
+            container.style.left = "-9999px";
+            container.style.top = "-9999px";
+            document.body.appendChild(container);
+            
+            const anim = lottie.loadAnimation({
+              container,
+              renderer: "canvas",
+              autoplay: false,
+              loop: true,
+              animationData: JSON.parse(JSON.stringify(lottieData)),
+            });
+            
+            anim.goToAndStop(0, true);
+            await Promise.resolve();
+            
+            const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+            if (canvas) {
+              cacheEntry = { anim, canvas, container, stickerId };
+              lottieRenderCache.set(layer.clipId, cacheEntry);
+            }
+          } catch (err) {
+            console.error("[Rasterizer] Failed to load Lottie animation:", err);
+          }
+        }
+        
+        if (cacheEntry) {
+          const totalFrames = cacheEntry.anim.totalFrames;
+          const frameRate = cacheEntry.anim.frameRate || 30;
+          const frame = Math.floor(layer.sourceTime * frameRate) % totalFrames;
+          
+          cacheEntry.anim.goToAndStop(frame, true);
+          await Promise.resolve();
+          
+          drawMediaWithSourceRotation(ctx, cacheEntry.canvas, width, height, layer.sourceRotation);
+          return;
+        }
+      }
+    }
+
     // 1. Try to use active video element (bypasses decoding)
     if (layer.mediaType === "video" && target.videoElements) {
       const key = `${layer.clipId}-${layer.mediaId}`;
@@ -340,7 +419,7 @@ function drawLoadingPlaceholder(ctx: CanvasRenderingContext2D | OffscreenCanvasR
  * @param height - Target height (layer height in canvas)
  * @param sourceRotation - Rotation from container metadata (0, 90, 180, 270)
  */
-function drawMediaWithSourceRotation(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, source: HTMLVideoElement | ImageBitmap, width: number, height: number, sourceRotation?: number): void {
+function drawMediaWithSourceRotation(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, source: HTMLVideoElement | ImageBitmap | HTMLCanvasElement, width: number, height: number, sourceRotation?: number): void {
   if (!sourceRotation || sourceRotation === 0) {
     // No rotation - draw normally
     ctx.drawImage(source, -width / 2, -height / 2, width, height);

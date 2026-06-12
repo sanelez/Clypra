@@ -248,6 +248,20 @@ export const ProgramPreview: React.FC = () => {
     }
   }, [project?.id]);
 
+  // Keep "original" dims in sync when changed via SettingsModal
+  // (but NOT when changed via AspectSelector presets like 16:9, 9:16, etc.)
+  useEffect(() => {
+    if (!project || !originalCanvasDimsRef.current) return;
+    // Only update if the current preset IS "original" — meaning the user
+    // changed dimensions from SettingsModal while on the original preset
+    if (project.aspectRatio === "original") {
+      originalCanvasDimsRef.current = {
+        width: project.canvasWidth,
+        height: project.canvasHeight,
+      };
+    }
+  }, [project?.canvasWidth, project?.canvasHeight, project?.aspectRatio]);
+
   useEffect(() => {
     if (project?.aspectRatio) {
       setPreviewAspectPreset(project.aspectRatio);
@@ -508,7 +522,7 @@ export const ProgramPreview: React.FC = () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
       if (lastJobId) scheduler.cancel(lastJobId);
     };
-  }, [useCanvasPreview, project, displayWidth, displayHeight]);
+  }, [useCanvasPreview, project, canvasWidth, canvasHeight, displayWidth, displayHeight]);
 
   // ── Clear selection when playback starts ──────────────────────────────
   // Transform overlays should not be visible during playback

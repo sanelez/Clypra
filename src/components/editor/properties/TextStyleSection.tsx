@@ -1,11 +1,78 @@
 import React from "react";
-import { Type, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Save, Trash2 } from "lucide-react";
+import { Type, Palette, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Save, Trash2, PaintBucket, Layers } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { normalizeFontFamily } from "@/core/evaluation/evaluator";
 import { allTextEffects } from "@/features/text-effects/registry";
 import type { TextEffectDefinition } from "@/features/text-effects/types/types";
-import { _buildConfig } from "@clypra/engine";
 import type { TextClip } from "@/types";
+import { PropertySlider } from "./primitives/PropertySlider";
+import { PropertySection } from "./primitives/PropertySection";
+
+// Extracted font list for maintainability
+const SYSTEM_FONTS = [
+  { value: "Arial", label: "Arial" },
+  { value: "Arial Black", label: "Arial Black" },
+  { value: "Arial Rounded MT Bold", label: "Arial Rounded MT Bold" },
+  { value: "Georgia", label: "Georgia" },
+  { value: "Times New Roman", label: "Times New Roman" },
+  { value: "Courier New", label: "Courier New" },
+  { value: "Impact", label: "Impact" },
+  { value: "Verdana", label: "Verdana" },
+  { value: "Trebuchet MS", label: "Trebuchet MS" },
+  { value: "Palatino", label: "Palatino" },
+];
+
+const GOOGLE_FONTS = [
+  { value: "Inter Variable", label: "Inter" },
+  { value: "Geist Variable", label: "Geist" },
+  { value: "Outfit Variable", label: "Outfit" },
+  { value: "Space Grotesk Variable", label: "Space Grotesk" },
+  { value: "Roboto Variable", label: "Roboto" },
+  { value: "Roboto Condensed", label: "Roboto Condensed" },
+  { value: "Open Sans", label: "Open Sans" },
+  { value: "Lato", label: "Lato" },
+  { value: "Montserrat Variable", label: "Montserrat" },
+  { value: "Raleway", label: "Raleway" },
+  { value: "Oswald", label: "Oswald" },
+  { value: "Playfair Display", label: "Playfair Display" },
+  { value: "Anton", label: "Anton" },
+  { value: "Bebas Neue", label: "Bebas Neue" },
+  { value: "Nunito", label: "Nunito" },
+  { value: "Poppins", label: "Poppins" },
+  { value: "Permanent Marker", label: "Permanent Marker" },
+  { value: "Bangers", label: "Bangers" },
+  { value: "Press Start 2P", label: "Press Start 2P" },
+  { value: "Dancing Script", label: "Dancing Script" },
+  { value: "Pacifico", label: "Pacifico" },
+];
+
+const COLOR_PALETTE = [
+  { label: "White", value: "#ffffff" },
+  { label: "Black", value: "#1a1a1a" },
+  { label: "Yellow", value: "#ffcc00" },
+  { label: "Red", value: "#ff3b30" },
+  { label: "Pink", value: "#ff2d55" },
+  { label: "Purple", value: "#af52de" },
+  { label: "Blue", value: "#007aff" },
+  { label: "Teal", value: "#00f0ff" },
+  { label: "Green", value: "#34c759" },
+  { label: "Gold", value: "#ffe066, #b38600" },
+  { label: "Sunset", value: "#ff3e00, #ff0077, #aa00ff" },
+  { label: "Ocean", value: "#00c8ff, #00ff66" },
+  { label: "Rainbow", value: "#ff007f, #aa00ff, #00c8ff, #00ff66" },
+];
+
+const FONT_WEIGHTS = [
+  { value: 100, label: "Thin" },
+  { value: 200, label: "Extra Light" },
+  { value: 300, label: "Light" },
+  { value: 400, label: "Regular" },
+  { value: 500, label: "Medium" },
+  { value: 600, label: "Semi Bold" },
+  { value: 700, label: "Bold" },
+  { value: 800, label: "Extra Bold" },
+  { value: 900, label: "Black" },
+];
 
 interface TextStyleSectionProps {
   textClip: TextClip;
@@ -40,41 +107,28 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({ textClip, pr
     });
   };
 
-  // Get the selected effect's definition from allTextEffects
-  const effectDefinition = allTextEffects.find((e) => e.id === textClip.styleId);
-
-  if (effectDefinition) {
-    // Resolve the definition into the exact flat config the engine constructor expects!
-    const effectDefaults = _buildConfig(effectDefinition, textClip.text, textClip.fontSize, textClip.width || 640, textClip.height || 360);
-  }
+  // Resolve current font weight to a numeric value for the slider
+  const currentWeight = typeof textClip.fontWeight === "number" ? textClip.fontWeight : textClip.fontWeight === "bold" ? 700 : 400;
+  const weightLabel = FONT_WEIGHTS.find((w) => w.value === currentWeight)?.label || "Regular";
 
   return (
-    <div className="space-y-5">
-      {/* Text Editor Box */}
+    <div className="space-y-3">
+      {/* Text Content */}
       <div>
         <label className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-1.5 select-none">Text Content</label>
-        <textarea value={textClip.text || ""} onChange={(e) => handleUpdate("text", e.target.value)} rows={3} placeholder={effectDefinition?.text || "CLYPRA"} className="w-full bg-surface-raised border border-border/80 rounded-lg p-2.5 text-xs text-text-primary outline-none focus:border-accent resize-none selectable" />
+        <textarea value={textClip.text || ""} onChange={(e) => handleUpdate("text", e.target.value)} rows={3} placeholder="CLYPRA" className="w-full bg-surface-raised border border-border/60 rounded-lg p-2.5 text-xs text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 resize-none selectable transition-colors" />
       </div>
 
-      {/* Style Presets Library */}
-      <div>
-        <label className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-2 select-none">Style Presets</label>
-
-        <div className="space-y-3 p-3 bg-surface-raised/20 border border-border/40 rounded-xl">
-          {/* Horizontal preset selection carousel */}
+      {/* Style Presets */}
+      <PropertySection title="Style Presets" icon={<Layers className="w-3.5 h-3.5" />} defaultCollapsed>
+        <div className="space-y-3">
+          {/* Horizontal preset carousel */}
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
             {presets.map((preset) => (
               <div key={preset.id} className="relative shrink-0 group/preset">
-                <button
-                  onClick={() => {
-                    handleApplyPreset(preset);
-                  }}
-                  className="px-3 py-2 bg-surface-raised hover:bg-surface-raised/80 border border-border/60 hover:border-accent rounded-lg text-xs font-semibold text-text-primary transition-all cursor-pointer whitespace-nowrap"
-                  style={{ fontFamily: preset.fontFamily, color: preset.color }}
-                >
+                <button onClick={() => handleApplyPreset(preset)} className="px-3 py-2 bg-surface-raised hover:bg-surface-raised/80 border border-border/60 hover:border-accent rounded-lg text-xs font-semibold text-text-primary transition-all cursor-pointer whitespace-nowrap" style={{ fontFamily: preset.fontFamily, color: preset.color }}>
                   {preset.name}
                 </button>
-
                 {preset.isCustom && (
                   <button
                     onClick={(e) => {
@@ -90,9 +144,9 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({ textClip, pr
             ))}
           </div>
 
-          {/* Save Current Style as Preset */}
+          {/* Save Current Style */}
           <div className="flex items-center gap-2 pt-2 border-t border-border/30">
-            <input type="text" value={newPresetName} onChange={(e) => setNewPresetName(e.target.value)} placeholder="Custom style name..." className="flex-1 min-w-0 bg-surface-raised border border-border/80 rounded px-2 py-1 text-xs text-text-primary outline-none focus:border-accent" />
+            <input type="text" value={newPresetName} onChange={(e) => setNewPresetName(e.target.value)} placeholder="Custom style name..." className="flex-1 min-w-0 bg-surface-raised border border-border/60 rounded-md px-2 py-1 text-xs text-text-primary outline-none focus:border-accent selectable" />
             <Button
               size="sm"
               variant="secondary"
@@ -112,7 +166,6 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({ textClip, pr
                   stroke: textClip.stroke,
                   shadow: textClip.shadow,
                   background: textClip.background,
-                  keyframes: (textClip as any).keyframes,
                 });
                 setNewPresetName("");
               }}
@@ -122,137 +175,124 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({ textClip, pr
             </Button>
           </div>
         </div>
-      </div>
+      </PropertySection>
 
-      {/* Typography Options */}
-      <div>
-        <label className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-2 select-none">Typography</label>
-
-        <div className="space-y-3 p-3 bg-surface-raised/20 border border-border/40 rounded-xl">
-          {/* Font Family Select */}
+      {/* Typography */}
+      <PropertySection title="Typography" icon={<Type className="w-3.5 h-3.5" />}>
+        <div className="space-y-3">
+          {/* Font Family */}
           <div>
-            <label className="text-[10px] text-text-muted block mb-1 select-none">Font Family</label>
-            <select value={normalizeFontFamily(textClip.fontFamily || "Inter Variable")} onChange={(e) => handleUpdate("fontFamily", e.target.value)} className="w-full bg-surface-raised border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none">
+            <label className="text-[10px] font-medium text-text-muted block mb-1 select-none">Font Family</label>
+            <select value={normalizeFontFamily(textClip.fontFamily || "Inter Variable")} onChange={(e) => handleUpdate("fontFamily", e.target.value)} className="w-full bg-surface-raised border border-border/60 rounded-md px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 cursor-pointer appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23888%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_8px_center] pr-7">
               <optgroup label="System Fonts">
-                <option value="Arial">Arial</option>
-                <option value="Arial Black">Arial Black</option>
-                <option value="Arial Rounded MT Bold">Arial Rounded MT Bold</option>
-                <option value="Georgia">Georgia</option>
-                <option value="Times New Roman">Times New Roman</option>
-                <option value="Courier New">Courier New</option>
-                <option value="Impact">Impact</option>
-                <option value="Verdana">Verdana</option>
-                <option value="Trebuchet MS">Trebuchet MS</option>
-                <option value="Palatino">Palatino</option>
+                {SYSTEM_FONTS.map((f) => (
+                  <option key={f.value} value={f.value}>
+                    {f.label}
+                  </option>
+                ))}
               </optgroup>
               <optgroup label="Google Web Fonts">
-                <option value="Inter Variable">Inter</option>
-                <option value="Geist Variable">Geist</option>
-                <option value="Outfit Variable">Outfit</option>
-                <option value="Space Grotesk Variable">Space Grotesk</option>
-                <option value="Roboto Variable">Roboto</option>
-                <option value="Roboto Condensed">Roboto Condensed</option>
-                <option value="Open Sans">Open Sans</option>
-                <option value="Lato">Lato</option>
-                <option value="Montserrat Variable">Montserrat</option>
-                <option value="Raleway">Raleway</option>
-                <option value="Oswald">Oswald</option>
-                <option value="Playfair Display">Playfair Display</option>
-                <option value="Anton">Anton</option>
-                <option value="Bebas Neue">Bebas Neue</option>
-                <option value="Nunito">Nunito</option>
-                <option value="Poppins">Poppins</option>
-                <option value="Permanent Marker">Permanent Marker</option>
-                <option value="Bangers">Bangers</option>
-                <option value="Press Start 2P">Press Start 2P</option>
-                <option value="Dancing Script">Dancing Script</option>
-                <option value="Pacifico">Pacifico</option>
+                {GOOGLE_FONTS.map((f) => (
+                  <option key={f.value} value={f.value}>
+                    {f.label}
+                  </option>
+                ))}
               </optgroup>
             </select>
           </div>
 
-          {/* Font Size slider */}
+          {/* Font Size */}
+          <PropertySlider label="Font Size" value={textClip.fontSize || 48} min={10} max={150} step={1} suffix="px" onChange={(v) => handleUpdate("fontSize", v)} />
+
+          {/* Font Weight (numeric slider instead of just Bold toggle) */}
           <div>
             <div className="flex justify-between items-center text-[10px] text-text-muted mb-1 select-none">
-              <span>Font Size</span>
-              <span className="font-mono text-text-primary">{textClip.fontSize}px</span>
+              <span>Font Weight</span>
+              <span className="text-text-primary font-medium">
+                {weightLabel} ({currentWeight})
+              </span>
             </div>
-            <div className="flex items-center gap-2">
-              <input type="range" min="10" max="150" value={textClip.fontSize || 48} onChange={(e) => handleUpdate("fontSize", Number(e.target.value))} className="grow accent-accent" />
-              <input type="number" value={textClip.fontSize || 48} onChange={(e) => handleUpdate("fontSize", Number(e.target.value))} className="w-12 bg-surface-raised border border-border rounded text-center py-0.5 text-xs text-text-primary outline-none" />
-            </div>
+            <input
+              type="range"
+              min={100}
+              max={900}
+              step={100}
+              value={currentWeight}
+              onChange={(e) => handleUpdate("fontWeight", Number(e.target.value))}
+              className="w-full h-1.5 rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-[0_0_8px_rgba(var(--color-accent-raw),0.35)] [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer"
+              style={{
+                background: `linear-gradient(to right, var(--color-accent) 0%, var(--color-accent) ${((currentWeight - 100) / 800) * 100}%, var(--color-border) ${((currentWeight - 100) / 800) * 100}%, var(--color-border) 100%)`,
+              }}
+            />
           </div>
 
-          {/* Weight, Italic, Alignments */}
-          <div className="grid grid-cols-2 gap-3 pt-1">
-            {/* Style buttons */}
+          {/* Font Style + Alignment */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Italic toggle */}
             <div className="space-y-1">
-              <label className="text-[9px] text-text-muted block select-none">Font Style</label>
-              <div className="flex gap-1 bg-surface-raised border border-border/60 p-0.5 rounded">
-                <button onClick={() => handleUpdate("fontWeight", textClip.fontWeight === "bold" ? "normal" : "bold")} className={`flex-1 py-1 rounded text-xs font-bold transition-all ${textClip.fontWeight === "bold" ? "bg-accent text-white" : "text-text-muted hover:text-text-primary"}`}>
-                  B
-                </button>
-                <button onClick={() => handleUpdate("fontStyle", textClip.fontStyle === "italic" ? "normal" : "italic")} className={`flex-1 py-1 rounded text-xs italic transition-all ${textClip.fontStyle === "italic" ? "bg-accent text-white font-bold" : "text-text-muted hover:text-text-primary"}`}>
-                  I
-                </button>
-              </div>
+              <label className="text-[9px] text-text-muted block select-none">Style</label>
+              <button onClick={() => handleUpdate("fontStyle", textClip.fontStyle === "italic" ? "normal" : "italic")} className={`w-full py-1.5 rounded-md text-xs italic font-medium transition-all cursor-pointer border ${textClip.fontStyle === "italic" ? "bg-accent/15 text-accent border-accent/30" : "bg-surface-raised text-text-muted border-border/60 hover:text-text-primary hover:bg-white/[0.06]"}`}>
+                Italic
+              </button>
             </div>
 
-            {/* Alignment buttons */}
+            {/* Horizontal Align */}
             <div className="space-y-1">
               <label className="text-[9px] text-text-muted block select-none">Horizontal Align</label>
-              <div className="flex gap-1 bg-surface-raised border border-border/60 p-0.5 rounded">
-                <button onClick={() => handleUpdate("align", "left")} className={`flex-1 py-1 rounded flex items-center justify-center transition-all ${textClip.align === "left" ? "bg-accent text-white" : "text-text-muted hover:text-text-primary"}`}>
-                  <AlignLeft className="w-3.5 h-3.5" />
-                </button>
-                <button onClick={() => handleUpdate("align", "center")} className={`flex-1 py-1 rounded flex items-center justify-center transition-all ${textClip.align === "center" || !textClip.align ? "bg-accent text-white" : "text-text-muted hover:text-text-primary"}`}>
-                  <AlignCenter className="w-3.5 h-3.5" />
-                </button>
-                <button onClick={() => handleUpdate("align", "right")} className={`flex-1 py-1 rounded flex items-center justify-center transition-all ${textClip.align === "right" ? "bg-accent text-white" : "text-text-muted hover:text-text-primary"}`}>
-                  <AlignRight className="w-3.5 h-3.5" />
-                </button>
+              <div className="flex gap-0.5 bg-surface-raised border border-border/60 p-0.5 rounded-md">
+                {(
+                  [
+                    ["left", AlignLeft],
+                    ["center", AlignCenter],
+                    ["right", AlignRight],
+                  ] as const
+                ).map(([align, Icon]) => (
+                  <button key={align} onClick={() => handleUpdate("align", align)} className={`flex-1 py-1.5 rounded flex items-center justify-center transition-all cursor-pointer ${(textClip.align || "center") === align ? "bg-accent text-white" : "text-text-muted hover:text-text-primary"}`}>
+                    <Icon className="w-3.5 h-3.5" />
+                  </button>
+                ))}
               </div>
             </div>
           </div>
 
-          {/* Vertical align and letter spacing */}
+          {/* Vertical align + letter spacing */}
           <div className="grid grid-cols-2 gap-3">
-            {/* Vertical align */}
             <div className="space-y-1">
               <label className="text-[9px] text-text-muted block select-none">Vertical Align</label>
-              <div className="flex gap-1 bg-surface-raised border border-border/60 p-0.5 rounded">
-                <button onClick={() => handleUpdate("valign", "top")} className={`flex-1 py-1 rounded flex items-center justify-center transition-all ${textClip.valign === "top" ? "bg-accent text-white" : "text-text-muted hover:text-text-primary"}`}>
-                  <AlignStartVertical className="w-3.5 h-3.5" />
-                </button>
-                <button onClick={() => handleUpdate("valign", "middle")} className={`flex-1 py-1 rounded flex items-center justify-center transition-all ${textClip.valign === "middle" || !textClip.valign ? "bg-accent text-white" : "text-text-muted hover:text-text-primary"}`}>
-                  <AlignCenterVertical className="w-3.5 h-3.5" />
-                </button>
-                <button onClick={() => handleUpdate("valign", "bottom")} className={`flex-1 py-1 rounded flex items-center justify-center transition-all ${textClip.valign === "bottom" ? "bg-accent text-white" : "text-text-muted hover:text-text-primary"}`}>
-                  <AlignEndVertical className="w-3.5 h-3.5" />
-                </button>
+              <div className="flex gap-0.5 bg-surface-raised border border-border/60 p-0.5 rounded-md">
+                {(
+                  [
+                    ["top", AlignStartVertical],
+                    ["middle", AlignCenterVertical],
+                    ["bottom", AlignEndVertical],
+                  ] as const
+                ).map(([valign, Icon]) => (
+                  <button key={valign} onClick={() => handleUpdate("valign", valign)} className={`flex-1 py-1.5 rounded flex items-center justify-center transition-all cursor-pointer ${(textClip.valign || "middle") === valign ? "bg-accent text-white" : "text-text-muted hover:text-text-primary"}`}>
+                    <Icon className="w-3.5 h-3.5" />
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Letter spacing */}
             <div className="space-y-1">
-              <label className="text-[9px] text-text-muted block select-none">Letter Spacing ({textClip.letterSpacing || 0}px)</label>
-              <input type="number" value={textClip.letterSpacing || 0} onChange={(e) => handleUpdate("letterSpacing", Number(e.target.value))} className="w-full bg-surface-raised border border-border rounded py-1 px-2 text-center text-xs text-text-primary outline-none" />
+              <label className="text-[9px] text-text-muted block select-none">Letter Spacing</label>
+              <input type="number" value={textClip.letterSpacing || 0} onChange={(e) => handleUpdate("letterSpacing", Number(e.target.value))} className="w-full bg-surface-raised border border-border/60 rounded-md py-1.5 px-2 text-center text-xs text-text-primary outline-none focus:border-accent tabular-nums selectable" />
             </div>
           </div>
+
+          {/* Line Height — was missing from UI! */}
+          <PropertySlider label="Line Height" value={textClip.lineHeight ?? 1.2} min={0.5} max={3.0} step={0.1} onChange={(v) => handleUpdate("lineHeight", v)} />
         </div>
-      </div>
+      </PropertySection>
 
-      {/* Visual Styling Customizers */}
-      <div>
-        <label className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-2 select-none">Style Customizers</label>
-
-        <div className="space-y-3.5 p-3.5 bg-surface-raised/20 border border-border/40 rounded-xl">
-          {/* Solid Text Color */}
+      {/* Color & Style Customizers */}
+      <PropertySection title="Colors & Effects" icon={<Palette className="w-3.5 h-3.5" />}>
+        <div className="space-y-3.5">
+          {/* Text Color */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-text-primary select-none font-medium">Text Color</span>
+              <span className="text-[10px] font-medium text-text-primary select-none">Text Color</span>
               <div className="flex items-center gap-2">
-                {/* Linear Gradients Quick Selectors */}
                 <select
                   value={(textClip.color || "#ffffff").includes(",") ? textClip.color : "solid"}
                   onChange={(e) => {
@@ -260,7 +300,7 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({ textClip, pr
                       handleUpdate("color", e.target.value);
                     }
                   }}
-                  className="bg-surface-raised border border-border rounded text-[10px] py-1 px-1.5 text-text-muted outline-none"
+                  className="bg-surface-raised border border-border/60 rounded text-[10px] py-1 px-1.5 text-text-muted outline-none cursor-pointer"
                 >
                   <option value="solid">Solid Color</option>
                   <option value="#ffe066, #b38600">Gold Gradient</option>
@@ -271,26 +311,11 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({ textClip, pr
               </div>
             </div>
 
-            {/* Quick Color Palette circles */}
+            {/* Quick Color Palette */}
             <div className="flex flex-wrap gap-1.5 pt-1 justify-start">
-              {[
-                { label: "White", value: "#ffffff" },
-                { label: "Black", value: "#1a1a1a" },
-                { label: "Yellow", value: "#ffcc00" },
-                { label: "Red", value: "#ff3b30" },
-                { label: "Pink", value: "#ff2d55" },
-                { label: "Purple", value: "#af52de" },
-                { label: "Blue", value: "#007aff" },
-                { label: "Teal", value: "#00f0ff" },
-                { label: "Green", value: "#34c759" },
-                { label: "Gold", value: "#ffe066, #b38600" },
-                { label: "Sunset", value: "#ff3e00, #ff0077, #aa00ff" },
-                { label: "Ocean", value: "#00c8ff, #00ff66" },
-                { label: "Rainbow", value: "#ff007f, #aa00ff, #00c8ff, #00ff66" },
-              ].map((p, idx) => {
+              {COLOR_PALETTE.map((p, idx) => {
                 const isGrad = p.value.includes(",");
                 const style: React.CSSProperties = isGrad ? { background: `linear-gradient(135deg, ${p.value})` } : { backgroundColor: p.value };
-
                 const isSelected = textClip.color === p.value;
 
                 return <button key={idx} onClick={() => handleUpdate("color", p.value)} className={`w-6 h-6 rounded-full border cursor-pointer hover:scale-110 active:scale-95 transition-all focus:outline-none ${isSelected ? "border-accent ring-2 ring-accent/30 scale-105" : "border-border/60 hover:border-text-primary"}`} style={style} title={p.label} />;
@@ -298,167 +323,129 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({ textClip, pr
             </div>
           </div>
 
-          {/* Stroke / Outline options */}
-          <div className="border-t border-border/40 pt-3 space-y-2">
+          {/* Stroke / Outline */}
+          <div className="border-t border-border/30 pt-3 space-y-2">
             <div className="flex items-center justify-between select-none">
-              <span className="text-xs text-text-primary font-medium">Outline / Stroke</span>
-              <input
-                type="checkbox"
-                checked={!!textClip.stroke}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    handleUpdate("stroke", { color: "#000000", width: 4 });
+              <span className="text-[10px] font-medium text-text-primary">Outline / Stroke</span>
+              <button
+                onClick={() => {
+                  if (textClip.stroke) {
+                    handleUpdate("stroke", null);
                   } else {
-                    handleUpdate("stroke", null); // Explicitly disable stroke
+                    handleUpdate("stroke", { color: "#000000", width: 4 });
                   }
                 }}
-                className="rounded border-border accent-accent cursor-pointer"
-              />
+                className={`px-2 py-0.5 text-[9px] font-medium rounded-full transition-all cursor-pointer ${textClip.stroke ? "bg-accent/15 text-accent border border-accent/30" : "bg-surface-raised text-text-muted border border-border/60 hover:text-text-primary"}`}
+              >
+                {textClip.stroke ? "ON" : "OFF"}
+              </button>
             </div>
 
             {textClip.stroke && (
-              <div className="space-y-2.5 p-2.5 bg-surface-raised/40 border border-border/40 rounded-lg">
+              <div className="space-y-2.5 p-2.5 bg-surface-raised/30 border border-border/30 rounded-lg">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-text-muted">Color</span>
-                  <div className="flex items-center gap-2">
-                    {/* Quick Stroke Colors */}
-                    <div className="flex gap-1">
-                      {["#000000", "#ffffff", "#ff3b30", "#ffcc00"].map((c, idx) => (
-                        <button key={idx} onClick={() => handleUpdate("stroke", { ...textClip.stroke, color: c })} className={`w-4 h-4 rounded-full border border-border/60 cursor-pointer ${textClip.stroke?.color === c ? "ring-2 ring-accent/40" : ""}`} style={{ backgroundColor: c }} />
-                      ))}
-                    </div>
+                  <div className="flex items-center gap-1.5">
+                    {["#000000", "#ffffff", "#ff3b30", "#ffcc00"].map((c, idx) => (
+                      <button key={idx} onClick={() => handleUpdate("stroke", { ...textClip.stroke, color: c })} className={`w-4 h-4 rounded-full border cursor-pointer transition-all ${textClip.stroke?.color === c ? "ring-2 ring-accent/40 border-accent" : "border-border/60"}`} style={{ backgroundColor: c }} />
+                    ))}
                     <input type="color" value={textClip.stroke.color} onChange={(e) => handleUpdate("stroke", { ...textClip.stroke, color: e.target.value })} className="w-5 h-5 bg-transparent border-0 cursor-pointer" />
                   </div>
                 </div>
-                <div>
-                  <div className="flex justify-between text-[9px] text-text-muted mb-1 select-none">
-                    <span>Thickness</span>
-                    <span>{textClip.stroke.width}px</span>
-                  </div>
-                  <input type="range" min="1" max="15" value={textClip.stroke.width} onChange={(e) => handleUpdate("stroke", { ...textClip.stroke, width: Number(e.target.value) })} className="w-full accent-accent" />
-                </div>
+                <PropertySlider label="Thickness" value={textClip.stroke.width} min={1} max={15} step={1} suffix="px" onChange={(v) => handleUpdate("stroke", { ...textClip.stroke, width: v })} compact />
               </div>
             )}
           </div>
 
-          {/* Outer Glow / Shadow */}
-          <div className="border-t border-border/40 pt-3 space-y-2">
+          {/* Shadow / Outer Glow */}
+          <div className="border-t border-border/30 pt-3 space-y-2">
             <div className="flex items-center justify-between select-none">
-              <span className="text-xs text-text-primary font-medium">Outer Glow / Shadow</span>
-              <input
-                type="checkbox"
-                checked={!!textClip.shadow}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    handleUpdate("shadow", { color: "#ff0000", blur: 15, offsetX: 0, offsetY: 0 });
+              <span className="text-[10px] font-medium text-text-primary">Outer Glow / Shadow</span>
+              <button
+                onClick={() => {
+                  if (textClip.shadow) {
+                    handleUpdate("shadow", null);
                   } else {
-                    handleUpdate("shadow", null); // Explicitly disable shadow
+                    handleUpdate("shadow", { color: "#ff0000", blur: 15, offsetX: 0, offsetY: 0 });
                   }
                 }}
-                className="rounded border-border accent-accent cursor-pointer"
-              />
+                className={`px-2 py-0.5 text-[9px] font-medium rounded-full transition-all cursor-pointer ${textClip.shadow ? "bg-accent/15 text-accent border border-accent/30" : "bg-surface-raised text-text-muted border border-border/60 hover:text-text-primary"}`}
+              >
+                {textClip.shadow ? "ON" : "OFF"}
+              </button>
             </div>
 
             {textClip.shadow && (
-              <div className="space-y-2.5 p-2.5 bg-surface-raised/40 border border-border/40 rounded-lg">
+              <div className="space-y-2.5 p-2.5 bg-surface-raised/30 border border-border/30 rounded-lg">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-text-muted">Glow Color</span>
-                  <div className="flex items-center gap-2">
-                    {/* Quick Glow Colors */}
-                    <div className="flex gap-1">
-                      {["#ff0000", "#ff007f", "#00f0ff", "#ffe066"].map((c, idx) => (
-                        <button key={idx} onClick={() => handleUpdate("shadow", { ...textClip.shadow, color: c })} className={`w-4 h-4 rounded-full border border-border/60 cursor-pointer ${textClip.shadow?.color === c ? "ring-2 ring-accent/40" : ""}`} style={{ backgroundColor: c }} />
-                      ))}
-                    </div>
+                  <span className="text-[10px] text-text-muted">Color</span>
+                  <div className="flex items-center gap-1.5">
+                    {["#ff0000", "#ff007f", "#00f0ff", "#ffe066"].map((c, idx) => (
+                      <button key={idx} onClick={() => handleUpdate("shadow", { ...textClip.shadow, color: c })} className={`w-4 h-4 rounded-full border cursor-pointer transition-all ${textClip.shadow?.color === c ? "ring-2 ring-accent/40 border-accent" : "border-border/60"}`} style={{ backgroundColor: c }} />
+                    ))}
                     <input type="color" value={textClip.shadow.color} onChange={(e) => handleUpdate("shadow", { ...textClip.shadow, color: e.target.value })} className="w-5 h-5 bg-transparent border-0 cursor-pointer" />
                   </div>
                 </div>
-
-                <div>
-                  <div className="flex justify-between text-[9px] text-text-muted mb-1 select-none">
-                    <span>Blur Radius</span>
-                    <span>{textClip.shadow.blur}px</span>
-                  </div>
-                  <input type="range" min="1" max="30" value={textClip.shadow.blur} onChange={(e) => handleUpdate("shadow", { ...textClip.shadow, blur: Number(e.target.value) })} className="w-full accent-accent" />
-                </div>
-
+                <PropertySlider label="Blur Radius" value={textClip.shadow.blur} min={1} max={30} step={1} suffix="px" onChange={(v) => handleUpdate("shadow", { ...textClip.shadow, blur: v })} compact />
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-[9px] text-text-muted block mb-0.5 select-none">Offset X</label>
-                    <input type="number" value={textClip.shadow.offsetX} onChange={(e) => handleUpdate("shadow", { ...textClip.shadow, offsetX: Number(e.target.value) })} className="w-full bg-surface-raised border border-border text-center rounded py-0.5 text-xs text-text-primary outline-none" />
+                    <input type="number" value={textClip.shadow.offsetX} onChange={(e) => handleUpdate("shadow", { ...textClip.shadow, offsetX: Number(e.target.value) })} className="w-full bg-surface-raised border border-border/60 text-center rounded-md py-0.5 text-xs text-text-primary outline-none focus:border-accent tabular-nums selectable" />
                   </div>
                   <div>
                     <label className="text-[9px] text-text-muted block mb-0.5 select-none">Offset Y</label>
-                    <input type="number" value={textClip.shadow.offsetY} onChange={(e) => handleUpdate("shadow", { ...textClip.shadow, offsetY: Number(e.target.value) })} className="w-full bg-surface-raised border border-border text-center rounded py-0.5 text-xs text-text-primary outline-none" />
+                    <input type="number" value={textClip.shadow.offsetY} onChange={(e) => handleUpdate("shadow", { ...textClip.shadow, offsetY: Number(e.target.value) })} className="w-full bg-surface-raised border border-border/60 text-center rounded-md py-0.5 text-xs text-text-primary outline-none focus:border-accent tabular-nums selectable" />
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Background Box Backing */}
-          <div className="border-t border-border/40 pt-3 space-y-2">
+          {/* Background Box */}
+          <div className="border-t border-border/30 pt-3 space-y-2">
             <div className="flex items-center justify-between select-none">
-              <span className="text-xs text-text-primary font-medium">Background Box</span>
-              <input
-                type="checkbox"
-                checked={!!textClip.background}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    handleUpdate("background", { color: "rgba(0,0,0,0.6)", padding: 12, borderRadius: 6 });
+              <span className="text-[10px] font-medium text-text-primary">Background Box</span>
+              <button
+                onClick={() => {
+                  if (textClip.background) {
+                    handleUpdate("background", null);
                   } else {
-                    handleUpdate("background", null); // Explicitly disable background
+                    handleUpdate("background", { color: "rgba(0,0,0,0.6)", padding: 12, borderRadius: 6 });
                   }
                 }}
-                className="rounded border-border accent-accent cursor-pointer"
-              />
+                className={`px-2 py-0.5 text-[9px] font-medium rounded-full transition-all cursor-pointer ${textClip.background ? "bg-accent/15 text-accent border border-accent/30" : "bg-surface-raised text-text-muted border border-border/60 hover:text-text-primary"}`}
+              >
+                {textClip.background ? "ON" : "OFF"}
+              </button>
             </div>
 
             {textClip.background && (
-              <div className="space-y-2.5 p-2.5 bg-surface-raised/40 border border-border/40 rounded-lg">
+              <div className="space-y-2.5 p-2.5 bg-surface-raised/30 border border-border/30 rounded-lg">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-text-muted">Box Color</span>
-                  <div className="flex items-center gap-2">
-                    {/* Quick Background Presets */}
-                    <div className="flex gap-1">
-                      {["rgba(0,0,0,0.6)", "rgba(255,255,255,0.2)", "rgba(0,122,255,0.3)", "rgba(255,59,48,0.3)"].map((c, idx) => (
-                        <button key={idx} onClick={() => handleUpdate("background", { ...textClip.background, color: c })} className={`w-4 h-4 rounded-full border border-border/60 cursor-pointer ${textClip.background?.color === c ? "ring-2 ring-accent/40" : ""}`} style={{ backgroundColor: c }} />
-                      ))}
-                    </div>
+                  <div className="flex items-center gap-1.5">
+                    {["rgba(0,0,0,0.6)", "rgba(255,255,255,0.2)", "rgba(0,122,255,0.3)", "rgba(255,59,48,0.3)"].map((c, idx) => (
+                      <button key={idx} onClick={() => handleUpdate("background", { ...textClip.background, color: c })} className={`w-4 h-4 rounded-full border cursor-pointer transition-all ${textClip.background?.color === c ? "ring-2 ring-accent/40 border-accent" : "border-border/60"}`} style={{ backgroundColor: c }} />
+                    ))}
                     <input type="color" value={textClip.background.color.startsWith("rgba") ? "#000000" : textClip.background.color} onChange={(e) => handleUpdate("background", { ...textClip.background, color: e.target.value })} className="w-5 h-5 bg-transparent border-0 cursor-pointer" />
                   </div>
                 </div>
-
-                <div>
-                  <div className="flex justify-between text-[9px] text-text-muted mb-1 select-none">
-                    <span>Box Padding</span>
-                    <span>{textClip.background.padding}px</span>
-                  </div>
-                  <input type="range" min="0" max="30" value={textClip.background.padding} onChange={(e) => handleUpdate("background", { ...textClip.background, padding: Number(e.target.value) })} className="w-full accent-accent" />
-                </div>
-
-                <div>
-                  <div className="flex justify-between text-[9px] text-text-muted mb-1 select-none">
-                    <span>Border Radius</span>
-                    <span>{textClip.background.borderRadius}px</span>
-                  </div>
-                  <input type="range" min="0" max="25" value={textClip.background.borderRadius} onChange={(e) => handleUpdate("background", { ...textClip.background, borderRadius: Number(e.target.value) })} className="w-full accent-accent" />
-                </div>
+                <PropertySlider label="Padding" value={textClip.background.padding} min={0} max={30} step={1} suffix="px" onChange={(v) => handleUpdate("background", { ...textClip.background, padding: v })} compact />
+                <PropertySlider label="Border Radius" value={textClip.background.borderRadius} min={0} max={25} step={1} suffix="px" onChange={(v) => handleUpdate("background", { ...textClip.background, borderRadius: v })} compact />
               </div>
             )}
           </div>
         </div>
-      </div>
+      </PropertySection>
 
-      {/* Presets Quick Switch */}
-      <div>
-        <label className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-2 select-none">Quick Presets Switch</label>
-        <div className="grid grid-cols-3 gap-2 bg-surface-raised/10 border border-border/40 p-2.5 rounded-xl">
-          {allTextEffects.slice(0, 6).map((effect) => (
+      {/* Quick Effect Presets */}
+      <PropertySection title="Quick Presets" icon={<PaintBucket className="w-3.5 h-3.5" />} defaultCollapsed>
+        <div className="grid grid-cols-3 gap-1.5">
+          {allTextEffects.slice(0, 9).map((effect) => (
             <button
               key={effect.id}
               onClick={() => applyEffectPreset(effect)}
-              className="p-2 rounded bg-surface-raised border border-border hover:border-accent text-center truncate text-[10px] text-text-primary font-bold shadow-[0_2px_4px_rgba(0,0,0,0.15)] transition-all cursor-pointer max-w-[90px]"
+              className={`p-2 rounded-lg border text-center truncate text-[10px] font-bold shadow-[0_2px_4px_rgba(0,0,0,0.15)] transition-all cursor-pointer max-w-full ${textClip.styleId === effect.id ? "bg-accent/15 border-accent/40" : "bg-surface-raised border-border/60 hover:border-accent"}`}
               style={{
                 fontFamily: effect.font.family,
                 color: effect.fills?.[0]?.color ?? "#ffffff",
@@ -469,7 +456,7 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({ textClip, pr
             </button>
           ))}
         </div>
-      </div>
+      </PropertySection>
     </div>
   );
 };

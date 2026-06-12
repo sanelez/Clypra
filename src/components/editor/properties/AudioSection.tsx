@@ -1,6 +1,8 @@
-import React from "react";
-import { Volume2, VolumeX } from "lucide-react";
+import React, { useCallback } from "react";
+import { Volume2, VolumeX, AudioLines } from "lucide-react";
 import type { Clip } from "@/types";
+import { PropertySlider } from "./primitives/PropertySlider";
+import { PropertySection } from "./primitives/PropertySection";
 
 interface AudioSectionProps {
   selectedClip: Clip;
@@ -11,61 +13,108 @@ export const AudioSection: React.FC<AudioSectionProps> = ({ selectedClip, handle
   const volume = selectedClip.volume ?? 1.0;
   const volumePercent = Math.round(volume * 100);
   const isMuted = volume === 0;
+  const fadeIn = (selectedClip as any).fadeIn ?? 0;
+  const fadeOut = (selectedClip as any).fadeOut ?? 0;
 
-  const handleVolumeChange = (newVolume: number) => {
-    // Clamp between 0 and 1
-    const clampedVolume = Math.max(0, Math.min(1, newVolume));
-    handleUpdate("volume", clampedVolume);
-  };
+  const handleVolumeChange = useCallback(
+    (newVolume: number) => {
+      const clampedVolume = Math.max(0, Math.min(2, newVolume));
+      handleUpdate("volume", clampedVolume);
+    },
+    [handleUpdate],
+  );
 
-  const handleVolumePercentChange = (percent: number) => {
-    handleVolumeChange(percent / 100);
-  };
+  const handleVolumePercentChange = useCallback(
+    (percent: number) => {
+      handleVolumeChange(percent / 100);
+    },
+    [handleVolumeChange],
+  );
 
-  const toggleMute = () => {
+  const toggleMute = useCallback(() => {
     handleVolumeChange(isMuted ? 1.0 : 0);
-  };
+  }, [handleVolumeChange, isMuted]);
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-medium text-text-primary">Volume</label>
-          <span className="text-xs text-text-muted">{volumePercent}%</span>
+    <div className="space-y-3">
+      {/* Volume Section */}
+      <PropertySection title="Volume" icon={<Volume2 className="w-3.5 h-3.5" />}>
+        <div className="space-y-3">
+          {/* Mute toggle + slider */}
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={toggleMute}
+              className={`flex items-center justify-center w-7 h-7 rounded-md transition-all cursor-pointer ${
+                isMuted
+                  ? "bg-red-500/15 text-red-400 hover:bg-red-500/25"
+                  : "bg-surface-raised hover:bg-white/[0.06] text-accent"
+              }`}
+              title={isMuted ? "Unmute" : "Mute"}
+            >
+              {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+            </button>
+            <div className="flex-1">
+              <PropertySlider
+                label="Level"
+                value={volumePercent}
+                min={0}
+                max={200}
+                step={1}
+                suffix="%"
+                onChange={handleVolumePercentChange}
+                compact
+              />
+            </div>
+          </div>
+
+          {/* Quick-set presets */}
+          <div className="flex items-center gap-1">
+            {[
+              { label: "0%", value: 0 },
+              { label: "50%", value: 0.5 },
+              { label: "100%", value: 1.0 },
+              { label: "150%", value: 1.5 },
+              { label: "200%", value: 2.0 },
+            ].map((preset) => (
+              <button
+                key={preset.label}
+                onClick={() => handleVolumeChange(preset.value)}
+                className={`flex-1 py-1 text-[9px] font-medium rounded transition-all cursor-pointer ${
+                  volume === preset.value
+                    ? "bg-accent/15 text-accent border border-accent/30"
+                    : "text-text-muted hover:text-text-primary hover:bg-white/[0.04] border border-transparent"
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
         </div>
+      </PropertySection>
 
-        <div className="flex items-center gap-3">
-          <button onClick={toggleMute} className="flex items-center justify-center w-8 h-8 rounded hover:bg-surface-raised transition-colors" title={isMuted ? "Unmute" : "Mute"}>
-            {isMuted ? <VolumeX className="w-4 h-4 text-text-muted" /> : <Volume2 className="w-4 h-4 text-accent" />}
-          </button>
-
-          <input type="range" min="0" max="100" value={volumePercent} onChange={(e) => handleVolumePercentChange(Number(e.target.value))} className="flex-1 h-2 bg-surface-raised rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer" />
-
-          <input type="number" min="0" max="100" value={volumePercent} onChange={(e) => handleVolumePercentChange(Number(e.target.value))} className="w-16 px-2 py-1 text-xs text-center bg-surface-raised border border-border rounded focus:outline-none focus:ring-1 focus:ring-accent" />
+      {/* Fade Section */}
+      <PropertySection title="Fade" icon={<AudioLines className="w-3.5 h-3.5" />} defaultCollapsed>
+        <div className="space-y-2.5">
+          <PropertySlider
+            label="Fade In"
+            value={fadeIn}
+            min={0}
+            max={5}
+            step={0.1}
+            suffix="s"
+            onChange={(v) => handleUpdate("fadeIn", v)}
+          />
+          <PropertySlider
+            label="Fade Out"
+            value={fadeOut}
+            min={0}
+            max={5}
+            step={0.1}
+            suffix="s"
+            onChange={(v) => handleUpdate("fadeOut", v)}
+          />
         </div>
-
-        <div className="flex items-center justify-between text-[10px] text-text-muted">
-          <button onClick={() => handleVolumeChange(0)} className="hover:text-text-primary transition-colors">
-            0%
-          </button>
-          <button onClick={() => handleVolumeChange(0.5)} className="hover:text-text-primary transition-colors">
-            50%
-          </button>
-          <button onClick={() => handleVolumeChange(1.0)} className="hover:text-text-primary transition-colors">
-            100%
-          </button>
-          <button onClick={() => handleVolumeChange(1.5)} className="hover:text-text-primary transition-colors">
-            150%
-          </button>
-          <button onClick={() => handleVolumeChange(2.0)} className="hover:text-text-primary transition-colors">
-            200%
-          </button>
-        </div>
-      </div>
-
-      <div className="pt-3 border-t border-border">
-        <p className="text-[10px] text-text-muted leading-relaxed">Adjust the volume level for this audio clip. Values above 100% will amplify the audio (may cause clipping).</p>
-      </div>
+      </PropertySection>
     </div>
   );
 };

@@ -1,145 +1,170 @@
 /**
  * Text Animation Controls Component
  *
- * UI controls for applying entrance and exit animations to text clips
+ * UI controls for applying entrance and exit animations to text clips.
+ * Uses handleUpdate/handleUpdateMultiple props to integrate with the
+ * undo/redo history system (TransformClipCommand).
  */
 
-import React from "react";
+import React, { useCallback } from "react";
+import { Sparkles } from "lucide-react";
 import type { TextClip, TextAnimation } from "@/types";
 import { ENTRANCE_PRESETS, EXIT_PRESETS, createDefaultAnimation } from "@/lib/textAnimation";
-import { useTimelineStore } from "@/store/timelineStore";
+import { PropertySlider } from "./primitives/PropertySlider";
+import { PropertySelect } from "./primitives/PropertySelect";
+import { PropertySection } from "./primitives/PropertySection";
 
 interface TextAnimationControlsProps {
   clip: TextClip;
+  handleUpdate: (key: string, value: any) => void;
+  handleUpdateMultiple: (fields: Record<string, any>) => void;
 }
 
-export const TextAnimationControls: React.FC<TextAnimationControlsProps> = ({ clip }) => {
-  const updateClip = useTimelineStore((state) => state.updateClip);
+const EASING_OPTIONS = [
+  { value: "linear", label: "Linear" },
+  { value: "ease-in", label: "Ease In" },
+  { value: "ease-out", label: "Ease Out" },
+  { value: "ease-in-out", label: "Ease In-Out" },
+];
 
-  const handleEntranceChange = (type: string) => {
-    const animation = type === "none" ? undefined : createDefaultAnimation(type as any);
+export const TextAnimationControls: React.FC<TextAnimationControlsProps> = ({ clip, handleUpdate }) => {
+  const handleEntranceChange = useCallback(
+    (type: string) => {
+      const animation = type === "none" ? undefined : createDefaultAnimation(type as TextAnimation["type"]);
+      handleUpdate("entranceAnimation", animation);
+    },
+    [handleUpdate],
+  );
 
-    updateClip(clip.id, { entranceAnimation: animation } as Partial<TextClip>);
-  };
+  const handleExitChange = useCallback(
+    (type: string) => {
+      const animation = type === "none" ? undefined : createDefaultAnimation(type as TextAnimation["type"]);
+      handleUpdate("exitAnimation", animation);
+    },
+    [handleUpdate],
+  );
 
-  const handleExitChange = (type: string) => {
-    const animation = type === "none" ? undefined : createDefaultAnimation(type as any);
-
-    updateClip(clip.id, { exitAnimation: animation } as Partial<TextClip>);
-  };
-
-  const handleEntranceDurationChange = (duration: number) => {
-    if (clip.entranceAnimation) {
-      updateClip(clip.id, {
-        entranceAnimation: {
+  const handleEntranceDurationChange = useCallback(
+    (duration: number) => {
+      if (clip.entranceAnimation) {
+        handleUpdate("entranceAnimation", {
           ...clip.entranceAnimation,
           duration: Math.max(0.1, Math.min(duration, clip.duration / 2)),
-        },
-      } as Partial<TextClip>);
-    }
-  };
+        });
+      }
+    },
+    [clip.entranceAnimation, clip.duration, handleUpdate],
+  );
 
-  const handleExitDurationChange = (duration: number) => {
-    if (clip.exitAnimation) {
-      updateClip(clip.id, {
-        exitAnimation: {
+  const handleExitDurationChange = useCallback(
+    (duration: number) => {
+      if (clip.exitAnimation) {
+        handleUpdate("exitAnimation", {
           ...clip.exitAnimation,
           duration: Math.max(0.1, Math.min(duration, clip.duration / 2)),
-        },
-      } as Partial<TextClip>);
-    }
-  };
+        });
+      }
+    },
+    [clip.exitAnimation, clip.duration, handleUpdate],
+  );
 
-  const handleEntranceEasingChange = (easing: TextAnimation["easing"]) => {
-    if (clip.entranceAnimation) {
-      updateClip(clip.id, {
-        entranceAnimation: {
+  const handleEntranceEasingChange = useCallback(
+    (easing: string) => {
+      if (clip.entranceAnimation) {
+        handleUpdate("entranceAnimation", {
           ...clip.entranceAnimation,
-          easing,
-        },
-      } as Partial<TextClip>);
-    }
-  };
+          easing: easing as TextAnimation["easing"],
+        });
+      }
+    },
+    [clip.entranceAnimation, handleUpdate],
+  );
 
-  const handleExitEasingChange = (easing: TextAnimation["easing"]) => {
-    if (clip.exitAnimation) {
-      updateClip(clip.id, {
-        exitAnimation: {
+  const handleExitEasingChange = useCallback(
+    (easing: string) => {
+      if (clip.exitAnimation) {
+        handleUpdate("exitAnimation", {
           ...clip.exitAnimation,
-          easing,
-        },
-      } as Partial<TextClip>);
-    }
-  };
+          easing: easing as TextAnimation["easing"],
+        });
+      }
+    },
+    [clip.exitAnimation, handleUpdate],
+  );
+
+  const entranceOptions = ENTRANCE_PRESETS.map((p) => ({ value: p.type, label: p.name }));
+  const exitOptions = EXIT_PRESETS.map((p) => ({ value: p.type, label: p.name }));
 
   return (
-    <div className="space-y-4 p-3 bg-surface/30 rounded-lg border border-border/50">
-      <div className="flex items-center gap-2 pb-2 border-b border-border/30">
-        <span className="text-xs font-bold text-text-primary uppercase tracking-wide">Text Animations</span>
-      </div>
+    <PropertySection title="Text Animations" icon={<Sparkles className="w-3.5 h-3.5" />}>
+      <div className="space-y-4">
+        {/* Entrance Animation */}
+        <div className="space-y-2.5">
+          <PropertySelect
+            label="Entrance"
+            value={clip.entranceAnimation?.type || "none"}
+            options={entranceOptions}
+            onChange={handleEntranceChange}
+          />
 
-      {/* Entrance Animation */}
-      <div className="space-y-2">
-        <label className="text-xs font-semibold text-text-muted uppercase">Entrance</label>
-        <select value={clip.entranceAnimation?.type || "none"} onChange={(e) => handleEntranceChange(e.target.value)} className="w-full px-2 py-1.5 text-xs bg-surface-raised border border-border rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent">
-          {ENTRANCE_PRESETS.map((preset) => (
-            <option key={preset.type} value={preset.type}>
-              {preset.name}
-            </option>
-          ))}
-        </select>
+          {clip.entranceAnimation && clip.entranceAnimation.type !== "none" && (
+            <div className="space-y-2.5 pl-2.5 border-l-2 border-accent/25">
+              <PropertySlider
+                label="Duration"
+                value={clip.entranceAnimation.duration}
+                min={0.1}
+                max={Math.max(clip.duration / 2, 0.2)}
+                step={0.1}
+                suffix="s"
+                onChange={handleEntranceDurationChange}
+              />
+              <PropertySelect
+                label="Easing"
+                value={clip.entranceAnimation.easing}
+                options={EASING_OPTIONS}
+                onChange={handleEntranceEasingChange}
+              />
+            </div>
+          )}
+        </div>
 
-        {clip.entranceAnimation && clip.entranceAnimation.type !== "none" && (
-          <div className="space-y-2 pl-2 border-l-2 border-accent/30">
-            <div>
-              <label className="text-[10px] font-medium text-text-muted block mb-1">Duration (seconds)</label>
-              <input type="number" min="0.1" max={clip.duration / 2} step="0.1" value={clip.entranceAnimation.duration} onChange={(e) => handleEntranceDurationChange(parseFloat(e.target.value))} className="w-full px-2 py-1 text-xs bg-surface-raised border border-border rounded text-text-primary focus:outline-none focus:ring-1 focus:ring-accent" />
+        {/* Exit Animation */}
+        <div className="space-y-2.5">
+          <PropertySelect
+            label="Exit"
+            value={clip.exitAnimation?.type || "none"}
+            options={exitOptions}
+            onChange={handleExitChange}
+          />
+
+          {clip.exitAnimation && clip.exitAnimation.type !== "none" && (
+            <div className="space-y-2.5 pl-2.5 border-l-2 border-accent/25">
+              <PropertySlider
+                label="Duration"
+                value={clip.exitAnimation.duration}
+                min={0.1}
+                max={Math.max(clip.duration / 2, 0.2)}
+                step={0.1}
+                suffix="s"
+                onChange={handleExitDurationChange}
+              />
+              <PropertySelect
+                label="Easing"
+                value={clip.exitAnimation.easing}
+                options={EASING_OPTIONS}
+                onChange={handleExitEasingChange}
+              />
             </div>
-            <div>
-              <label className="text-[10px] font-medium text-text-muted block mb-1">Easing</label>
-              <select value={clip.entranceAnimation.easing} onChange={(e) => handleEntranceEasingChange(e.target.value as any)} className="w-full px-2 py-1 text-xs bg-surface-raised border border-border rounded text-text-primary focus:outline-none focus:ring-1 focus:ring-accent">
-                <option value="linear">Linear</option>
-                <option value="ease-in">Ease In</option>
-                <option value="ease-out">Ease Out</option>
-                <option value="ease-in-out">Ease In-Out</option>
-              </select>
-            </div>
+          )}
+        </div>
+
+        {/* Animation Info */}
+        {(clip.entranceAnimation?.type !== "none" || clip.exitAnimation?.type !== "none") && (
+          <div className="text-[10px] text-text-muted/60 italic pt-2 border-t border-border/20 select-none">
+            Animations preview during playback
           </div>
         )}
       </div>
-
-      {/* Exit Animation */}
-      <div className="space-y-2">
-        <label className="text-xs font-semibold text-text-muted uppercase">Exit</label>
-        <select value={clip.exitAnimation?.type || "none"} onChange={(e) => handleExitChange(e.target.value)} className="w-full px-2 py-1.5 text-xs bg-surface-raised border border-border rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent">
-          {EXIT_PRESETS.map((preset) => (
-            <option key={preset.type} value={preset.type}>
-              {preset.name}
-            </option>
-          ))}
-        </select>
-
-        {clip.exitAnimation && clip.exitAnimation.type !== "none" && (
-          <div className="space-y-2 pl-2 border-l-2 border-accent/30">
-            <div>
-              <label className="text-[10px] font-medium text-text-muted block mb-1">Duration (seconds)</label>
-              <input type="number" min="0.1" max={clip.duration / 2} step="0.1" value={clip.exitAnimation.duration} onChange={(e) => handleExitDurationChange(parseFloat(e.target.value))} className="w-full px-2 py-1 text-xs bg-surface-raised border border-border rounded text-text-primary focus:outline-none focus:ring-1 focus:ring-accent" />
-            </div>
-            <div>
-              <label className="text-[10px] font-medium text-text-muted block mb-1">Easing</label>
-              <select value={clip.exitAnimation.easing} onChange={(e) => handleExitEasingChange(e.target.value as any)} className="w-full px-2 py-1 text-xs bg-surface-raised border border-border rounded text-text-primary focus:outline-none focus:ring-1 focus:ring-accent">
-                <option value="linear">Linear</option>
-                <option value="ease-in">Ease In</option>
-                <option value="ease-out">Ease Out</option>
-                <option value="ease-in-out">Ease In-Out</option>
-              </select>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Animation Info */}
-      {(clip.entranceAnimation?.type !== "none" || clip.exitAnimation?.type !== "none") && <div className="text-[10px] text-text-muted/70 italic pt-2 border-t border-border/20">Animations preview during playback</div>}
-    </div>
+    </PropertySection>
   );
 };

@@ -22,6 +22,8 @@ import type { EvaluatedScene, EvaluatedVisualLayer, EvaluatedMediaLayer, Evaluat
 import { toCompositorClips } from "../timeline/adapter";
 import { getClipEndTime } from "@/lib/timelineClip";
 import { convertFileSrc } from "@tauri-apps/api/core";
+
+const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
 import { getEvaluationCache, computeClipVersion } from "./cache";
 import { evaluateProperty } from "./animation";
 import { resolveClipSourceTime } from "../timeline/sourceTime";
@@ -188,7 +190,9 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
       clampToRange: true,
       frameRate: project?.frameRate ?? 30,
     }).sourceTime;
-    const sourcePath = asset.path ? convertFileSrc(asset.path) : asset.posterFrame || "";
+    const sourcePath = asset.path
+      ? (isExternalOrDataUrl(asset.path) ? asset.path : convertFileSrc(asset.path))
+      : asset.posterFrame || "";
     if (!sourcePath) continue;
 
     const transitionState = evaluateTransitionState(clip, transitionWindows);
@@ -238,7 +242,9 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
       clampToRange: true,
       frameRate: project?.frameRate ?? 30,
     }).sourceTime;
-    const sourcePath = asset.path ? convertFileSrc(asset.path) : "";
+    const sourcePath = asset.path
+      ? (isExternalOrDataUrl(asset.path) ? asset.path : convertFileSrc(asset.path))
+      : "";
     if (!sourcePath) continue;
 
     audioLayers.push({

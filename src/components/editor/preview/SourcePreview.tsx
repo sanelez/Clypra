@@ -1,5 +1,5 @@
-import React, { useRef, useState, useEffect, useCallback } from "react";
-import { Plus, X, RotateCcw, Play } from "lucide-react";
+import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
+import { Plus, X, RotateCcw, Play, Loader2 } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useUIStore } from "@/store/uiStore";
 import { usePreviewMode } from "@/hooks/usePreviewMode";
@@ -18,6 +18,10 @@ import { PreviewTransport } from "./PreviewTransport";
 import { createTextClip } from "@/lib/textClip";
 import { TextSourcePreview } from "./TextSourcePreview";
 import { useEffectsStore } from "@/features/text-effects/store/effectsStore";
+import LottiePlayer, { type LottiePlayerHandle } from "@/features/text-templates/LottiePlayer";
+import { useStickersStore } from "@/features/stickers/store/stickersStore";
+
+const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
 
 // GPU preview for scrubbing only (precise frame-accurate seeking)
 // Use HTML5 video for playback (hardware decode, buffering, smooth playback)
@@ -27,15 +31,19 @@ export const SourcePreview: React.FC = () => {
   const { sourceAsset, sourceTextPreset, sourceInPoint, sourceOutPoint, markSourceIn, markSourceOut } = useUIStore();
   const { exitSourceMode } = usePreviewMode();
   const { tracks, clips, addClip, addTrack, insertTrackAt, getTimelineEndTime } = useTimelineStore();
-  const { project, updateProject } = useProjectStore();
+  const { project, updateProject, addMediaAsset } = useProjectStore();
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const lottiePlayerRef = useRef<LottiePlayerHandle>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [useGPU, setUseGPU] = useState(USE_GPU_PREVIEW && sourceAsset?.type === "video");
   const [gpuFailed, setGpuFailed] = useState(false);
   const sourceCtxRef = useRef<SourcePlaybackContext | null>(null);
+
+  const [lottieData, setLottieData] = useState<object | null>(null);
+  const [lottieError, setLottieError] = useState<string | null>(null);
 
   // Get source context from active session and bind media element
   useEffect(() => {
@@ -101,11 +109,109 @@ export const SourcePreview: React.FC = () => {
     return () => clearInterval(timer);
   }, [isPlaying, sourceAsset?.type]);
 
+  // Load Lottie JSON from cache on demand
+  useEffect(() => {
+    if (!sourceAsset || sourceAsset.type !== "image" || !sourceAsset.path || !sourceAsset.path.endsWith(".json")) {
+      setLottieData(null);
+      setLottieError(null);
+      return;
+    }
+
+    let active = true;
+    setLottieError(null);
+
+    import("@/lib/stickerCache")
+      .then(({ stickerCacheManager }) => {
+        return stickerCacheManager.readLottieJson(sourceAsset.path!);
+      })
+      .then((data) => {
+        if (active) {
+          setLottieData(data);
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          console.error("[SourcePreview] Failed to load Lottie JSON:", err);
+          setLottieError("Failed to load Lottie preview");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [sourceAsset?.id, sourceAsset?.path]);
+
+  // Compute Lottie animation duration
+  const lottieDuration = useMemo(() => {
+    if (!lottieData) return 0;
+    const { op, ip, fr } = lottieData as any;
+    if (typeof op === "number" && typeof fr === "number" && fr > 0) {
+      return (op - (ip || 0)) / fr;
+    }
+    return 3.0;
+  }, [lottieData]);
+
   // Reset when asset changes
   useEffect(() => {
     setUseGPU(USE_GPU_PREVIEW && sourceAsset?.type === "video");
     setGpuFailed(false);
-  }, [sourceAsset?.id]);
+    if (sourceAsset?.path && sourceAsset.path.endsWith(".json")) {
+      setDuration(lottieDuration);
+      setCurrentTime(0);
+      setIsPlaying(true);
+    }
+  }, [sourceAsset?.id, lottieDuration]);
+
+  // Set duration when Lottie duration changes
+  useEffect(() => {
+    if (sourceAsset?.path && sourceAsset.path.endsWith(".json")) {
+      setDuration(lottieDuration);
+    }
+  }, [lottieDuration, sourceAsset?.path]);
+
+  // Keep Lottie play state in sync with isPlaying
+  useEffect(() => {
+    if (!lottiePlayerRef.current) return;
+    if (isPlaying) {
+      lottiePlayerRef.current.play();
+    } else {
+      lottiePlayerRef.current.pause();
+    }
+  }, [isPlaying]);
+
+  // Virtual clock for Lottie playback
+  useEffect(() => {
+    if (!sourceAsset || !sourceAsset.path || !sourceAsset.path.endsWith(".json")) return;
+    if (!isPlaying) return;
+
+    const timer = setInterval(() => {
+      setCurrentTime((prev) => {
+        if (prev >= duration) {
+          if (lottiePlayerRef.current) {
+            lottiePlayerRef.current.goToFrame(0);
+          }
+          return 0;
+        }
+        const next = prev + 0.016;
+        if (next >= duration) {
+          if (lottiePlayerRef.current) {
+            lottiePlayerRef.current.goToFrame(0);
+          }
+          return 0;
+        }
+
+        if (lottiePlayerRef.current && lottieData) {
+          const { fr } = lottieData as any;
+          const frameRate = fr || 30;
+          lottiePlayerRef.current.goToFrame(next * frameRate);
+        }
+
+        return next;
+      });
+    }, 16);
+
+    return () => clearInterval(timer);
+  }, [isPlaying, duration, lottieData, sourceAsset?.id, sourceAsset?.path]);
 
   const handleSeek = useCallback(
     (time: number) => {
@@ -113,9 +219,19 @@ export const SourcePreview: React.FC = () => {
         setCurrentTime(Math.max(0, Math.min(time, 3.0)));
         return;
       }
+      if (sourceAsset?.path && sourceAsset.path.endsWith(".json")) {
+        const targetTime = Math.max(0, Math.min(time, duration));
+        setCurrentTime(targetTime);
+        if (lottiePlayerRef.current && lottieData) {
+          const { fr } = lottieData as any;
+          const frameRate = fr || 30;
+          lottiePlayerRef.current.goToFrame(targetTime * frameRate);
+        }
+        return;
+      }
       sourceCtxRef.current?.seek(time);
     },
-    [sourceAsset?.type],
+    [sourceAsset?.type, sourceAsset?.path, duration, lottieData],
   );
 
   const handlePlayPause = useCallback(() => {
@@ -124,6 +240,19 @@ export const SourcePreview: React.FC = () => {
         const next = !prev;
         if (next && currentTime >= 3.0) {
           setCurrentTime(0);
+        }
+        return next;
+      });
+      return;
+    }
+    if (sourceAsset?.path && sourceAsset.path.endsWith(".json")) {
+      setIsPlaying((prev) => {
+        const next = !prev;
+        if (next && currentTime >= duration) {
+          setCurrentTime(0);
+          if (lottiePlayerRef.current) {
+            lottiePlayerRef.current.goToFrame(0);
+          }
         }
         return next;
       });
@@ -141,7 +270,7 @@ export const SourcePreview: React.FC = () => {
         ctx.play();
       }
     }
-  }, [useGPU, sourceAsset?.type, currentTime]);
+  }, [useGPU, sourceAsset?.type, sourceAsset?.path, currentTime, duration]);
 
   const handlePlayMarkedRegion = useCallback(() => {
     sourceCtxRef.current?.playMarkedRegion();
@@ -167,7 +296,7 @@ export const SourcePreview: React.FC = () => {
 
   if (!sourceAsset) return null;
 
-  const handleAddToTimeline = () => {
+  const handleAddToTimeline = async () => {
     if (!project) return;
 
     // Handle synthetic text assets differently
@@ -242,7 +371,22 @@ export const SourcePreview: React.FC = () => {
       return;
     }
 
-    const mediaAsset = sourceAsset as MediaAsset;
+    let mediaAsset = sourceAsset as MediaAsset;
+
+    // Special handling for stickers added from preview
+    if (mediaAsset.id.startsWith("sticker-")) {
+      const stickerId = mediaAsset.id.replace("sticker-", "");
+      const cachedSticker = useStickersStore.getState().getCachedSticker(stickerId);
+      if (cachedSticker && cachedSticker.format === "lottie" && cachedSticker.localImagePath) {
+        // Point timeline asset to the static fallback image
+        const appCache = await import("@tauri-apps/api/path").then((m) => m.appCacheDir());
+        const absoluteImagePath = await import("@tauri-apps/api/path").then((m) => m.join(appCache, cachedSticker.localImagePath!));
+        mediaAsset = {
+          ...mediaAsset,
+          path: absoluteImagePath,
+        };
+      }
+    }
 
     const placement = resolveAddToTimelinePlacement({
       asset: mediaAsset,
@@ -284,6 +428,7 @@ export const SourcePreview: React.FC = () => {
     newClip.trimOut = trimOut;
     newClip.duration = trimOut - trimIn;
 
+    addMediaAsset(mediaAsset);
     addClip(newClip);
     exitSourceMode(); // Auto-switches transport context
   };
@@ -302,7 +447,9 @@ export const SourcePreview: React.FC = () => {
   const hasMarks = sourceInPoint !== null || sourceOutPoint !== null;
   const hasCompleteMarks = sourceInPoint !== null && sourceOutPoint !== null;
 
-  const sourcePath = sourceAsset.path ? convertFileSrc(sourceAsset.path) : "";
+  const sourcePath = sourceAsset.path
+    ? (isExternalOrDataUrl(sourceAsset.path) ? sourceAsset.path : convertFileSrc(sourceAsset.path))
+    : "";
   const mediaLabel = sourceAsset.type === "video" ? "video" : sourceAsset.type === "audio" ? "audio" : sourceAsset.type === "text" ? "text" : "image";
 
   return (
@@ -380,7 +527,20 @@ export const SourcePreview: React.FC = () => {
               <video ref={videoRef} src={sourcePath} className="max-w-full max-h-full shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 bg-black" playsInline preload="auto" />
             )
           ) : sourceAsset.type === "image" ? (
-            <img src={sourcePath} alt={sourceAsset.name} className="max-w-full max-h-full object-contain" />
+            sourceAsset.path?.endsWith(".json") ? (
+              lottieError ? (
+                <div className="text-red-400 text-xs">{lottieError}</div>
+              ) : lottieData ? (
+                <LottiePlayer ref={lottiePlayerRef} lottieData={lottieData} autoplay={isPlaying} loop={true} className="max-w-full max-h-full" />
+              ) : (
+                <div className="text-text-muted text-xs flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading preview...
+                </div>
+              )
+            ) : (
+              <img src={sourcePath} alt={sourceAsset.name} className="max-w-full max-h-full object-contain" />
+            )
           ) : sourceAsset.type === "text" ? (
             <TextSourcePreview preset={sourceTextPreset} />
           ) : (
@@ -424,10 +584,20 @@ export const SourcePreview: React.FC = () => {
                 </button>
               )}
               <div className="w-px h-4 bg-white/10 mx-1" />
-              <button onClick={handleAddToTimeline} disabled={!hasCompleteMarks} className={`flex items-center gap-1 px-2.5 h-6 rounded text-[10px] font-semibold transition-all ${hasCompleteMarks ? "bg-accent hover:bg-accent-soft text-white cursor-pointer" : "bg-text-muted/70 hover:bg-text-muted/90 text-white cursor-not-allowed"}`} title={hasCompleteMarks ? `Add ${markedDuration?.toFixed(2)}s to Timeline` : "Add to Track"}>
-                <Plus className="w-3 h-3" />
-                Add
-              </button>
+              {(() => {
+                const isAddEnabled = sourceAsset.type === "image" || hasCompleteMarks;
+                return (
+                  <button
+                    onClick={handleAddToTimeline}
+                    disabled={!isAddEnabled}
+                    className={`flex items-center gap-1 px-2.5 h-6 rounded text-[10px] font-semibold transition-all ${isAddEnabled ? "bg-accent hover:bg-accent-soft text-white cursor-pointer" : "bg-text-muted/70 hover:bg-text-muted/90 text-white cursor-not-allowed"}`}
+                    title={isAddEnabled ? (sourceAsset.type === "image" ? "Add to Timeline" : `Add ${markedDuration?.toFixed(2)}s to Timeline`) : "Add to Track"}
+                  >
+                    <Plus className="w-3 h-3" />
+                    Add
+                  </button>
+                );
+              })()}
             </>
           }
         />
