@@ -7,7 +7,7 @@
  * - Transitions: JSON animation definitions (zoom, dissolve)
  */
 
-export type EffectCategory = "overlay" | "effect" | "transition";
+export type EffectCategory = "overlay" | "effect" | "transition" | "filter";
 
 // ============================================================================
 // OVERLAY ASSETS (Data-driven: actual video/image files)
@@ -281,7 +281,28 @@ export interface TransitionParameters {
 // API RESPONSE TYPES
 // ============================================================================
 
-export type VideoEffectItem = OverlayAsset | EffectPreset | TransitionPreset;
+// ============================================================================
+// FILTER ASSETS (Data-driven: canvas filter definitions)
+// ============================================================================
+
+export interface FilterAsset {
+  id: string;
+  name: string;
+  type: "filter";
+  category: string; // "vintage", "modern", "cinematic", "bw", "color"
+  description: string;
+  thumbnail: string;
+  swatch?: string;
+  status?: string;
+  intensity: {
+    min: number;
+    max: number;
+    default: number;
+    step: number;
+  };
+}
+
+export type VideoEffectItem = OverlayAsset | EffectPreset | TransitionPreset | FilterAsset;
 
 export interface VideoEffectCategory {
   id: string;

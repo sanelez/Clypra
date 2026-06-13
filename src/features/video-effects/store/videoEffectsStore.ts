@@ -94,6 +94,13 @@ export const useVideoEffectsStore = create<VideoEffectsState>()(
       initializeCache: async () => {
         try {
           await videoEffectsCacheManager.initialize();
+
+          // Try loading cached manifest from disk
+          const diskManifest = await videoEffectsCacheManager.loadManifestJson();
+          if (diskManifest && !get().manifest) {
+            set({ manifest: diskManifest });
+          }
+
           const cached = videoEffectsCacheManager.getAllCached();
 
           const downloads: Record<string, VideoEffectsDownloadState> = { ...get().downloads };
@@ -141,7 +148,27 @@ export const useVideoEffectsStore = create<VideoEffectsState>()(
             manifestLoading: false,
             manifestError: null,
           });
+          // Cache to local disk asynchronously
+          videoEffectsCacheManager.saveManifestJson(manifest).catch((err) => {
+            console.warn("[VideoEffectsStore] Failed to save manifest to disk cache:", err);
+          });
         } catch (error) {
+          // Attempt fallback to local disk cache
+          try {
+            const cachedManifest = await videoEffectsCacheManager.loadManifestJson();
+            if (cachedManifest) {
+              set({
+                manifest: cachedManifest,
+                manifestLoading: false,
+                manifestError: null,
+              });
+              console.info("[VideoEffectsStore] Loaded manifest from disk cache fallback.");
+              return;
+            }
+          } catch (cacheErr) {
+            console.warn("[VideoEffectsStore] Failed to load manifest from disk cache:", cacheErr);
+          }
+
           const message = error instanceof Error ? error.message : "Failed to load manifest";
           set({
             manifestLoading: false,
@@ -174,7 +201,28 @@ export const useVideoEffectsStore = create<VideoEffectsState>()(
             categoryLoading: { ...state.categoryLoading, [cacheKey]: false },
             categoryErrors: { ...state.categoryErrors, [cacheKey]: null },
           }));
+
+          // Cache to local disk asynchronously
+          videoEffectsCacheManager.saveCategoryJson(type, category, items).catch((err) => {
+            console.warn(`[VideoEffectsStore] Failed to save category ${cacheKey} to disk cache:`, err);
+          });
         } catch (error) {
+          // Attempt fallback to local disk cache
+          try {
+            const cachedItems = await videoEffectsCacheManager.loadCategoryJson(type, category);
+            if (cachedItems) {
+              set((state) => ({
+                categories: { ...state.categories, [cacheKey]: cachedItems },
+                categoryLoading: { ...state.categoryLoading, [cacheKey]: false },
+                categoryErrors: { ...state.categoryErrors, [cacheKey]: null },
+              }));
+              console.info(`[VideoEffectsStore] Loaded category ${cacheKey} from disk cache fallback.`);
+              return;
+            }
+          } catch (cacheErr) {
+            console.warn(`[VideoEffectsStore] Failed to load category ${cacheKey} from disk cache:`, cacheErr);
+          }
+
           const message = error instanceof Error ? error.message : "Failed to load category";
 
           set((state) => ({

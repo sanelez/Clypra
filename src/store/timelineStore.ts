@@ -114,12 +114,13 @@ const trackHeights: Record<string, number> = {
   audio: 52,
   text: 30,
   sticker: 30,
+  filter: 30,
 };
 const MIN_TRIM_DURATION_SEC = 1;
 
 /** Where to insert a new row when dropping off-track: video/text at top; audio under first video (or append if no video). */
 export function getInsertIndexForNewTrack(tracks: Track[], trackType: TrackType): number {
-  if (trackType === "video" || trackType === "text" || trackType === "sticker") {
+  if (trackType === "video" || trackType === "text" || trackType === "sticker" || trackType === "filter") {
     return 0;
   }
   const mainIdx = tracks.findIndex((t) => t.type === "video");
@@ -443,9 +444,7 @@ export const useTimelineStore = create<TimelineStore>(
     updateTransition: (transitionId, updates) => {
       set((state) => {
         const next: Partial<TimelineStore> = {
-          transitions: state.transitions.map((t) =>
-            t.id === transitionId ? { ...t, ...updates } : t
-          ),
+          transitions: state.transitions.map((t) => (t.id === transitionId ? { ...t, ...updates } : t)),
         };
         if (state._batchDepth > 0) {
           next._pendingEpochIncrement = true;

@@ -5,7 +5,7 @@
 
 import { BaseDirectory, exists, mkdir, writeFile, readFile, remove, readDir } from "@tauri-apps/plugin-fs";
 import { join, appCacheDir } from "@tauri-apps/api/path";
-import type { OverlayAsset } from "@/features/video-effects/types";
+import type { OverlayAsset, VideoEffectManifest, VideoEffectItem, EffectCategory } from "@/features/video-effects/types";
 
 export interface CachedOverlay {
   id: string;
@@ -205,6 +205,71 @@ class VideoEffectsCacheManager {
     }
 
     return this.downloadOverlay(item, onProgress);
+  }
+
+  async saveManifestJson(manifest: VideoEffectManifest): Promise<void> {
+    await this.initialize();
+    if (!this.cacheDir) return;
+    try {
+      const filePath = `${CACHE_DIR}/manifest.json`;
+      const data = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
+      await writeFile(filePath, data, { baseDir: BaseDirectory.AppCache });
+    } catch (error) {
+      console.error("[VideoEffectsCache] Failed to save manifest JSON:", error);
+    }
+  }
+
+  async loadManifestJson(): Promise<VideoEffectManifest | null> {
+    await this.initialize();
+    if (!this.cacheDir) return null;
+    try {
+      const filePath = `${CACHE_DIR}/manifest.json`;
+      const fileExists = await exists(filePath, { baseDir: BaseDirectory.AppCache });
+      if (!fileExists) return null;
+      const data = await readFile(filePath, { baseDir: BaseDirectory.AppCache });
+      const jsonText = new TextDecoder().decode(data);
+      return JSON.parse(jsonText);
+    } catch (error) {
+      console.warn("[VideoEffectsCache] Failed to load manifest JSON:", error);
+      return null;
+    }
+  }
+
+  async saveCategoryJson(
+    type: EffectCategory,
+    category: string,
+    items: VideoEffectItem[]
+  ): Promise<void> {
+    await this.initialize();
+    if (!this.cacheDir) return;
+    try {
+      const fileName = `category_${type}_${category}.json`;
+      const filePath = `${CACHE_DIR}/${fileName}`;
+      const data = new TextEncoder().encode(JSON.stringify(items, null, 2));
+      await writeFile(filePath, data, { baseDir: BaseDirectory.AppCache });
+    } catch (error) {
+      console.error(`[VideoEffectsCache] Failed to save category JSON for ${type}/${category}:`, error);
+    }
+  }
+
+  async loadCategoryJson(
+    type: EffectCategory,
+    category: string
+  ): Promise<VideoEffectItem[] | null> {
+    await this.initialize();
+    if (!this.cacheDir) return null;
+    try {
+      const fileName = `category_${type}_${category}.json`;
+      const filePath = `${CACHE_DIR}/${fileName}`;
+      const fileExists = await exists(filePath, { baseDir: BaseDirectory.AppCache });
+      if (!fileExists) return null;
+      const data = await readFile(filePath, { baseDir: BaseDirectory.AppCache });
+      const jsonText = new TextDecoder().decode(data);
+      return JSON.parse(jsonText);
+    } catch (error) {
+      console.warn(`[VideoEffectsCache] Failed to load category JSON for ${type}/${category}:`, error);
+      return null;
+    }
   }
 
   async clearCache(itemId: string): Promise<void> {

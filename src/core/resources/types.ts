@@ -78,6 +78,9 @@ export interface FrameRequest {
 
   /** Map of active video elements (key: clipId-mediaId) to bypass decoding */
   videoElements?: Map<string, HTMLVideoElement>;
+
+  /** Whether to skip applying track-level filters on the CPU (for GPU preview path) */
+  skipFilters?: boolean;
 }
 
 /**

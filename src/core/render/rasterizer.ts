@@ -16,8 +16,9 @@
  */
 
 import type { EvaluatedScene, EvaluatedMediaLayer, EvaluatedTextLayer } from "../evaluation/types";
+import { resolveFilterToIR, compileFilterIRToCSS } from "./filterIR";
 import { getResourceCache } from "../resources/ResourceCache";
-import { defaultConfig as engineDefaultConfig, evaluateScene as engineEvaluateScene, textEffectConfigToScene, type TextEffectConfig, _buildConfig, layerToTextEffectConfig, CanvasDevice, TextEffectBuilder } from "@clypra/engine";
+import { evaluateScene as engineEvaluateScene, textEffectConfigToScene, type TextEffectConfig, layerToTextEffectConfig, CanvasDevice, TextEffectBuilder } from "@clypra/engine";
 import { useEffectsStore } from "../../features/text-effects/store/effectsStore";
 import { invalidateEvaluationCache } from "../evaluation/evaluator";
 import { useTimelineStore } from "../../store/timelineStore";
@@ -57,6 +58,9 @@ export interface RasterTarget {
 
   /** Active video elements (bypass decoding) */
   videoElements?: Map<string, HTMLVideoElement>;
+
+  /** Whether to skip applying track-level filters on the CPU (for GPU preview path) */
+  skipFilters?: boolean;
 }
 
 /**
@@ -237,19 +241,12 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
         ctx.save();
         // Since the frames are already rendered with offsetX/offsetY, reset transform to draw them full-screen
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        
+
         // Import TransitionRenderer from features/video-effects
         const { TransitionRenderer } = await import("@/features/video-effects/renderers/TransitionRenderer");
-        
+
         // Render transition
-        TransitionRenderer.render(
-          ctx as any,
-          frames.fromCanvas as any,
-          frames.toCanvas as any,
-          tInfo.transition.type,
-          {},
-          tInfo.transition.progress
-        );
+        TransitionRenderer.render(ctx as any, frames.fromCanvas as any, frames.toCanvas as any, tInfo.transition.type, {}, tInfo.transition.progress);
         ctx.restore();
       } else {
         // Fallback to normal rendering if frames failed to prepare
@@ -257,12 +254,47 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
       }
     } else {
       // Normal layer rendering
-      console.log("[TRACE][RASTERIZER] Drawing:", layer.clipId.substring(0, 8), "role:", layer.role, "zIndex:", layer.zIndex);
       await rasterizeLayer(ctx, layer, scale, scale, target);
     }
   }
 
   ctx.restore();
+
+  // Apply track-level filter to the entire composition on CPU (unless skipped for GPU)
+  console.log(`[rasterizeScene] Checking track filter - scene.activeFilter:`, scene.activeFilter, `target.skipFilters:`, target.skipFilters);
+  if (scene.activeFilter && !target.skipFilters) {
+    const { id, intensity } = scene.activeFilter;
+    const ir = resolveFilterToIR(id, intensity);
+    const cssFilter = compileFilterIRToCSS(ir);
+    console.log(`[rasterizeScene] Applying CPU Track-level filter - id: "${id}", intensity: ${intensity}, cssFilter: "${cssFilter}"`);
+
+    if (cssFilter) {
+      // Apply the filter to the entire canvas by drawing it onto a temporary canvas,
+      // then drawing it back with the filter applied.
+      const tempCanvas = CanvasDevice.acquire(targetWidth, targetHeight);
+      const tempCtx = tempCanvas.getContext("2d");
+      if (tempCtx) {
+        // Copy current canvas contents to temp canvas
+        tempCtx.clearRect(0, 0, targetWidth, targetHeight);
+        tempCtx.drawImage(outputCanvas, 0, 0);
+
+        // Clear output canvas
+        ctx.save();
+        if (typeof ctx.setTransform === "function") {
+          ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset scale/offset
+        }
+        ctx.clearRect(0, 0, targetWidth, targetHeight);
+        ctx.fillStyle = backgroundColor;
+        ctx.fillRect(0, 0, targetWidth, targetHeight);
+
+        // Draw back with filter
+        ctx.filter = cssFilter;
+        ctx.drawImage(tempCanvas, 0, 0);
+        ctx.restore();
+      }
+      CanvasDevice.release(tempCanvas);
+    }
+  }
 
   const rasterTimeMs = performance.now() - startTime;
 
@@ -529,23 +561,13 @@ function drawLoadingPlaceholder(ctx: CanvasRenderingContext2D | OffscreenCanvasR
 function drawMediaWithSourceRotation(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, source: HTMLVideoElement | ImageBitmap | HTMLCanvasElement, width: number, height: number, sourceRotation?: number, effects?: import("../evaluation/types").EvaluatedEffect[], filter?: { id: string; name: string; intensity: number }): void {
   ctx.save();
 
-  // 1. Build and apply CSS filter string
+  // 1. Build and apply CSS filter string using Filter IR
   let filterString = "";
   if (filter) {
     const { id, intensity } = filter;
-    if (id === "filter-sepia") {
-      filterString += `sepia(${intensity * 100}%)`;
-    } else if (id === "filter-retro") {
-      filterString += `sepia(${intensity * 50}%) saturate(${1 + intensity * 0.4}) contrast(${1 - intensity * 0.15})`;
-    } else if (id === "filter-vivid") {
-      filterString += `saturate(${1 + intensity * 1.2}) contrast(${1 + intensity * 0.25})`;
-    } else if (id === "filter-cool") {
-      filterString += `hue-rotate(${-intensity * 25}deg) saturate(${1 - intensity * 0.1})`;
-    } else if (id === "filter-cinematic-teal") {
-      filterString += `contrast(${1 + intensity * 0.15}) saturate(${1 - intensity * 0.1}) hue-rotate(5deg)`;
-    } else if (id === "filter-bw-classic") {
-      filterString += `grayscale(${intensity * 100}%)`;
-    }
+    const ir = resolveFilterToIR(id, intensity);
+    filterString = compileFilterIRToCSS(ir);
+    console.log(`[drawMediaWithSourceRotation] Layer filter applied - id: "${id}", intensity: ${intensity}, filterString: "${filterString}"`);
   }
 
   // Check for CSS-based effects
@@ -559,6 +581,7 @@ function drawMediaWithSourceRotation(ctx: CanvasRenderingContext2D | OffscreenCa
   }
 
   if (filterString) {
+    console.log(`[drawMediaWithSourceRotation] Setting ctx.filter to: "${filterString}"`);
     ctx.filter = filterString;
   }
 
@@ -691,7 +714,7 @@ async function rasterizeTextLayer(ctx: CanvasRenderingContext2D | OffscreenCanva
     if (template && template.lottieData) {
       const customizationSig = JSON.stringify(layer.customization || {});
       const cacheKey = `${layer.clipId}-${layer.templateId}-${customizationSig}`;
-      
+
       let cacheEntry = lottieRenderCache.get(layer.clipId);
       if (cacheEntry && cacheEntry.cacheKey !== cacheKey) {
         cacheEntry.anim.destroy();
@@ -703,7 +726,7 @@ async function rasterizeTextLayer(ctx: CanvasRenderingContext2D | OffscreenCanva
       if (!cacheEntry) {
         try {
           const { injectText, injectColor } = await import("@/features/text-templates/TemplateInjector");
-          
+
           const customization = layer.customization || {
             primaryText: layer.text || "",
             secondaryText: "",
@@ -752,7 +775,7 @@ async function rasterizeTextLayer(ctx: CanvasRenderingContext2D | OffscreenCanva
       if (cacheEntry) {
         const totalFrames = cacheEntry.anim.totalFrames;
         const frameRate = cacheEntry.anim.frameRate || 30;
-        
+
         const localTime = layer.time !== undefined && layer.clipStartTime !== undefined ? layer.time - layer.clipStartTime : 0;
         const frame = Math.floor(localTime * frameRate) % totalFrames;
 

@@ -73,7 +73,7 @@ export interface RustMediaAsset {
  */
 export interface RustTrack {
   id: string;
-  type: "video" | "audio" | "text" | "sticker";
+  type: "video" | "audio" | "text" | "sticker" | "filter";
   name: string;
   muted: boolean;
   locked: boolean;
@@ -190,6 +190,8 @@ export function fromRustClip(rust: RustClip): Clip {
       kind = "text";
     } else if (rust.mediaId.startsWith("sticker-")) {
       kind = "sticker";
+    } else if (rust.id.startsWith("filter-clip-") || rust.kind === "filter") {
+      kind = "filter";
     }
   }
 

@@ -337,7 +337,7 @@ export function useTimelineDrag(containerRef: RefObject<HTMLDivElement | null>) 
       for (const draggedId of ds.draggedClipIds) {
         const draggedClip = clipMapRef.current.get(draggedId) ?? liveClips.find((c) => c.id === draggedId);
         if (!draggedClip) continue;
-        const kind = draggedClip.kind ?? ("text" in draggedClip || draggedClip.id.startsWith("text-clip-") ? "text" : draggedClip.mediaId.startsWith("sticker-") ? "sticker" : "video");
+        const kind = draggedClip.kind ?? ("text" in draggedClip || draggedClip.id.startsWith("text-clip-") ? "text" : draggedClip.mediaId.startsWith("sticker-") ? "sticker" : draggedClip.id.startsWith("filter-clip-") ? "filter" : "video");
         if (kind === "text" && targetTrack.type !== "text") {
           isTrackTypeMismatch = true;
           break;
@@ -346,7 +346,11 @@ export function useTimelineDrag(containerRef: RefObject<HTMLDivElement | null>) 
           isTrackTypeMismatch = true;
           break;
         }
-        if (kind !== "text" && kind !== "sticker" && (targetTrack.type === "text" || targetTrack.type === "sticker")) {
+        if (kind === "filter" && targetTrack.type !== "filter") {
+          isTrackTypeMismatch = true;
+          break;
+        }
+        if (kind !== "text" && kind !== "sticker" && kind !== "filter" && (targetTrack.type === "text" || targetTrack.type === "sticker" || targetTrack.type === "filter")) {
           isTrackTypeMismatch = true;
           break;
         }
@@ -551,8 +555,9 @@ export function useTimelineDrag(containerRef: RefObject<HTMLDivElement | null>) 
       if (dragSnapshot.willCreateNewTrack && dragSnapshot.newTrackPosition) {
         const isTextClip = clip.kind === "text";
         const isStickerClip = clip.kind === "sticker";
+        const isFilterClip = clip.kind === "filter";
         const mediaAsset = useProjectStore.getState().mediaAssets.find((a) => a.id === clip.mediaId);
-        const trackType = isTextClip ? "text" : isStickerClip ? "sticker" : mediaAsset?.type === "audio" ? "audio" : "video";
+        const trackType = isTextClip ? "text" : isStickerClip ? "sticker" : isFilterClip ? "filter" : mediaAsset?.type === "audio" ? "audio" : "video";
 
         const store = useTimelineStore.getState();
         const insertIndex = getInsertIndexForNewTrackSmart(store.tracks, trackType, {

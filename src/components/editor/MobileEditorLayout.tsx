@@ -8,6 +8,7 @@ import { Timeline } from "./timeline/Timeline";
 import { BottomSheet } from "../ui/BottomSheet";
 import { getInsertIndexForNewTrack, useTimelineStore } from "@/store/timelineStore";
 import { useProjectStore } from "@/store/projectStore";
+import { generateId } from "@/lib/utils/id";
 import { useUIStore } from "@/store/uiStore";
 import { useHistoryStore } from "@/store/historyStore";
 import { useMediaImport } from "@/hooks/useMediaImport";
@@ -289,6 +290,43 @@ export const MobileEditorLayout: React.FC = () => {
       } else {
         useProjectStore.getState().showToast(`${item?.name || "Transition"} added`);
       }
+    } else if (type === "filters") {
+      const playheadTime = getPlaybackClock().time;
+      const firstUnlockedFilterTrack = tracks.find((track) => track.type === "filter" && !track.locked);
+      let targetTrackId: string | null = firstUnlockedFilterTrack?.id ?? null;
+
+      if (!targetTrackId) {
+        const latestTracks = useTimelineStore.getState().tracks;
+        const insertIndex = getInsertIndexForNewTrack(latestTracks, "filter");
+        targetTrackId = insertTrackAt("filter", insertIndex);
+      }
+
+      if (!targetTrackId) return;
+
+      const defaultIntensity = item.intensity?.default !== undefined ? item.intensity.default / 100 : 0.8;
+
+      const filterClip = {
+        id: generateId("filter-clip"),
+        trackId: targetTrackId,
+        mediaId: item.id,
+        startTime: playheadTime,
+        duration: 5.0,
+        trimIn: 0,
+        trimOut: 5.0,
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        opacity: 1.0,
+        rotation: 0,
+        kind: "filter" as const,
+        name: item.name || "Filter",
+        intensity: defaultIntensity,
+        swatch: item.swatch || "",
+      };
+
+      addClip(filterClip as any);
+      useProjectStore.getState().showToast(`Added ${item.name} filter to timeline`);
     }
   };
 

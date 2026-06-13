@@ -100,23 +100,14 @@ describe("Timeline Store - Gap Operations", () => {
       // Use trackId from beforeEach
 
       const clip1Before = store.clips.find((c) => c.mediaId === "media1");
-      console.log("DEBUG: clip1Before", clip1Before);
-      console.log(
-        "DEBUG: all clips before",
-        store.clips.map((c) => ({ id: c.id, mediaId: c.mediaId, startTime: c.startTime })),
-      );
       expect(clip1Before!.startTime).toBe(0);
 
       store.insertGap(trackId, 7, 3);
 
       // Get fresh state after mutation
       const freshStore = useTimelineStore.getState();
-      console.log(
-        "DEBUG: all clips after",
-        freshStore.clips.map((c) => ({ id: c.id, mediaId: c.mediaId, startTime: c.startTime })),
-      );
+
       const clip1After = freshStore.clips.find((c) => c.mediaId === "media1");
-      console.log("DEBUG: clip1After", clip1After);
       expect(clip1After!.startTime).toBe(0); // Unchanged
     });
 

@@ -6,6 +6,7 @@ import { PropertiesPanel } from "./PropertiesPanel";
 import { Timeline } from "./timeline/Timeline";
 import { getInsertIndexForNewTrack, useTimelineStore } from "@/store/timelineStore";
 import { useProjectStore } from "@/store/projectStore";
+import { generateId } from "@/lib/utils/id";
 import { createClipFromAsset } from "@/lib/timeline/timelineClip";
 import { createTextClip, TEXT_PRESETS } from "@/lib/text/textClip";
 import { autoAdaptSequenceForFirstVisualClip } from "@/lib/sequence/sequenceAutoAspect";
@@ -290,7 +291,7 @@ export const EditorLayout: React.FC = () => {
       } else {
         useProjectStore.getState().showToast(`${item?.name || "Transition"} added`);
       }
-    } else if (type === "effects" || type === "filters") {
+    } else if (type === "effects") {
       const selectedClipId = selectedClipIds[0] ?? null;
       let targetClip = clips.find((c) => c.id === selectedClipId);
 
@@ -305,48 +306,78 @@ export const EditorLayout: React.FC = () => {
       }
 
       if (!targetClip) {
-        useProjectStore.getState().showToast(`Select a video or image clip to apply this ${type === "effects" ? "effect" : "filter"}`, "warning");
+        useProjectStore.getState().showToast("Select a video or image clip to apply this effect", "warning");
         return;
       }
 
       const asset = mediaAssets.find((a) => a.id === targetClip.mediaId);
       if (asset?.type !== "video" && asset?.type !== "image") {
-        useProjectStore.getState().showToast("Effects and filters can only be applied to video or image clips", "warning");
+        useProjectStore.getState().showToast("Effects can only be applied to video or image clips", "warning");
         return;
       }
 
-      if (type === "effects") {
-        const currentEffects = targetClip.effects || [];
-        const effectExists = currentEffects.some((fx) => fx.id === item.id);
+      const currentEffects = targetClip.effects || [];
+      const effectExists = currentEffects.some((fx) => fx.id === item.id);
 
-        if (effectExists) {
-          useProjectStore.getState().showToast(`Effect "${item.name}" is already applied`, "warning");
-          return;
-        }
-
-        const updatedEffects = [
-          ...currentEffects,
-          {
-            id: item.id,
-            effectId: item.id,
-            type: "effect" as const,
-            renderer: item.renderer || item.id,
-            params: item.params || {},
-            name: item.name,
-            startTime: 0,
-            duration: targetClip.duration,
-            intensity: 0.5,
-          },
-        ];
-
-        updateClip(targetClip.id, { effects: updatedEffects });
-        useProjectStore.getState().showToast(`Applied ${item.name} effect`);
-      } else {
-        updateClip(targetClip.id, {
-          filter: { id: item.id, name: item.name, intensity: 0.8 },
-        });
-        useProjectStore.getState().showToast(`Applied ${item.name} filter`);
+      if (effectExists) {
+        useProjectStore.getState().showToast(`Effect "${item.name}" is already applied`, "warning");
+        return;
       }
+
+      const updatedEffects = [
+        ...currentEffects,
+        {
+          id: item.id,
+          effectId: item.id,
+          type: "effect" as const,
+          renderer: item.renderer || item.id,
+          params: item.params || {},
+          name: item.name,
+          startTime: 0,
+          duration: targetClip.duration,
+          intensity: 0.5,
+        },
+      ];
+
+      updateClip(targetClip.id, { effects: updatedEffects });
+      useProjectStore.getState().showToast(`Applied ${item.name} effect`);
+    } else if (type === "filters") {
+      const playheadTime = getPlaybackClock().time;
+      const firstUnlockedFilterTrack = tracks.find((track) => track.type === "filter" && !track.locked);
+      let targetTrackId: string | null = firstUnlockedFilterTrack?.id ?? null;
+
+      if (!targetTrackId) {
+        const latestTracks = useTimelineStore.getState().tracks;
+        const insertIndex = getInsertIndexForNewTrack(latestTracks, "filter");
+        targetTrackId = insertTrackAt("filter", insertIndex);
+      }
+
+      if (!targetTrackId) return;
+
+      const defaultIntensity = item.intensity?.default !== undefined ? item.intensity.default / 100 : 0.8;
+
+      const filterClip = {
+        id: generateId("filter-clip"),
+        trackId: targetTrackId,
+        mediaId: item.id,
+        startTime: playheadTime,
+        duration: 5.0,
+        trimIn: 0,
+        trimOut: 5.0,
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        opacity: 1.0,
+        rotation: 0,
+        kind: "filter" as const,
+        name: item.name || "Filter",
+        intensity: defaultIntensity,
+        swatch: item.swatch || "",
+      };
+
+      addClip(filterClip as any);
+      useProjectStore.getState().showToast(`Added ${item.name} filter to timeline`);
     }
   };
 

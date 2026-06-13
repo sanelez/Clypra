@@ -75,6 +75,10 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
 
   // ─── 2. Compositing Order (Contract §2) ───────────────────────────────────
 
+  // Find active timeline filter clip at this time (lowest trackIndex = top in UI)
+  const activeFilterClips = compositorClips.filter((c) => c.kind === "filter" && c.startTime <= evalTime && evalTime < c.startTime + c.duration).sort((a, b) => a.trackIndex - b.trackIndex);
+  const activeFilterClip = activeFilterClips[0] ?? null;
+
   const sortedClips = activeClips.sort((a, b) => {
     const roleOrder = getRoleOrder(a.role) - getRoleOrder(b.role);
     if (roleOrder !== 0) return roleOrder;
@@ -88,19 +92,6 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
     if (zOrder !== 0) return zOrder;
     return a.evaluationPriority - b.evaluationPriority;
   });
-
-  // TRACE: Z-order verification (can be removed after validation)
-  if (sortedClips.length > 0) {
-    console.log(
-      "[TRACE][EVALUATOR] Sorted order:",
-      sortedClips.map((c, idx) => ({
-        idx,
-        trackIndex: c.trackIndex,
-        role: c.role,
-        clipId: c.id.substring(0, 8),
-      })),
-    );
-  }
 
   // ─── 3. Evaluate Visual Layers ────────────────────────────────────────────
 
@@ -305,7 +296,15 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
     activeMediaHash,
   };
 
-  return { visualLayers, audioLayers, transitions: evaluatedTransitions, metadata };
+  const activeFilter = activeFilterClip
+    ? {
+        id: activeFilterClip.mediaId,
+        name: activeFilterClip.name || "",
+        intensity: (activeFilterClip as any).intensity ?? 0.8,
+      }
+    : undefined;
+
+  return { visualLayers, audioLayers, transitions: evaluatedTransitions, metadata, activeFilter };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -424,6 +424,7 @@ export class FrameScheduler {
         pixelRatio: job.request.pixelRatio,
         colorSpace: job.request.colorSpace,
         videoElements: job.request.videoElements,
+        skipFilters: job.request.skipFilters,
       });
 
       job.metrics.rasterTimeMs = Date.now() - rasterStartTime;

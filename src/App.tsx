@@ -91,6 +91,8 @@ const App = () => {
             clip.kind = "text";
           } else if (clip.mediaId.startsWith("sticker-")) {
             clip.kind = "sticker";
+          } else if (clip.id.startsWith("filter-clip-")) {
+            clip.kind = "filter";
           } else {
             const asset = assetMap.get(clip.mediaId);
             if (asset) {

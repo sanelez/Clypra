@@ -329,16 +329,6 @@ export const SourcePreview: React.FC = () => {
       // Get the effect definition for accurate bounding box calculation
       const effectDefinition = styleId ? useEffectsStore.getState().definitions[styleId] : undefined;
 
-      // Log the full text effect definition to verify caching
-      console.log("[SourcePreview] Adding text effect to timeline:", {
-        presetType: preset.presetType,
-        styleId,
-        presetId: preset.id,
-        presetName: preset.name,
-        fullPreset: preset,
-        effectDefinition,
-      });
-
       // When adding a text effect, we should NOT override individual properties
       // because the rasterizer uses TextEffectBuilder.fromDefinition() which
       // reads all styling from the cached effect definition.

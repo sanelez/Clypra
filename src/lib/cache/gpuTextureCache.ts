@@ -11,6 +11,8 @@
  * - Subsequent renders: 210× faster (texture reuse)
  */
 
+import type { FilterIR } from "../../core/render/filterIR";
+
 interface TextureMetadata {
   width: number;
   height: number;
@@ -28,6 +30,11 @@ export class GPUTextureCache {
   private positionLocation: number = -1;
   private texCoordLocation: number = -1;
   private textureLocation: WebGLUniformLocation | null = null;
+  private sepiaLocation: WebGLUniformLocation | null = null;
+  private grayscaleLocation: WebGLUniformLocation | null = null;
+  private saturateLocation: WebGLUniformLocation | null = null;
+  private contrastLocation: WebGLUniformLocation | null = null;
+  private hueRotateLocation: WebGLUniformLocation | null = null;
   private memoryBudgetBytes: number;
   private currentMemoryBytes: number = 0;
 
@@ -70,6 +77,11 @@ export class GPUTextureCache {
     this.positionLocation = this.gl.getAttribLocation(this.program, "a_position");
     this.texCoordLocation = this.gl.getAttribLocation(this.program, "a_texCoord");
     this.textureLocation = this.gl.getUniformLocation(this.program, "u_texture");
+    this.sepiaLocation = this.gl.getUniformLocation(this.program, "u_sepia");
+    this.grayscaleLocation = this.gl.getUniformLocation(this.program, "u_grayscale");
+    this.saturateLocation = this.gl.getUniformLocation(this.program, "u_saturate");
+    this.contrastLocation = this.gl.getUniformLocation(this.program, "u_contrast");
+    this.hueRotateLocation = this.gl.getUniformLocation(this.program, "u_hueRotate");
   }
 
   /**
@@ -148,7 +160,7 @@ export class GPUTextureCache {
    * Render texture to canvas at specified sub-rectangle (reuse, no upload).
    * Handles letterboxing by drawing a quad that only covers the given rectangle.
    */
-  renderTexture(key: string, x: number, y: number, width: number, height: number) {
+  renderTexture(key: string, x: number, y: number, width: number, height: number, filter?: FilterIR) {
     const texture = this.textures.get(key);
     if (!texture) {
       console.warn(`[GPUTextureCache] Texture ${key} not found`);
@@ -183,6 +195,20 @@ export class GPUTextureCache {
 
     // Use shader program
     this.gl.useProgram(this.program);
+
+    // Set filter uniforms
+    const sepia = filter?.sepia ?? 0.0;
+    const grayscale = filter?.grayscale ?? 0.0;
+    const saturate = filter?.saturate ?? 1.0;
+    const contrast = filter?.contrast ?? 1.0;
+    const hueRotateDeg = filter?.hueRotate ?? 0.0;
+    const hueRotateRad = (hueRotateDeg * Math.PI) / 180.0;
+
+    this.gl.uniform1f(this.sepiaLocation, sepia);
+    this.gl.uniform1f(this.grayscaleLocation, grayscale);
+    this.gl.uniform1f(this.saturateLocation, saturate);
+    this.gl.uniform1f(this.contrastLocation, contrast);
+    this.gl.uniform1f(this.hueRotateLocation, hueRotateRad);
 
     // Bind texture
     this.gl.activeTexture(this.gl.TEXTURE0);
@@ -345,8 +371,54 @@ export class GPUTextureCache {
       out vec4 outColor;
       uniform sampler2D u_texture;
       
+      // Filter IR uniforms
+      uniform float u_sepia;
+      uniform float u_grayscale;
+      uniform float u_saturate;
+      uniform float u_contrast;
+      uniform float u_hueRotate; // in radians
+      
       void main() {
-        outColor = texture(u_texture, v_texCoord);
+        vec4 color = texture(u_texture, v_texCoord);
+        
+        // 1. Grayscale
+        if (u_grayscale > 0.0) {
+          float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+          color.rgb = mix(color.rgb, vec3(luma), u_grayscale);
+        }
+        
+        // 2. Sepia
+        if (u_sepia > 0.0) {
+          vec3 sepiaColor;
+          sepiaColor.r = dot(color.rgb, vec3(0.393, 0.769, 0.189));
+          sepiaColor.g = dot(color.rgb, vec3(0.349, 0.686, 0.168));
+          sepiaColor.b = dot(color.rgb, vec3(0.272, 0.534, 0.131));
+          color.rgb = mix(color.rgb, sepiaColor, u_sepia);
+        }
+        
+        // 3. Hue rotation
+        if (u_hueRotate != 0.0) {
+          vec3 k = vec3(0.57735, 0.57735, 0.57735);
+          float cosAngle = cos(u_hueRotate);
+          float sinAngle = sin(u_hueRotate);
+          color.rgb = color.rgb * cosAngle + cross(k, color.rgb) * sinAngle + k * dot(k, color.rgb) * (1.0 - cosAngle);
+        }
+        
+        // 4. Saturation
+        if (u_saturate != 1.0) {
+          float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+          color.rgb = mix(vec3(luma), color.rgb, u_saturate);
+        }
+        
+        // 5. Contrast
+        if (u_contrast != 1.0) {
+          color.rgb = (color.rgb - 0.5) * u_contrast + 0.5;
+        }
+        
+        // Clamp output colors
+        color.rgb = clamp(color.rgb, 0.0, 1.0);
+        
+        outColor = color;
       }
     `;
 

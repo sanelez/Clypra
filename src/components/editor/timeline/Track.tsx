@@ -38,11 +38,8 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
     () => ({
       accept: ["MEDIA_ASSET"],
       drop: (item: DragItem, monitor: any) => {
-        console.log("[Track] Drop triggered:", { trackId: track.id, locked: track.locked, type: track.type, item });
         if (!track.locked && track.type !== "text") {
           handleDropOnTrack(item, monitor, track.id);
-        } else {
-          console.log("[Track] Drop rejected - locked or text track");
         }
       },
       canDrop: () => !track.locked && track.type !== "text",
@@ -211,11 +208,7 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
                 e.stopPropagation();
                 selectTransition(t.id);
               }}
-              className={`absolute top-1/2 -translate-y-1/2 h-7 rounded z-35 flex items-center justify-center cursor-pointer transition-all border ${
-                isSelected
-                  ? "bg-accent/80 text-white border-white shadow-md scale-105"
-                  : "bg-surface-raised/80 hover:bg-surface-raised border-border/40 text-text-muted hover:text-text-primary hover:border-accent/30"
-              }`}
+              className={`absolute top-1/2 -translate-y-1/2 h-7 rounded z-35 flex items-center justify-center cursor-pointer transition-all border ${isSelected ? "bg-accent/80 text-white border-white shadow-md scale-105" : "bg-surface-raised/80 hover:bg-surface-raised border-border/40 text-text-muted hover:text-text-primary hover:border-accent/30"}`}
               style={{
                 left: `${left}px`,
                 width: `${width}px`,

@@ -1,7 +1,8 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { Filter, Grid3X3, Plus, Search, SlidersHorizontal, Sparkles, Sun, Palette, Droplets, Camera, Loader2, AlertCircle, type LucideIcon } from "lucide-react";
 import type { TabProps } from "./types";
-import { useVideoEffectsStore, type EffectItem } from "@/store/videoEffectsStore";
+import { useVideoEffectsStore } from "@/features/video-effects/store/videoEffectsStore";
+import type { FilterAsset } from "@/features/video-effects/types";
 
 const FILTER_CATEGORIES = [
   { id: "all", label: "All" },
@@ -13,8 +14,6 @@ const FILTER_CATEGORIES = [
 ] as const;
 
 type FilterCategory = (typeof FILTER_CATEGORIES)[number]["id"];
-type FilterStatusFilter = "all" | "ready" | "soon";
-type FilterIntensityFilter = "all" | "light" | "medium" | "bold";
 
 const FILTER_ICONS: Record<string, LucideIcon> = {
   "filter-sepia": Sun,
@@ -39,10 +38,11 @@ const DEFAULT_ICON = Filter;
 export const FiltersTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<FilterCategory>("all");
-  const [statusFilter, setStatusFilter] = useState<FilterStatusFilter>("all");
-  const [intensityFilter, setIntensityFilter] = useState<FilterIntensityFilter>("all");
 
-  const { categoryItems, loading, errors, loadCategory } = useVideoEffectsStore();
+  const loadCategory = useVideoEffectsStore((state) => state.loadCategory);
+  const categories = useVideoEffectsStore((state) => state.categories);
+  const loading = useVideoEffectsStore((state) => state.categoryLoading);
+  const errors = useVideoEffectsStore((state) => state.categoryErrors);
 
   const categoriesToLoad = useMemo(() => {
     return FILTER_CATEGORIES.filter((c) => c.id !== "all").map((c) => c.id);
@@ -52,52 +52,41 @@ export const FiltersTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
   useEffect(() => {
     if (activeCategory === "all") {
       categoriesToLoad.forEach((cat) => {
-        loadCategory(cat);
+        loadCategory("filter", cat).catch((err) => console.error(`Failed to load category ${cat}:`, err));
       });
     } else {
-      loadCategory(activeCategory);
+      loadCategory("filter", activeCategory).catch((err) => console.error(`Failed to load category ${activeCategory}:`, err));
     }
   }, [activeCategory, loadCategory, categoriesToLoad]);
 
   // Consolidate list based on active category selection
   const allFilters = useMemo(() => {
     if (activeCategory === "all") {
-      // Flatten all loaded categories
-      return Object.values(categoryItems).flat();
+      return categoriesToLoad.flatMap((cat) => categories[`filter:${cat}`] || []) as FilterAsset[];
     }
-    return categoryItems[activeCategory] || [];
-  }, [activeCategory, categoryItems]);
-
-  // Filter out any video effects (e.g. fx-brightness) that might share the 'color' category endpoint
-  const cleanFilters = useMemo(() => {
-    return allFilters.filter((item) => item.id.startsWith("filter-"));
-  }, [allFilters]);
+    return (categories[`filter:${activeCategory}`] || []) as FilterAsset[];
+  }, [activeCategory, categories, categoriesToLoad]);
 
   const filteredFilters = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return cleanFilters.filter((filter) => {
-      const matchesStatus = statusFilter === "all" || filter.status === statusFilter;
-      const matchesIntensity = intensityFilter === "all" || filter.intensity?.toLowerCase() === intensityFilter;
+    return allFilters.filter((filter) => {
       const matchesSearch = !query || filter.name.toLowerCase().includes(query) || filter.description.toLowerCase().includes(query) || filter.category.includes(query);
-      return matchesStatus && matchesIntensity && matchesSearch;
+      return matchesSearch;
     });
-  }, [cleanFilters, searchQuery, statusFilter, intensityFilter]);
-
-  const readyCount = filteredFilters.filter((filter) => filter.status === "ready").length;
+  }, [allFilters, searchQuery]);
 
   const isCategoryLoading = useMemo(() => {
     if (activeCategory === "all") {
-      return categoriesToLoad.some((cat) => loading[cat]);
+      return categoriesToLoad.some((cat) => loading[`filter:${cat}`]);
     }
-    return loading[activeCategory] || false;
+    return loading[`filter:${activeCategory}`] || false;
   }, [activeCategory, loading, categoriesToLoad]);
 
   const categoryError = useMemo(() => {
     if (activeCategory === "all") {
-      // Return first error found, if any
-      return categoriesToLoad.map((cat) => errors[cat]).find(Boolean) || null;
+      return categoriesToLoad.map((cat) => errors[`filter:${cat}`]).find(Boolean) || null;
     }
-    return errors[activeCategory] || null;
+    return errors[`filter:${activeCategory}`] || null;
   }, [activeCategory, errors, categoriesToLoad]);
 
   return (
@@ -180,17 +169,17 @@ const SkeletonCard = () => (
   </div>
 );
 
-const FilterCard: React.FC<{ filter: EffectItem; onAddToTimeline: () => void }> = ({ filter, onAddToTimeline }) => {
+const FilterCard: React.FC<{ filter: FilterAsset; onAddToTimeline: () => void }> = ({ filter, onAddToTimeline }) => {
   const Icon = FILTER_ICONS[filter.id] || DEFAULT_ICON;
-  const isReady = filter.status === "ready";
+  const isReady = (filter as any).status !== "soon";
   return (
     <button onClick={isReady ? onAddToTimeline : undefined} disabled={!isReady} className={`group text-left rounded-lg border bg-surface-raised/60 transition-all overflow-hidden flex flex-col h-[180px] justify-between ${isReady ? "border-border/50 hover:bg-surface-raised hover:border-accent/30 cursor-pointer" : "border-border/30 opacity-70 cursor-not-allowed"}`}>
-      <div className={`h-16 w-full bg-linear-to-br ${filter.swatch} relative overflow-hidden shrink-0`}>
+      <div className={`h-16 w-full bg-linear-to-br ${filter.swatch || "from-zinc-500/20 to-zinc-700/20"} relative overflow-hidden shrink-0`}>
         <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.42),transparent_38%)]" />
         <div className="absolute left-2 top-2 h-7 w-7 rounded-md bg-black/30 border border-white/10 flex items-center justify-center backdrop-blur-sm">
           <Icon className="w-4 h-4 text-white" />
         </div>
-        <span className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${filter.status === "ready" ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/20" : "bg-white/10 text-white/70 border border-white/10"}`}>{filter.status === "ready" ? "Ready" : "Soon"}</span>
+        <span className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${isReady ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/20" : "bg-white/10 text-white/70 border border-white/10"}`}>{isReady ? "Ready" : "Soon"}</span>
       </div>
       <div className="p-2 flex-1 flex flex-col justify-between">
         <div>
@@ -202,7 +191,7 @@ const FilterCard: React.FC<{ filter: EffectItem; onAddToTimeline: () => void }> 
         </div>
         <div className="mt-2 flex items-center justify-between border-t border-border/40 pt-1.5">
           <span className="text-[10px] capitalize text-text-muted truncate mr-1">{filter.category}</span>
-          {filter.intensity && <span className="text-[10px] text-text-muted shrink-0">{filter.intensity}</span>}
+          {filter.intensity && <span className="text-[10px] text-text-muted shrink-0">{filter.intensity.default}%</span>}
         </div>
       </div>
     </button>

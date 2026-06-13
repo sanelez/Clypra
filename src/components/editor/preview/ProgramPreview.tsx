@@ -16,9 +16,10 @@ import { calculateDisplayTransform } from "@/lib/utils/coordinateSystem";
 import { GPUTextureCache } from "@/lib/cache/gpuTextureCache";
 import { PreviewQualityManager, PreviewQualityTier } from "@/lib/preview/PreviewQualityManager";
 import { cn } from "@/lib/utils";
-import { AspectRatio } from "@/types";
+import { AspectRatio, FilterClip } from "@/types";
 import { formatTime } from "@/lib/utils/timeFormatting";
 import { refitClipsForCanvasChange } from "@/lib/timeline/refitClips";
+import { resolveFilterToIR } from "../../../core/render/filterIR";
 
 import { TelemetryOverlay, type TelemetryStats } from "./TelemetryOverlay";
 import { AspectSelector } from "./AspectSelector";
@@ -121,7 +122,10 @@ export const ProgramPreview: React.FC = () => {
   // 4. REF DECLARATIONS (useRef)
   // =========================================================================
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null);
+  const canvasRef = useCallback((node: HTMLCanvasElement | null) => {
+    setCanvasEl(node);
+  }, []);
   const aspectMenuRef = useRef<HTMLDivElement>(null);
   const speedMenuRef = useRef<HTMLDivElement>(null);
   const qualityMenuRef = useRef<HTMLDivElement>(null);
@@ -372,14 +376,14 @@ export const ProgramPreview: React.FC = () => {
   }, [project, canvasWidth, canvasHeight, displayWidth, displayHeight]);
 
   useEffect(() => {
-    if (!useCanvasPreview || !canvasRef.current || gpuFallbackRef.current) return;
+    if (!useCanvasPreview || !canvasEl || gpuFallbackRef.current) return;
     if (gpuCacheRef.current) return;
     try {
-      gpuCacheRef.current = new GPUTextureCache(canvasRef.current);
+      gpuCacheRef.current = new GPUTextureCache(canvasEl);
     } catch {
       gpuFallbackRef.current = true;
     }
-  }, [useCanvasPreview]);
+  }, [useCanvasPreview, canvasEl]);
 
   useEffect(() => {
     return () => {
@@ -391,8 +395,8 @@ export const ProgramPreview: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!useCanvasPreview || !canvasRef.current || !project) return;
-    const canvas = canvasRef.current;
+    if (!useCanvasPreview || !canvasEl || !project) return;
+    const canvas = canvasEl;
     if (displayWidth === 0 || displayHeight === 0) return;
     const canvasDpr = window.devicePixelRatio || 1;
     const backingW = Math.round(displayWidth * canvasDpr);
@@ -428,6 +432,34 @@ export const ProgramPreview: React.FC = () => {
       const epochChanged = state.epoch !== lastRenderedEpoch;
       const needsRender = isPlaying || timeChanged || epochChanged;
 
+      // Get the active track-level filter at the rendering time
+      const getActiveFilterIR = (time: number) => {
+        const filterTracks = state.tracks.filter((t: any) => t.type === "filter");
+        const filterTrackIds = new Set(filterTracks.map((t: any) => t.id));
+        const activeFilterClips = state.clips
+          .filter(
+            (c: any) =>
+              c.kind === "filter" &&
+              filterTrackIds.has(c.trackId) &&
+              c.startTime <= time &&
+              time < c.startTime + c.duration
+          )
+          .sort((a: any, b: any) => {
+            const trackA = state.tracks.findIndex((t: any) => t.id === a.trackId);
+            const trackB = state.tracks.findIndex((t: any) => t.id === b.trackId);
+            return trackA - trackB;
+          });
+
+        const activeClip = activeFilterClips[0] as FilterClip | undefined;
+        console.log(`[ProgramPreview] getActiveFilterIR - time: ${time}, filterTrackIds:`, Array.from(filterTrackIds), `activeFilterClips count: ${activeFilterClips.length}`, `activeClip:`, activeClip ? { id: activeClip.id, name: activeClip.name, mediaId: activeClip.mediaId, intensity: activeClip.intensity } : "none");
+        if (activeClip && activeClip.kind === "filter") {
+          const resolvedIR = resolveFilterToIR(activeClip.mediaId, activeClip.intensity ?? 0.8);
+          console.log(`[ProgramPreview] getActiveFilterIR - resolved FilterIR:`, resolvedIR);
+          return resolvedIR;
+        }
+        return undefined;
+      };
+
       // Only render if something changed or we're playing
       // This prevents infinite RAF loops when idle
       if (!needsRender) {
@@ -453,7 +485,8 @@ export const ProgramPreview: React.FC = () => {
         const cacheKey = `preview:${state.project?.id}:${state.epoch}:${timeToRender.toFixed(3)}:${renderW}x${renderH}:${state.dpr}`;
         if (gpuCache.hasTexture(cacheKey)) {
           gpuCache.clear();
-          gpuCache.renderTexture(cacheKey, 0, 0, state.displayWidth, state.displayHeight);
+          const filterIR = getActiveFilterIR(timeToRender);
+          gpuCache.renderTexture(cacheKey, 0, 0, state.displayWidth * state.dpr, state.displayHeight * state.dpr, filterIR);
           isRendering = false;
           return;
         }
@@ -468,6 +501,7 @@ export const ProgramPreview: React.FC = () => {
         outputFormat: "imagebitmap",
         priority: "realtime",
         videoElements: activeVideoElements,
+        skipFilters: !!gpuCache, // Skip applying track-level filters on CPU if WebGL GPU rendering is available
       });
       lastJobId = jobId;
       scheduler
@@ -481,7 +515,8 @@ export const ProgramPreview: React.FC = () => {
               const cacheKey = `preview:${latestState.project?.id}:${latestState.epoch}:${timeToRender.toFixed(3)}:${profile.maxWidth}x${profile.maxHeight}:${latestState.dpr}`;
               gpuCache.uploadTexture(cacheKey, result.data, result.data.width, result.data.height);
               gpuCache.clear();
-              gpuCache.renderTexture(cacheKey, 0, 0, latestState.displayWidth, latestState.displayHeight);
+              const filterIR = getActiveFilterIR(timeToRender);
+              gpuCache.renderTexture(cacheKey, 0, 0, latestState.displayWidth * latestState.dpr, latestState.displayHeight * latestState.dpr, filterIR);
               result.data.close();
               gpuCache.evictLRU(GPU_MEMORY_LIMIT_MB);
             } else if (ctx2d) {
@@ -525,7 +560,7 @@ export const ProgramPreview: React.FC = () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
       if (lastJobId) scheduler.cancel(lastJobId);
     };
-  }, [useCanvasPreview, project, canvasWidth, canvasHeight, displayWidth, displayHeight]);
+  }, [useCanvasPreview, project, canvasWidth, canvasHeight, displayWidth, displayHeight, canvasEl]);
 
   // ── Clear selection when playback starts ──────────────────────────────
   // Transform overlays should not be visible during playback

@@ -25,16 +25,17 @@ export function toCompositorClip(clip: Clip, tracks: Track[]): CompositorClip {
   // Use explicit clip role when available, otherwise infer from track position.
   const role = ((clip as any).role as ClipRole | undefined) ?? inferRoleFromTrackPosition(track, trackIndex, tracks);
 
-  // TRACE: Z-order verification (can be removed after validation)
-  console.log("[TRACE][ADAPTER] trackIndex:", trackIndex, "role:", role, "clipId:", clip.id.substring(0, 8));
-
   // Default z-index and priority
   // TODO: These should eventually come from clip metadata
   const zIndex = trackIndex; // Higher tracks = higher z-index
   const evaluationPriority = 0; // Default priority
 
+  // Resolve kind if missing or incorrect
+  const kind = clip.kind ?? (track?.type === "filter" ? "filter" : clip.id.startsWith("filter-clip-") ? "filter" : undefined);
+
   return {
     ...clip,
+    kind,
     role,
     trackIndex: trackIndex >= 0 ? trackIndex : 0,
     zIndex,
