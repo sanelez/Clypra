@@ -282,19 +282,19 @@ pub async fn transcribe_audio_local(
         if !hints.is_empty() {
             let lang_names: Vec<String> = hints.iter().map(|code| {
                 match code.as_str() {
-                    "en" => "English",
-                    "es" => "Spanish",
-                    "fr" => "French",
-                    "de" => "German",
-                    "it" => "Italian",
-                    "pt" => "Portuguese",
-                    "ru" => "Russian",
-                    "ja" => "Japanese",
-                    "ko" => "Korean",
-                    "zh" => "Chinese",
-                    "ar" => "Arabic",
-                    "hi" => "Hindi",
-                    _ => code,
+                    "en" => "English".to_string(),
+                    "es" => "Spanish".to_string(),
+                    "fr" => "French".to_string(),
+                    "de" => "German".to_string(),
+                    "it" => "Italian".to_string(),
+                    "pt" => "Portuguese".to_string(),
+                    "ru" => "Russian".to_string(),
+                    "ja" => "Japanese".to_string(),
+                    "ko" => "Korean".to_string(),
+                    "zh" => "Chinese".to_string(),
+                    "ar" => "Arabic".to_string(),
+                    "hi" => "Hindi".to_string(),
+                    _ => code.clone(),
                 }
             }).collect();
             Some(format!("This audio may contain speech in {}. Transcribe accordingly.", lang_names.join(", ")))
