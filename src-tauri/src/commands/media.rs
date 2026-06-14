@@ -220,16 +220,19 @@ pub async fn extract_audio_track(path: String) -> Result<String, String> {
 
     eprintln!("🦀 [extract_audio_track] Extracting audio from: {}", path);
 
-    // Create a temporary directory inside the workspace if it doesn't exist
-    let temp_dir = Path::new("temp");
-    if !temp_dir.exists() {
-        fs::create_dir_all(temp_dir).map_err(|e| format!("Failed to create temp directory: {}", e))?;
+    // Use system temp directory to avoid triggering file watchers in dev mode
+    let temp_dir = std::env::temp_dir();
+    
+    // Create a clypra-specific subdirectory
+    let clypra_temp = temp_dir.join("clypra-audio");
+    if !clypra_temp.exists() {
+        fs::create_dir_all(&clypra_temp).map_err(|e| format!("Failed to create temp directory: {}", e))?;
     }
 
     // Generate a unique filename using MD5 of path
     let hash = format!("{:x}", md5::compute(path.as_bytes()));
     let output_filename = format!("{}.mp3", hash);
-    let output_path = temp_dir.join(output_filename);
+    let output_path = clypra_temp.join(output_filename);
     let output_path_str = output_path.to_str().ok_or("Failed to convert output path to string")?.to_string();
 
     // Call ffmpeg command to extract audio: ffmpeg -i <path> -vn -acodec libmp3lame -ac 1 -ar 16000 -y <output_path>

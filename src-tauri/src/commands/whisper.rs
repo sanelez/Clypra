@@ -103,7 +103,6 @@ async fn perform_download(
 ) -> Result<(), String> {
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
-    
     // Emit initial progress event
     let _ = app.emit(
         "whisper_model_progress",
