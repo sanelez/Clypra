@@ -253,6 +253,7 @@ function ModelCard({ model }: { model: ModelInfo }) {
       totalBytes: number;
       speedBytesPerSec: number;
     }>("whisper_model_progress", (event) => {
+      console.log(`[WhisperSettings] Received progress event for ${event.payload.size}:`, event.payload);
       if (event.payload.size === model.size) {
         updateModelDownloadState(model.size, {
           progressBytes: event.payload.downloadedBytes,

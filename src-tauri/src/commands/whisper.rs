@@ -9,8 +9,11 @@ use tokio_util::sync::CancellationToken;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadProgressPayload {
     pub size: String,
+    #[serde(rename = "downloadedBytes")]
     pub downloaded_bytes: u64,
+    #[serde(rename = "totalBytes")]
     pub total_bytes: u64,
+    #[serde(rename = "speedBytesPerSec")]
     pub speed_bytes_per_sec: u64,
 }
 
@@ -160,6 +163,13 @@ async fn perform_download(
                             let elapsed_secs = now.duration_since(last_update).as_secs_f64();
                             let bytes_since_last = downloaded - last_downloaded;
                             let speed = (bytes_since_last as f64 / elapsed_secs) as u64;
+                            
+                            eprintln!("🦀 [download] Progress: {}/{} MB ({:.1}%) @ {} MB/s", 
+                                downloaded / 1_048_576, 
+                                total_size / 1_048_576,
+                                (downloaded as f64 / total_size as f64) * 100.0,
+                                speed / 1_048_576
+                            );
                             
                             let _ = app.emit(
                                 "whisper_model_progress",
