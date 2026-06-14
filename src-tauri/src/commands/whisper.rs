@@ -10,20 +10,17 @@ pub struct DownloadProgressPayload {
     pub speed_bytes_per_sec: u64,
 }
 
-/// Download a Whisper model from Hugging Face or OpenAI CDN
+/// Download a Whisper model by triggering the openai-whisper library to cache it
 #[tauri::command]
 pub async fn download_whisper_model(
     app: tauri::AppHandle,
     size: String,
 ) -> Result<(), String> {
-    // TODO: Implement actual download from Hugging Face / OpenAI CDN
-    // Model URLs (example):
-    // tiny: https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt
-    // base: https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e/base.pt
-    // small: https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt
-    // medium: https://openaipublic.azureedge.net/main/whisper/models/345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1/medium.pt
-    // large-v3: https://openaipublic.azureedge.net/main/whisper/models/e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb/large-v3.pt
-
+    use std::process::Command;
+    use std::time::Instant;
+    
+    eprintln!("🦀 [download_whisper_model] Starting download for model: {}", size);
+    
     // Get app data directory
     let app_data_dir = app
         .path()
@@ -36,29 +33,71 @@ pub async fn download_whisper_model(
     std::fs::create_dir_all(&models_dir)
         .map_err(|e| format!("Failed to create models directory: {}", e))?;
 
-    let model_path = models_dir.join(format!("{}.bin", size));
-
-    // Simulate download progress for now
-    // In real implementation, use reqwest or similar HTTP client
-    eprintln!("🦀 [download_whisper_model] Would download {} to {:?}", size, model_path);
-
-    // Emit progress events
+    eprintln!("🦀 [download_whisper_model] Models directory: {:?}", models_dir);
+    
+    // Emit initial progress event
     let _ = app.emit(
         "whisper_model_progress",
         DownloadProgressPayload {
             size: size.clone(),
             downloaded_bytes: 0,
-            total_bytes: 100_000_000, // Example: 100MB
+            total_bytes: 100_000_000, // Placeholder - actual size varies
             speed_bytes_per_sec: 0,
         },
     );
 
-    // TODO: Actual download implementation
-    // 1. Determine the correct URL based on model size
-    // 2. Stream download with progress tracking
-    // 3. Emit progress events periodically
-    // 4. Save to model_path
-    // 5. Verify checksum/integrity
+    // Use Python script to load the model, which will trigger automatic download via openai-whisper
+    // The openai-whisper library automatically downloads models to ~/.cache/whisper/
+    let start = Instant::now();
+    
+    let output = Command::new("uv")
+        .args(&[
+            "run",
+            "python",
+            "-c",
+            &format!(
+                "import whisper; \
+                 print('Downloading Whisper model: {}...'); \
+                 model = whisper.load_model('{}'); \
+                 print('Model loaded successfully!');",
+                size, size
+            ),
+        ])
+        .output()
+        .map_err(|e| format!("Failed to execute download command: {}", e))?;
+
+    let elapsed = start.elapsed();
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        eprintln!("🦀 [download_whisper_model] Download failed!");
+        eprintln!("  stdout: {}", stdout);
+        eprintln!("  stderr: {}", stderr);
+        return Err(format!("Failed to download model: {}\n{}", stdout, stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    eprintln!("🦀 [download_whisper_model] Download completed in {:?}", elapsed);
+    eprintln!("  Output: {}", stdout);
+    
+    // Create a marker file in our app directory to track that this model has been downloaded
+    let model_path = models_dir.join(format!("{}.bin", size));
+    std::fs::write(&model_path, format!("Downloaded at: {:?}", std::time::SystemTime::now()))
+        .map_err(|e| format!("Failed to create model marker: {}", e))?;
+    
+    eprintln!("🦀 [download_whisper_model] Created marker at {:?}", model_path);
+
+    // Emit completion event
+    let _ = app.emit(
+        "whisper_model_progress",
+        DownloadProgressPayload {
+            size: size.clone(),
+            downloaded_bytes: 100_000_000,
+            total_bytes: 100_000_000,
+            speed_bytes_per_sec: 0,
+        },
+    );
 
     Ok(())
 }
