@@ -24,6 +24,10 @@ export const CaptionsTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
 
   const mediaAssets = project?.mediaAssets || [];
 
+  // Check model status for helpful UI hints
+  const selectedModel = captionSettings.activeModel || "tiny";
+  const isModelDownloaded = captionSettings.models[selectedModel]?.status === "downloaded";
+
   // Find the text track designated for captions
   const captionTrack = tracks.find((t) => t.type === "text" && (t.name.toLowerCase().includes("caption") || t.name.toLowerCase().includes("subtitle"))) || tracks.find((t) => t.type === "text");
 
@@ -150,6 +154,15 @@ export const CaptionsTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
     // Smart defaults — no pre-flight checks blocking the user
     const model = captionSettings.activeModel || "tiny"; // Default to tiny if none selected
     const language = captionSettings.language || "auto"; // Default to auto-detect
+
+    // Check if the selected model is downloaded
+    const modelState = captionSettings.models[model];
+    if (modelState.status !== "downloaded") {
+      setErrorMsg(`Whisper model "${model}" is not downloaded yet. Please go to Settings → Captions to download the model first.`);
+      // Open settings modal to help user
+      toggleSettingsModal();
+      return;
+    }
 
     // Find video or audio clips on the timeline
     const mediaClips = clips.filter((clip) => {
@@ -303,16 +316,31 @@ export const CaptionsTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
       </div>
 
       {/* Auto-Generate Section — Zero Config UX */}
-      <div className="relative">
-        <Button variant="default" size="sm" className="w-full bg-accent hover:bg-accent/80 text-white flex items-center justify-center gap-1.5" onClick={handleAutoGenerate} disabled={isGenerating}>
-          <Sparkles className="w-4 h-4" />
-          {isGenerating ? "Generating..." : "Auto-Generate Captions"}
-        </Button>
+      <div className="space-y-2">
+        {!isModelDownloaded && (
+          <div className="p-2.5 bg-yellow-500/10 border border-yellow-500/25 rounded-lg text-yellow-200 text-xs flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold">Whisper Model Required</p>
+              <p className="mt-1 opacity-90">The "{selectedModel}" model needs to be downloaded before generating captions.</p>
+              <button onClick={toggleSettingsModal} className="mt-2 px-2 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 rounded text-xs font-semibold transition-colors">
+                Download Model in Settings
+              </button>
+            </div>
+          </div>
+        )}
 
-        {/* Settings gear — subtle, non-blocking */}
-        <button onClick={toggleSettingsModal} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 opacity-40 hover:opacity-100 transition-opacity" title="Caption settings">
-          <Settings className="w-3.5 h-3.5 text-white" />
-        </button>
+        <div className="relative">
+          <Button variant="default" size="sm" className="w-full bg-accent hover:bg-accent/80 text-white flex items-center justify-center gap-1.5" onClick={handleAutoGenerate} disabled={isGenerating}>
+            <Sparkles className="w-4 h-4" />
+            {isGenerating ? "Generating..." : "Auto-Generate Captions"}
+          </Button>
+
+          {/* Settings gear — subtle, non-blocking */}
+          <button onClick={toggleSettingsModal} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 opacity-40 hover:opacity-100 transition-opacity" title="Caption settings">
+            <Settings className="w-3.5 h-3.5 text-white" />
+          </button>
+        </div>
       </div>
 
       <Button variant="secondary" size="sm" className="w-full flex items-center justify-center gap-1.5" onClick={handleAddManualCaption}>
@@ -321,9 +349,18 @@ export const CaptionsTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
       </Button>
 
       {errorMsg && (
-        <div className="p-2.5 bg-destructive/10 border border-destructive/20 text-destructive rounded-lg flex items-start gap-2 text-xs">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{errorMsg}</span>
+        <div className="p-2.5 bg-destructive/10 border border-destructive/20 text-destructive rounded-lg text-xs">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p>{errorMsg}</p>
+              {errorMsg.includes("not downloaded") && (
+                <button onClick={toggleSettingsModal} className="mt-2 px-2 py-1 bg-accent/20 hover:bg-accent/30 text-accent rounded text-xs font-semibold transition-colors">
+                  Open Settings to Download Model
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
