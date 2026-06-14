@@ -317,6 +317,13 @@ export const useTimelineStore = create<TimelineStore>(
 
     addClip: (clip) => {
       set((state) => {
+        // Prevent adding duplicate clips with the same ID
+        const existingClip = state.clips.find((c) => c.id === clip.id);
+        if (existingClip) {
+          console.warn(`[TimelineStore] Clip with ID "${clip.id}" already exists. Skipping duplicate.`);
+          return state; // Return unchanged state
+        }
+
         const wasEmpty = state.clips.length === 0;
 
         // Check for overlap and adjust position if needed

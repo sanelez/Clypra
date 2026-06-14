@@ -125,9 +125,20 @@ class FilterCacheManager {
     }
 
     try {
+      // Get the full cache directory path
+      const appCache = await appCacheDir();
+      const fullCacheDir = await join(appCache, CACHE_DIR);
+
+      // Ensure the cache directory exists using the full path
+      const dirExists = await exists(fullCacheDir);
+      if (!dirExists) {
+        await mkdir(fullCacheDir, { recursive: true });
+      }
+
       const sanitizedName = sanitizeFileName(filter.name);
       const fileName = `${filter.id}_${sanitizedName}.json`;
       const relativePath = `${CACHE_DIR}/${fileName}`;
+      const fullPath = await join(appCache, relativePath);
 
       // Since filters are just JSON, we don't fetch from a URL
       // We save the filter object itself as JSON
@@ -143,7 +154,8 @@ class FilterCacheManager {
         });
       }
 
-      await writeFile(relativePath, fileData, { baseDir: BaseDirectory.AppCache });
+      // Write to the full path
+      await writeFile(fullPath, fileData);
 
       const cachedFile: CachedFilter = {
         id: filter.id,

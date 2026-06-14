@@ -159,7 +159,6 @@ const StickerCard: React.FC<{ sticker: StickerItem; onAddToTimeline?: (item: any
   const isDownloadedFlag = isDownloaded(sticker.id);
 
   const isDownloading = downloadState?.status === "downloading";
-  const hasError = downloadState?.status === "error";
 
   // Use animated version on hover if available
   const displayUrl = showAnimation && sticker.animatedUrl ? sticker.animatedUrl : sticker.thumbnailUrl;
@@ -168,12 +167,8 @@ const StickerCard: React.FC<{ sticker: StickerItem; onAddToTimeline?: (item: any
     try {
       const cachedFile = await startDownload(sticker);
       const appCache = await import("@tauri-apps/api/path").then((m) => m.appCacheDir());
-      
-      const targetPath = cachedFile.format === "lottie"
-        ? cachedFile.localAnimationPath
-        : cachedFile.format === "gif"
-        ? cachedFile.localAnimationPath
-        : cachedFile.localImagePath;
+
+      const targetPath = cachedFile.format === "lottie" ? cachedFile.localAnimationPath : cachedFile.format === "gif" ? cachedFile.localAnimationPath : cachedFile.localImagePath;
 
       if (!targetPath) {
         throw new Error("Missing cached file path");
@@ -234,22 +229,8 @@ const StickerCard: React.FC<{ sticker: StickerItem; onAddToTimeline?: (item: any
         </div>
       )}
 
-      {/* Error Overlay */}
-      {hasError && (
-        <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center gap-1 text-red-400">
-          <AlertCircle className="w-5 h-5" />
-          <span className="text-[10px] font-semibold">Failed</span>
-        </div>
-      )}
-
       {/* Image or Fallback */}
-      {displayUrl && !imageError ? (
-        <img src={displayUrl} alt={sticker.name} className="w-full h-full object-contain p-3" onError={() => setImageError(true)} />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center text-5xl">
-          {sticker.name.includes("Heart") ? "❤️" : sticker.name.includes("Star") ? "⭐" : sticker.name.includes("Circle") ? "⭕" : "🎨"}
-        </div>
-      )}
+      {displayUrl && !imageError ? <img src={displayUrl} alt={sticker.name} className="w-full h-full object-contain p-3" onError={() => setImageError(true)} /> : <div className="w-full h-full flex items-center justify-center text-5xl">{sticker.name.includes("Heart") ? "❤️" : sticker.name.includes("Star") ? "⭐" : sticker.name.includes("Circle") ? "⭕" : "🎨"}</div>}
 
       {/* Add to Timeline Button on Hover */}
       <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">

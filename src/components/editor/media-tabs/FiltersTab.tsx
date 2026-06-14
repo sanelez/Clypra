@@ -6,8 +6,8 @@ import type { FilterAsset } from "@/features/video-effects/types";
 import { useProjectStore } from "@/store/projectStore";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 
+// Hardcoded filter categories for instant UI rendering
 const FILTER_CATEGORIES = [
-  { id: "all", label: "All" },
   { id: "vintage", label: "Vintage" },
   { id: "modern", label: "Modern" },
   { id: "cinematic", label: "Cinematic" },
@@ -39,40 +39,32 @@ const DEFAULT_ICON = Filter;
 
 export const FiltersTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState<FilterCategory>("all");
+  const [activeCategory, setActiveCategory] = useState<FilterCategory>("vintage");
 
   const loadCategory = useVideoEffectsStore((state) => state.loadCategory);
   const categories = useVideoEffectsStore((state) => state.categories);
   const loading = useVideoEffectsStore((state) => state.categoryLoading);
   const errors = useVideoEffectsStore((state) => state.categoryErrors);
 
-  const categoriesToLoad = useMemo(() => {
-    return FILTER_CATEGORIES.filter((c) => c.id !== "all").map((c) => c.id);
-  }, []);
-
-  // Initialize filter cache on mount
+  // Initialize cache on mount
   useEffect(() => {
     useVideoEffectsStore.getState().initializeCache();
   }, []);
 
-  // Fetch filter category items dynamically
+  // Fetch filter category items only when the active category changes
   useEffect(() => {
-    if (activeCategory === "all") {
-      categoriesToLoad.forEach((cat) => {
-        loadCategory("filter", cat).catch((err) => console.error(`Failed to load category ${cat}:`, err));
+    const categoryKey = `filter:${activeCategory}`;
+    if (!categories[categoryKey]) {
+      loadCategory("filter", activeCategory).catch((err) => {
+        console.error(`[FiltersTab] Failed to load category ${activeCategory}:`, err);
       });
-    } else {
-      loadCategory("filter", activeCategory).catch((err) => console.error(`Failed to load category ${activeCategory}:`, err));
     }
-  }, [activeCategory, loadCategory, categoriesToLoad]);
+  }, [activeCategory, loadCategory, categories]);
 
-  // Consolidate list based on active category selection
+  // Get filters for the active category only
   const allFilters = useMemo(() => {
-    if (activeCategory === "all") {
-      return categoriesToLoad.flatMap((cat) => categories[`filter:${cat}`] || []) as FilterAsset[];
-    }
     return (categories[`filter:${activeCategory}`] || []) as FilterAsset[];
-  }, [activeCategory, categories, categoriesToLoad]);
+  }, [activeCategory, categories]);
 
   const filteredFilters = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -83,18 +75,12 @@ export const FiltersTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
   }, [allFilters, searchQuery]);
 
   const isCategoryLoading = useMemo(() => {
-    if (activeCategory === "all") {
-      return categoriesToLoad.some((cat) => loading[`filter:${cat}`]);
-    }
     return loading[`filter:${activeCategory}`] || false;
-  }, [activeCategory, loading, categoriesToLoad]);
+  }, [activeCategory, loading]);
 
   const categoryError = useMemo(() => {
-    if (activeCategory === "all") {
-      return categoriesToLoad.map((cat) => errors[`filter:${cat}`]).find(Boolean) || null;
-    }
     return errors[`filter:${activeCategory}`] || null;
-  }, [activeCategory, errors, categoriesToLoad]);
+  }, [activeCategory, errors]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-surface/5 select-none">
@@ -106,7 +92,7 @@ export const FiltersTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
         <div className="w-px h-5 bg-border/80 shrink-0" />
         <div className="grow overflow-x-auto flex items-center gap-2 pb-0.5 whitespace-nowrap" style={{ scrollbarWidth: "none" }}>
           {FILTER_CATEGORIES.map((category) => (
-            <button key={category.id} onClick={() => setActiveCategory(category.id)} className={`px-2 py-0.5 rounded-sm text-xs font-semibold transition-all cursor-pointer ${activeCategory === category.id ? "bg-accent text-white" : "text-text-muted hover:text-text-primary hover:bg-surface-raised/40"}`}>
+            <button key={category.id} onClick={() => setActiveCategory(category.id)} className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer shrink-0 ${activeCategory === category.id ? "bg-accent text-white shadow-sm" : "text-text-muted hover:text-text-primary hover:bg-surface-raised/60"}`}>
               {category.label}
             </button>
           ))}
@@ -120,7 +106,7 @@ export const FiltersTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
         </div>
       </div>
 
-      <div className="grow overflow-y-auto scrollbar-thin p-2">
+      <div className="grow overflow-y-auto scrollbar-thin p-1" style={{ scrollbarWidth: "none" }}>
         {categoryError && (
           <div className="mb-3 p-3 rounded-lg border border-red-500/20 bg-red-500/5 text-red-200 flex items-start gap-2.5 text-xs">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
@@ -178,14 +164,13 @@ const SkeletonCard = () => (
 
 const FilterCard: React.FC<{ filter: FilterAsset; onAddToTimeline: () => void }> = ({ filter, onAddToTimeline }) => {
   const Icon = FILTER_ICONS[filter.id] || DEFAULT_ICON;
-  const isReady = (filter as any).status !== "soon";
+  const isReady = true; // All filters are ready (status field is just for UI labeling)
 
   const { getFilterDownloadState, startFilterDownload, isFilterDownloaded } = useVideoEffectsStore();
 
   const downloadState = getFilterDownloadState(filter.id);
   const isDownloadedFlag = isFilterDownloaded(filter.id);
   const isDownloading = downloadState?.status === "downloading";
-  const hasError = downloadState?.status === "error";
 
   // Use filter-specific preview, or fallback to sample image for testing
   const previewSrc = filter.thumbnail || "/filter-previews/sample.jpg";
@@ -238,8 +223,21 @@ const FilterCard: React.FC<{ filter: FilterAsset; onAddToTimeline: () => void }>
     if (!isReady || isDownloading) return;
 
     try {
-      await startFilterDownload(filter);
+      console.log(`[FilterCard] Adding filter "${filter.name}" to timeline`);
+
+      // Download filter JSON with minimum delay for visual feedback
+      const downloadPromise = startFilterDownload(filter);
+      const delayPromise = new Promise((resolve) => setTimeout(resolve, 300));
+
+      await Promise.all([downloadPromise, delayPromise]);
+      console.log(`[FilterCard] Filter "${filter.name}" downloaded successfully`);
+
+      // Add to timeline
       onAddToTimeline();
+      console.log(`[FilterCard] Filter "${filter.name}" added to timeline`);
+
+      // Show success feedback
+      useProjectStore.getState().showToast(`Added ${filter.name} filter`);
     } catch (error) {
       console.error("[FilterCard] Add to timeline failed:", error);
       useProjectStore.getState().showToast("Failed to add filter", "error");
@@ -255,14 +253,6 @@ const FilterCard: React.FC<{ filter: FilterAsset; onAddToTimeline: () => void }>
             <Loader2 className="w-6 h-6 text-accent animate-spin" />
             <span className="text-[10px] font-semibold text-accent">{downloadState?.progress || 0}%</span>
           </div>
-        </div>
-      )}
-
-      {/* Error Overlay */}
-      {hasError && (
-        <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center gap-1 text-red-400">
-          <AlertCircle className="w-5 h-5" />
-          <span className="text-[10px] font-semibold">Failed</span>
         </div>
       )}
 

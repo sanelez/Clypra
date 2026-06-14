@@ -185,7 +185,6 @@ const AudioItem: React.FC<AudioItemProps> = ({ item, onAddToTimeline }) => {
   };
 
   const isDownloading = downloadState?.status === "downloading";
-  const hasError = downloadState?.status === "error";
 
   return (
     <div onClick={handlePreview} className="group flex items-center gap-3 p-1 bg-surface-raised/40 hover:bg-surface-raised/60 rounded-lg transition-colors cursor-pointer">
@@ -232,12 +231,6 @@ const AudioItem: React.FC<AudioItemProps> = ({ item, onAddToTimeline }) => {
               <span className="flex items-center gap-1 text-[10px] text-accent">
                 <Download className="w-3 h-3" />
                 {downloadState.progress}%
-              </span>
-            )}
-            {hasError && (
-              <span className="flex items-center gap-1 text-[10px] text-red-400">
-                <AlertCircle className="w-3 h-3" />
-                Failed
               </span>
             )}
           </div>

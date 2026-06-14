@@ -27,11 +27,23 @@ export const EditorLayout: React.FC = () => {
     return <MobileEditorLayout />;
   }
 
-  const { tracks, clips, addClip, updateClip, insertTrackAt, getTimelineEndTime, createTransitionBetweenClips } = useTimelineStore();
+  // Only subscribe to actions, not state - prevents re-renders when clips/tracks change
+  const addClip = useTimelineStore((s) => s.addClip);
+  const updateClip = useTimelineStore((s) => s.updateClip);
+  const insertTrackAt = useTimelineStore((s) => s.insertTrackAt);
+  const getTimelineEndTime = useTimelineStore((s) => s.getTimelineEndTime);
+  const createTransitionBetweenClips = useTimelineStore((s) => s.createTransitionBetweenClips);
+
+  // Read state only when needed in the handler (not as subscriptions)
+  const getTimelineState = () => {
+    const state = useTimelineStore.getState();
+    return { tracks: state.tracks, clips: state.clips };
+  };
   const { mediaAssets, project, updateProject, addMediaAsset } = useProjectStore();
   const { selectedClipIds } = useUIStore();
 
   const findAdjacentClipsAtPlayhead = () => {
+    const { tracks, clips } = getTimelineState();
     const playheadTime = getPlaybackClock().time;
     for (const track of tracks.filter((candidate) => candidate.type !== "audio" && !candidate.locked)) {
       const sorted = clips.filter((clip) => clip.trackId === track.id).sort((a, b) => a.startTime - b.startTime);
@@ -48,6 +60,9 @@ export const EditorLayout: React.FC = () => {
   const { getCachedFile } = useAudioLibraryStore();
 
   const handleAddToTimeline = (item: any, type: string) => {
+    // Get current timeline state
+    const { tracks, clips } = getTimelineState();
+
     // Handle different item types
     if (type === "media") {
       const mediaAsset = mediaAssets.find((asset) => asset.id === item.id);
@@ -388,11 +403,8 @@ export const EditorLayout: React.FC = () => {
         swatch: cachedFilter.filter.swatch || "",
       };
 
-      addClip(filterClip);
-      useProjectStore.getState().showToast(`Added ${cachedFilter.filter.name} filter`);
-
       addClip(filterClip as any);
-      useProjectStore.getState().showToast(`Added ${item.name} filter to timeline`);
+      useProjectStore.getState().showToast(`Added ${cachedFilter.filter.name} filter`);
     }
   };
 

@@ -32,7 +32,7 @@ export function OverlayPicker({ onSelect }: OverlayPickerProps) {
 
   const overlays = useMemo(() => {
     if (activeCategory === "All") {
-      const featuredOverlays = manifest?.featured.filter((item) => item.type === "overlay") as OverlayAsset[] || [];
+      const featuredOverlays = (manifest?.featured.filter((item) => item.type === "overlay") as OverlayAsset[]) || [];
       return featuredOverlays;
     } else {
       const cacheKey = `overlay:${activeCategory.toLowerCase()}`;
@@ -60,15 +60,7 @@ export function OverlayPicker({ onSelect }: OverlayPickerProps) {
       <div className="relative shrink-0 border-b border-border/40 bg-surface/5">
         <div className="grow overflow-x-auto flex items-center gap-1.5 p-2 scrollbar-none whitespace-nowrap">
           {OVERLAY_CATEGORIES.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                activeCategory === cat
-                  ? "bg-accent text-white"
-                  : "bg-surface-raised border border-border text-text-muted hover:text-text-primary"
-              }`}
-            >
+            <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${activeCategory === cat ? "bg-accent text-white" : "bg-surface-raised border border-border text-text-muted hover:text-text-primary"}`}>
               {cat}
             </button>
           ))}
@@ -79,13 +71,7 @@ export function OverlayPicker({ onSelect }: OverlayPickerProps) {
       <div className="p-3 shrink-0 border-b border-border/40">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-          <input
-            type="text"
-            placeholder="Search overlays..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-surface-raised border border-border/60 rounded-lg pl-9 pr-4 py-2 text-xs text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 transition-all selectable"
-          />
+          <input type="text" placeholder="Search overlays..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-surface-raised border border-border/60 rounded-lg pl-9 pr-4 py-2 text-xs text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 transition-all selectable" />
         </div>
       </div>
 
@@ -136,12 +122,7 @@ const OverlayCard: React.FC<{ overlay: OverlayAsset; onSelect: (overlay: Overlay
   const hasError = downloadState?.status === "error";
 
   return (
-    <div
-      className="group relative aspect-square bg-surface-raised hover:bg-surface-raised/60 rounded-lg overflow-hidden transition-all border border-border hover:border-accent/30 cursor-pointer"
-      onClick={() => !isDownloading && onSelect(overlay)}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
+    <div className="group relative aspect-square bg-surface-raised hover:bg-surface-raised/60 rounded-lg overflow-hidden transition-all border border-border hover:border-accent/30 cursor-pointer" onClick={() => !isDownloading && onSelect(overlay)} onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)}>
       {overlay.isPremium && (
         <div className="absolute top-2 left-2 z-10">
           <div className="bg-linear-to-r from-purple-500 to-pink-500 rounded-full p-1">
@@ -164,14 +145,6 @@ const OverlayCard: React.FC<{ overlay: OverlayAsset; onSelect: (overlay: Overlay
         <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center gap-1">
           <Loader2 className="w-5 h-5 text-accent animate-spin" />
           <span className="text-[10px] text-accent font-semibold">{downloadState?.progress || 0}%</span>
-        </div>
-      )}
-
-      {/* Error Overlay */}
-      {hasError && (
-        <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center gap-1 text-red-400">
-          <AlertCircle className="w-5 h-5" />
-          <span className="text-[10px] font-semibold">Failed</span>
         </div>
       )}
 

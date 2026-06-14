@@ -190,7 +190,6 @@ const EffectCard: React.FC<{ effect: EffectPreset; onAddToTimeline: () => void }
   const downloadState = getEffectDownloadState(effect.id);
   const isDownloadedFlag = isEffectDownloaded(effect.id);
   const isDownloading = downloadState?.status === "downloading";
-  const hasError = downloadState?.status === "error";
 
   // Handle preview (download effect JSON first)
   const handlePreview = async () => {
@@ -232,14 +231,6 @@ const EffectCard: React.FC<{ effect: EffectPreset; onAddToTimeline: () => void }
             <Loader2 className="w-6 h-6 text-accent animate-spin" />
             <span className="text-[10px] font-semibold text-accent">{downloadState?.progress || 0}%</span>
           </div>
-        </div>
-      )}
-
-      {/* Error Overlay */}
-      {hasError && (
-        <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center gap-1 text-red-400">
-          <AlertCircle className="w-5 h-5" />
-          <span className="text-[10px] font-semibold">Failed</span>
         </div>
       )}
 

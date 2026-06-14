@@ -5,9 +5,10 @@
  * 1. Overlay Assets (smoke, fire, light leaks, etc.)
  * 2. Effect Presets (shake, blur, glitch, etc.)
  * 3. Transitions (zoom, dissolve, wipe, etc.)
+ * 4. Filter Assets (color filters from JSON definitions)
  */
 
-import { VideoEffectManifest, VideoEffectItem, OverlayAsset, EffectPreset, TransitionPreset, VideoEffectCategory, EffectCategory } from "../types";
+import { VideoEffectManifest, VideoEffectItem, OverlayAsset, EffectPreset, TransitionPreset, FilterAsset, VideoEffectCategory, EffectCategory } from "../types";
 
 const BASE = "https://clypra-worker-api.abdulkabirmusa.com";
 const API_KEY = import.meta.env.VITE_CLYPRA_API_KEY || "";
@@ -146,6 +147,14 @@ export class VideoEffectsApi {
     return items as TransitionPreset[];
   }
 
+  /**
+   * Fetch filter assets by category
+   */
+  static async getFilters(category: string): Promise<FilterAsset[]> {
+    const items = await this.getItemsByCategory("filter", category);
+    return items as FilterAsset[];
+  }
+
   // ============================================================================
   // INDIVIDUAL ITEMS
   // ============================================================================
@@ -195,6 +204,14 @@ export class VideoEffectsApi {
   static async getTransition(category: string, id: string): Promise<TransitionPreset> {
     const item = await this.getItem("transition", category, id);
     return item as TransitionPreset;
+  }
+
+  /**
+   * Fetch a specific filter asset
+   */
+  static async getFilter(category: string, id: string): Promise<FilterAsset> {
+    const item = await this.getItem("filter", category, id);
+    return item as FilterAsset;
   }
 
   // ============================================================================
