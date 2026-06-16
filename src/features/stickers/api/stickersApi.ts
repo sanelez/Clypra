@@ -14,21 +14,9 @@ export interface StickerItem {
   tags?: string[];
 }
 
-const BASE = "https://clypra-worker-api.abdulkabirmusa.com";
-const API_KEY = import.meta.env.VITE_CLYPRA_API_KEY || "";
+import { getApiHeaders, getApiBaseUrl } from "@/lib/api";
 
-const getHeaders = (): HeadersInit => {
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-    "X-Clypra-Client": "clypra-desktop-v1",
-  };
-
-  if (API_KEY) {
-    headers["X-API-Key"] = API_KEY;
-  }
-
-  return headers;
-};
+const BASE = getApiBaseUrl();
 
 export const STICKER_CATEGORIES: StickerCategory[] = ["trending", "football", "classic", "new", "animal-meme", "hits", "free-fire", "icons", "emoji", "fun", "emphasis", "cover-ups", "wrong", "love", "letters", "mood", "sale", "gaming", "text-sticker", "vlog", "collage", "y2k", "countdown", "music-festival", "journal", "campus", "cartoon", "animal", "fashion", "eco-friendly", "basketball", "birthday", "barbie", "vibes", "shimmer", "glitter", "frame", "travel", "winter", "fall", "neon-text", "details", "techniques", "lip-illustration", "handwriting", "retro-character", "illustration", "alphabet", "pixelated-style", "bubble", "weather", "label", "plog", "cyber", "stylish", "food", "shapes"];
 
@@ -36,7 +24,7 @@ export const StickersApi = {
   async getStickersIndex(): Promise<StickerItem[]> {
     const res = await fetch(`${BASE}/stickers`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error("Failed to load stickers library");
     return res.json();
@@ -45,7 +33,7 @@ export const StickersApi = {
   async getStickersByCategory(category: StickerCategory): Promise<StickerItem[]> {
     const res = await fetch(`${BASE}/stickers/${category}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load stickers category: ${category}`);
     return res.json();
@@ -54,7 +42,7 @@ export const StickersApi = {
   async getSticker(category: string, id: string): Promise<StickerItem> {
     const res = await fetch(`${BASE}/stickers/${category}/${id}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load sticker: ${id}`);
     return res.json();

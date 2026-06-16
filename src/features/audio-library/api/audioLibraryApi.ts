@@ -25,21 +25,9 @@ export interface AudioLibraryItem {
   isPremium?: boolean;
 }
 
-const BASE = "https://clypra-worker-api.abdulkabirmusa.com";
-const API_KEY = import.meta.env.VITE_CLYPRA_API_KEY || "";
+import { getApiHeaders, getApiBaseUrl } from "@/lib/api";
 
-const getHeaders = (): HeadersInit => {
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-    "X-Clypra-Client": "clypra-desktop-v1",
-  };
-
-  if (API_KEY) {
-    headers["X-API-Key"] = API_KEY;
-  }
-
-  return headers;
-};
+const BASE = getApiBaseUrl();
 
 export const AUDIO_LIBRARY_CATEGORIES: AudioLibraryCategory[] = ["music", "lo-fi", "chill", "cinematic", "epic", "upbeat", "corporate", "hip-hop", "trap", "electronic", "synth", "acoustic", "indie", "jazz", "soul", "ambient", "background", "sfx", "transition", "impact", "ui", "notifications", "voice"];
 
@@ -47,7 +35,7 @@ export const AudioLibraryApi = {
   async getAudioIndex(): Promise<AudioLibraryItem[]> {
     const res = await fetch(`${BASE}/audio`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error("Failed to load audio library");
     return res.json();
@@ -56,7 +44,7 @@ export const AudioLibraryApi = {
   async getAudioByCategory(category: AudioLibraryCategory): Promise<AudioLibraryItem[]> {
     const res = await fetch(`${BASE}/audio/${category}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load audio category: ${category}`);
     return res.json();
@@ -65,7 +53,7 @@ export const AudioLibraryApi = {
   async getAudioAsset(category: string, id: string): Promise<AudioLibraryItem> {
     const res = await fetch(`${BASE}/audio/${category}/${id}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load audio asset: ${id}`);
     return res.json();

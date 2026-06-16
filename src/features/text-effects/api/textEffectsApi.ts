@@ -1,5 +1,6 @@
 import { TextEffectDefinition } from "../types/types";
 import { TemplateDefinition } from "@/features/text-templates/types";
+import { getApiHeaders, getApiBaseUrl } from "@/lib/api";
 
 export interface TextEffectSummary {
   id: string;
@@ -10,22 +11,7 @@ export interface TextEffectSummary {
   description: string;
 }
 
-const BASE = "https://clypra-worker-api.abdulkabirmusa.com";
-const API_KEY = import.meta.env.VITE_CLYPRA_API_KEY || "";
-
-// Helper function to create headers with API key
-const getHeaders = (): HeadersInit => {
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-    "X-Clypra-Client": "clypra-desktop-v1",
-  };
-
-  if (API_KEY) {
-    headers["X-API-Key"] = API_KEY;
-  }
-
-  return headers;
-};
+const BASE = getApiBaseUrl();
 
 export const TextEffectsApi = {
   // In-memory cache map to avoid duplicate network calls when users toggle effects
@@ -36,7 +22,7 @@ export const TextEffectsApi = {
   async checkApiHealth(): Promise<boolean> {
     try {
       const res = await fetch(`${BASE}/health`, {
-        headers: getHeaders(),
+        headers: getApiHeaders(),
       });
       if (!res.ok) return false;
       const data = await res.json();
@@ -50,7 +36,7 @@ export const TextEffectsApi = {
   async getEffectsIndex(): Promise<TextEffectSummary[]> {
     const res = await fetch(`${BASE}/effects`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error("Failed to load effects index");
     return res.json();
@@ -59,7 +45,7 @@ export const TextEffectsApi = {
   async getEffectsByCategory(category: string): Promise<TextEffectSummary[]> {
     const res = await fetch(`${BASE}/effects/${category}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load category manifest for: ${category}`);
     return res.json();
@@ -75,7 +61,7 @@ export const TextEffectsApi = {
     } else {
       const res = await fetch(`${BASE}/effects/${category}/${id}`, {
         cache: "reload",
-        headers: getHeaders(),
+        headers: getApiHeaders(),
       });
       if (!res.ok) throw new Error(`Failed to load heavy configuration for effect: ${id}`);
 
@@ -100,7 +86,7 @@ export const TextEffectsApi = {
   async getTemplatesIndex(): Promise<TemplateDefinition[]> {
     const res = await fetch(`${BASE}/templates`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error("Failed to load templates index");
     return res.json();
@@ -109,7 +95,7 @@ export const TextEffectsApi = {
   async getTemplatesByCategory(category: string): Promise<TemplateDefinition[]> {
     const res = await fetch(`${BASE}/templates/${category}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load templates for category: ${category}`);
     return res.json();
@@ -124,7 +110,7 @@ export const TextEffectsApi = {
 
     const res = await fetch(`${BASE}/templates/${category}/${id}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load Lottie animation payload for: ${id}`);
 
@@ -150,7 +136,7 @@ export const TextEffectsApi = {
   async purgeServerKVCache(): Promise<{ success: boolean; totalDeleted: number; results: any[] }> {
     const res = await fetch(`${BASE}/admin/purge-kv`, {
       method: "POST",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
 
     if (!res.ok) {
@@ -167,7 +153,7 @@ export const TextEffectsApi = {
   async purgeServerCacheAPI(): Promise<{ success: boolean; purged: number; total: number }> {
     const res = await fetch(`${BASE}/admin/purge-cache`, {
       method: "POST",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
 
     if (!res.ok) {
@@ -191,7 +177,7 @@ export const TextEffectsApi = {
     // Clear server-side caches
     const res = await fetch(`${BASE}/admin/purge-all`, {
       method: "POST",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
 
     if (!res.ok) {

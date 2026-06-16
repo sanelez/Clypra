@@ -7,23 +7,9 @@
  */
 
 import { VideoEffectManifest, VideoEffectItem, EffectPreset, VideoEffectCategory, EffectCategory } from "../types";
+import { getApiHeaders, getApiBaseUrl } from "@/lib/api";
 
-const BASE = "https://clypra-worker-api.abdulkabirmusa.com";
-const API_KEY = import.meta.env.VITE_CLYPRA_API_KEY || "";
-
-// Helper function to create headers with API key
-const getHeaders = (): HeadersInit => {
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-    "X-Clypra-Client": "clypra-desktop-v1",
-  };
-
-  if (API_KEY) {
-    headers["X-API-Key"] = API_KEY;
-  }
-
-  return headers;
-};
+const BASE = getApiBaseUrl();
 
 export class VideoEffectsApi {
   // In-memory caches
@@ -42,7 +28,7 @@ export class VideoEffectsApi {
   static async getVideoEffectsManifest(): Promise<any> {
     const res = await fetch(`${BASE}/video-effects/v2/manifest`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
 
     if (!res.ok) {
@@ -58,7 +44,7 @@ export class VideoEffectsApi {
   static async getRendererEffects(): Promise<EffectPreset[]> {
     const res = await fetch(`${BASE}/video-effects/v2/effects`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
 
     if (!res.ok) {
@@ -74,7 +60,7 @@ export class VideoEffectsApi {
   static async getRendererEffectsByCategory(category: string): Promise<EffectPreset[]> {
     const res = await fetch(`${BASE}/video-effects/v2/effects/${category}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
 
     if (!res.ok) {
@@ -90,7 +76,7 @@ export class VideoEffectsApi {
   static async getRendererEffectById(id: string): Promise<EffectPreset> {
     const res = await fetch(`${BASE}/video-effects/v2/effects/by-id/${id}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
 
     if (!res.ok) {
@@ -110,7 +96,7 @@ export class VideoEffectsApi {
       return this._blobCache.get(cacheKey)!;
     }
 
-    const res = await fetch(`https://raw.githubusercontent.com/AIEraDev/clypra-api/main/public/effect-previews/${category}/${effectId}.webm`, { headers: getHeaders() });
+    const res = await fetch(`https://raw.githubusercontent.com/AIEraDev/clypra-api/main/public/effect-previews/${category}/${effectId}.webm`, { headers: getApiHeaders() });
 
     if (!res.ok) {
       throw new Error(`Failed to download preview for effect "${effectId}": ${res.statusText}`);
@@ -134,7 +120,7 @@ export class VideoEffectsApi {
    */
   static async searchRendererEffects(query: string): Promise<EffectPreset[]> {
     const res = await fetch(`${BASE}/video-effects/v2/search?q=${encodeURIComponent(query)}`, {
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
 
     if (!res.ok) {
@@ -150,7 +136,7 @@ export class VideoEffectsApi {
   static async getBodyEffects(): Promise<EffectPreset[]> {
     const res = await fetch(`${BASE}/effects/body`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
 
     if (!res.ok) {
@@ -166,7 +152,7 @@ export class VideoEffectsApi {
   static async getEffectById(id: string): Promise<EffectPreset> {
     const res = await fetch(`${BASE}/effects/${id}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
 
     if (!res.ok) {

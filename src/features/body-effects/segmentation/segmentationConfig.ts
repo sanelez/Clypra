@@ -1,7 +1,7 @@
 import type { BodySegmentationRuntime, BodySegmentationRuntimeConfig } from "./types";
+import { getApiHeaders, getApiBaseUrl } from "@/lib/api";
 
-const API_BASE = "https://clypra-worker-api.abdulkabirmusa.com";
-const API_KEY = import.meta.env.VITE_CLYPRA_API_KEY || "";
+const API_BASE = getApiBaseUrl();
 
 let configPromise: Promise<BodySegmentationRuntimeConfig> | null = null;
 
@@ -11,19 +11,6 @@ function getEnvValue(key: string): string | undefined {
 
 function normalizeRuntime(value: unknown): BodySegmentationRuntime | null {
   return value === "heuristic" || value === "onnx" || value === "mediapipe" ? value : null;
-}
-
-function getHeaders(): HeadersInit {
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-    "X-Clypra-Client": "clypra-desktop-v1",
-  };
-
-  if (API_KEY) {
-    headers["X-API-Key"] = API_KEY;
-  }
-
-  return headers;
 }
 
 function envOverrides(): Partial<BodySegmentationRuntimeConfig> {
@@ -40,7 +27,7 @@ function envOverrides(): Partial<BodySegmentationRuntimeConfig> {
 async function fetchRemoteConfig(): Promise<BodySegmentationRuntimeConfig> {
   const response = await fetch(`${API_BASE}/effects/segmentation-config`, {
     cache: "reload",
-    headers: getHeaders(),
+    headers: getApiHeaders(),
   });
 
   if (!response.ok) {

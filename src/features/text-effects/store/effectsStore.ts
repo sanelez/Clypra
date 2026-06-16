@@ -5,9 +5,9 @@ import { TextEffectsApi } from "../api/textEffectsApi";
 import { builtInPresets } from "@clypra/engine";
 import type { TextEffectConfig } from "@clypra/engine";
 import { getTextEffectCache } from "../cache/persistentCache";
+import { getApiHeaders, getApiBaseUrl } from "@/lib/api";
 
-const API_BASE = "https://clypra-worker-api.abdulkabirmusa.com";
-const API_KEY = import.meta.env.VITE_CLYPRA_API_KEY || "";
+const API_BASE = getApiBaseUrl();
 
 type BoundingBoxSpec = {
   paddingX: number;
@@ -17,20 +17,6 @@ type BoundingBoxSpec = {
 
 type EffectDefinitionWithBounds = EffectFullDefinition & {
   boundingBox?: BoundingBoxSpec;
-};
-
-// Helper function to create headers with API key
-const getHeaders = (): HeadersInit => {
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-    "X-Clypra-Client": "clypra-desktop-v1",
-  };
-
-  if (API_KEY) {
-    headers["X-API-Key"] = API_KEY;
-  }
-
-  return headers;
 };
 
 function convertConfigToDefinition(preset: any): EffectDefinitionWithBounds {
@@ -282,7 +268,7 @@ export const useEffectsStore = create<EffectsState>((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/effects/${catKey}`, {
         cache: "reload",
-        headers: getHeaders(),
+        headers: getApiHeaders(),
       });
 
       // Handle 404 as empty category (category doesn't exist yet on API)
@@ -339,7 +325,7 @@ export const useEffectsStore = create<EffectsState>((set, get) => ({
     const catKey = category.toLowerCase();
     const res = await fetch(`${API_BASE}/effects/${catKey}/${id}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json()) as EffectFullDefinition;
@@ -392,7 +378,7 @@ export const useEffectsStore = create<EffectsState>((set, get) => ({
 
     fetch(`${API_BASE}/effects/${catKey}/${id}`, {
       cache: "reload",
-      headers: getHeaders(),
+      headers: getApiHeaders(),
     })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
