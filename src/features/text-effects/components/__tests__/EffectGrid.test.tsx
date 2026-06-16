@@ -7,9 +7,9 @@ import { useUIStore } from "@/store/uiStore";
 import { TextEffectsApi } from "../../api/textEffectsApi";
 import type { TextEffectDefinition } from "../../types/types";
 
-// Mock ClypraApi
-vi.mock("../../api/clypraApi", () => ({
-  ClypraApi: {
+// Mock TextEffectsApi
+vi.mock("../../api/textEffectsApi", () => ({
+  TextEffectsApi: {
     getFullEffect: vi.fn(),
   },
 }));

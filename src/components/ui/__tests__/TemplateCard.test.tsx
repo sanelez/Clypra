@@ -9,9 +9,9 @@ vi.mock("@/features/text-templates/LottiePlayer", () => ({
   LottiePlayer: vi.fn(() => <div data-testid="mock-lottie-player" />),
 }));
 
-// Mock ClypraApi
-vi.mock("@/features/text-effects/api/clypraApi", () => ({
-  ClypraApi: {
+// Mock TextEffectsApi
+vi.mock("@/features/text-effects/api/textEffectsApi", () => ({
+  TextEffectsApi: {
     getLottieTemplate: vi.fn(),
   },
 }));
