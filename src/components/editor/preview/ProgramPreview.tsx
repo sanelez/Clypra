@@ -298,6 +298,29 @@ export const ProgramPreview: React.FC = () => {
     }
   }, [project, clips, setDuration, setFrameRate]);
 
+  // Auto-seek to first clip if playhead is at 0 and no clips exist at time 0
+  useEffect(() => {
+    if (clips.length === 0 || clockState.state === "playing") return;
+
+    const currentTime = clockState.time;
+
+    // Only auto-seek if we're at time 0 or before the first clip
+    if (currentTime > 0.1) return;
+
+    // Check if there's any content at current time
+    const hasContentAtCurrentTime = clips.some((clip) => clip.startTime <= currentTime && currentTime < clip.startTime + clip.duration);
+
+    if (!hasContentAtCurrentTime) {
+      // Find the earliest clip start time
+      const earliestStartTime = Math.min(...clips.map((clip) => clip.startTime));
+
+      // Only seek if there's a clip that starts after current time
+      if (earliestStartTime > currentTime) {
+        seek(earliestStartTime);
+      }
+    }
+  }, [clips, clockState.time, clockState.state, seek]);
+
   useEffect(() => {
     if (!aspectMenuOpen) return;
     const onMouseDown = (e: MouseEvent) => {

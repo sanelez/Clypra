@@ -6,7 +6,7 @@ import { useProjectStore } from "@/store/projectStore";
 import { useHistoryStore } from "@/store/historyStore";
 import { TransformClipCommand } from "@/core/history/commands/TransformCommand";
 import { calculateClipDimensions, type ClipFitModeExtended } from "@/lib/timeline/timelineClip";
-import { recalculateTextClipBounds } from "@/lib/text/textClip";
+import { resolveTextClipStyleUpdate } from "@/lib/text/textClip";
 import type { Clip, TextClip } from "@/types";
 import { usePresetStore } from "@/store/presetStore";
 
@@ -20,15 +20,6 @@ import { TransitionSection } from "./properties/TransitionSection";
 import { StickerSettingsSection } from "./properties/StickerSettingsSection";
 import { TimelineEffectSection } from "./properties/TimelineEffectSection";
 
-const TEXT_BOUNDS_STYLE_KEYS: (keyof TextClip)[] = ["text", "fontSize", "fontFamily", "fontWeight", "fontStyle", "styleId", "stroke", "shadow", "background", "letterSpacing", "lineHeight"];
-const MANUAL_BOUNDS_KEYS: (keyof Clip)[] = ["x", "y", "width", "height"];
-
-export function shouldRecalculateTextBoundsForPropertyUpdate(updates: Record<string, unknown>): boolean {
-  const hasManualBounds = MANUAL_BOUNDS_KEYS.some((key) => key in updates);
-  const hasStyleChange = TEXT_BOUNDS_STYLE_KEYS.some((key) => key in updates);
-  return hasStyleChange && !hasManualBounds;
-}
-
 export function buildClipPropertyTransform(clip: Clip, updates: Record<string, unknown>, canvasWidth: number, canvasHeight: number): { oldTransform: Record<string, unknown>; newTransform: Record<string, unknown> } {
   let newTransform = { ...updates };
 
@@ -41,15 +32,8 @@ export function buildClipPropertyTransform(clip: Clip, updates: Record<string, u
     };
   }
 
-  if ("text" in clip && shouldRecalculateTextBoundsForPropertyUpdate(updates)) {
-    const recalculated = recalculateTextClipBounds(clip as TextClip, updates as Partial<TextClip>, canvasWidth, canvasHeight);
-    newTransform = {
-      ...newTransform,
-      x: recalculated.x,
-      y: recalculated.y,
-      width: recalculated.width,
-      height: recalculated.height,
-    };
+  if ("text" in clip) {
+    newTransform = resolveTextClipStyleUpdate(clip as TextClip, newTransform as Partial<TextClip>, canvasWidth, canvasHeight) as Record<string, unknown>;
   }
 
   const oldTransform: Record<string, unknown> = {};

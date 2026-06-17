@@ -298,7 +298,7 @@ export const useEffectsStore = create<EffectsState>((set, get) => ({
     }
 
     // 6. Fallback: Scan known categories
-    const ALL_CATEGORIES = ["3d", "neon", "metallic", "glitch", "retro", "gradient", "grunge", "outline", "shadow", "elements", "luxury"];
+    const ALL_CATEGORIES = ["3d", "neon", "metallic", "glitch", "retro", "gradient", "grunge", "outline", "shadow", "elements", "luxury", "essentials", "color", "light", "stylize", "distort", "vintage", "modern", "cinematic", "bw", "classic", "clean", "organic"];
     for (const cat of ALL_CATEGORIES) {
       try {
         const categoryManifest = await TextEffectsApi.getEffectsByCategory(cat);

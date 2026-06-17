@@ -7,7 +7,7 @@ export function isTextRenderTraceEnabled(): boolean {
 
 export function textRenderTrace(stage: string, payload: Record<string, unknown>): void {
   if (!isTextRenderTraceEnabled()) return;
-  console.debug(`[TextRenderTrace:${stage}]`, payload);
+  console.log(`[TextRenderTrace:${stage}]`, payload);
 }
 
 export function textRenderWarn(stage: string, payload: Record<string, unknown>): void {
@@ -15,7 +15,14 @@ export function textRenderWarn(stage: string, payload: Record<string, unknown>):
   console.warn(`[TextRenderTrace:${stage}]`, payload);
 }
 
-export function sampleCanvasAlpha(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number): { visiblePixels: number; sampledPixels: number; alphaMax: number } | null {
+export interface CanvasAlphaBounds {
+  visiblePixels: number;
+  sampledPixels: number;
+  alphaMax: number;
+  bounds: { x: number; y: number; width: number; height: number } | null;
+}
+
+export function sampleCanvasAlpha(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number): CanvasAlphaBounds | null {
   if (!isTextRenderTraceEnabled()) return null;
 
   try {
@@ -26,15 +33,33 @@ export function sampleCanvasAlpha(ctx: CanvasRenderingContext2D | OffscreenCanva
     let visiblePixels = 0;
     let sampledPixels = 0;
     let alphaMax = 0;
+    let minX = w;
+    let minY = h;
+    let maxX = -1;
+    let maxY = -1;
 
     for (let i = 3; i < image.data.length; i += step) {
       const alpha = image.data[i];
-      if (alpha > 8) visiblePixels++;
+      if (alpha > 8) {
+        visiblePixels++;
+        const pixel = Math.floor((i - 3) / 4);
+        const x = pixel % w;
+        const y = Math.floor(pixel / w);
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
       if (alpha > alphaMax) alphaMax = alpha;
       sampledPixels++;
     }
 
-    return { visiblePixels, sampledPixels, alphaMax };
+    return {
+      visiblePixels,
+      sampledPixels,
+      alphaMax,
+      bounds: maxX >= minX && maxY >= minY ? { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 } : null,
+    };
   } catch (error) {
     textRenderWarn("alpha-sample-failed", { error });
     return null;

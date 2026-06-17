@@ -131,7 +131,7 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
       const transitionState = evaluateTransitionState(clip, transitionWindows);
 
       const styleDefinition = textClip.styleId ? useEffectsStore.getState().definitions[textClip.styleId] ?? textClip.styleDefinition : textClip.styleDefinition;
-      textRenderTrace("evaluate-text-clip", {
+      textRenderTrace("text-evaluate-layer", {
         clipId: clip.id,
         evalTime,
         startTime: clip.startTime,
@@ -140,7 +140,7 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
         trackId: clip.trackId,
         role: clip.role,
         trackIndex: clip.trackIndex,
-        sourceGeometry: { x: clip.x, y: clip.y, width: clip.width, height: clip.height, opacity: clip.opacity },
+        contentBounds: { x: clip.x, y: clip.y, width: clip.width, height: clip.height, opacity: clip.opacity },
         styleId: textClip.styleId,
         hasStoreDefinition: !!(textClip.styleId && useEffectsStore.getState().definitions[textClip.styleId]),
         hasEmbeddedDefinition: !!textClip.styleDefinition,
@@ -206,14 +206,11 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
       };
 
       visualLayers.push(textLayer);
-      textRenderTrace("evaluated-text-layer", {
+      textRenderTrace("text-evaluate-layer", {
         clipId: textLayer.clipId,
         layerId: textLayer.layerId,
         zIndex: textLayer.zIndex,
-        x: textLayer.x,
-        y: textLayer.y,
-        width: textLayer.width,
-        height: textLayer.height,
+        contentBounds: { x: textLayer.x, y: textLayer.y, width: textLayer.width, height: textLayer.height },
         opacity: textLayer.opacity,
         fontFamily: textLayer.fontFamily,
         fontSize: textLayer.fontSize,
