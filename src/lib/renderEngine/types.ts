@@ -18,6 +18,9 @@
  * Heights target 16:9; the "align to mult of 4" constraint applies to
  * textureSize after DPR multiplication, not to the base tier dims.
  *
+ * CRITICAL: These dimensions MUST match src-tauri/src/thumbnail_engine/pyramid.rs SpatialTier::dims()
+ * Any mismatch will cause thumbnail blur/stretching bugs.
+ *
  * SRP zoom → tier mapping (default, configurable via SRP_CONFIG):
  *   L0: 0.25–0.5×  |  L1: 0.5–1×  |  L2: 1–2×  |  L3: 2–4×
  */
@@ -43,20 +46,26 @@ export const SPATIAL_TIER_DIMS: Record<SpatialTier, readonly [number, number]> =
  * Intervals are [base, near-edit] seconds.
  *
  * TSP viewport-density → tier mapping mirrors SpatialTier levels.
+ *
+ * CRITICAL: These values MUST match Rust DensityLevel::time_interval()
+ * See: src-tauri/src/thumbnail_engine/types.rs:187-196
  */
 export enum TemporalTier {
-  L0 = 0, // 2–4s base (1s near edits)
-  L1 = 1, // 1s  (0.5s near edits)
-  L2 = 2, // 0.5s (0.25s near edits)
-  L3 = 3, // 0.25s (0.12s near edits)
+  L0 = 0, // 5.0s base (2.5s near edits) - matches Rust DensityLevel::Low
+  L1 = 1, // 1.0s (0.5s near edits) - matches Rust DensityLevel::Medium
+  L2 = 2, // 0.2s (0.1s near edits) - matches Rust DensityLevel::High
+  L3 = 3, // 0.02s (0.01s near edits) - matches Rust DensityLevel::Ultra
 }
 
-/** [baseInterval, nearEditInterval] in seconds per temporal tier. */
+/**
+ * [baseInterval, nearEditInterval] in seconds per temporal tier.
+ * MUST stay in sync with Rust DensityLevel::time_interval()
+ */
 export const TEMPORAL_TIER_INTERVALS: Record<TemporalTier, readonly [number, number]> = {
-  [TemporalTier.L0]: [2.0, 1.0],
-  [TemporalTier.L1]: [1.0, 0.5],
-  [TemporalTier.L2]: [0.5, 0.25],
-  [TemporalTier.L3]: [0.25, 0.12],
+  [TemporalTier.L0]: [5.0, 2.5], // Matches Rust Low: 5.0
+  [TemporalTier.L1]: [1.0, 0.5], // Matches Rust Medium: 1.0
+  [TemporalTier.L2]: [0.2, 0.1], // Matches Rust High: 0.2
+  [TemporalTier.L3]: [0.02, 0.01], // Matches Rust Ultra: 0.02
 } as const;
 
 /** High-motion region density multiplier (R1). */
@@ -197,8 +206,12 @@ export type ArtifactSource = "backend-frame-cache" | "backend-tier-cache" | "fro
 export type ArtifactResidency = "gpu" | "cpu" | "disk";
 
 /**
- * Canonical backend→frontend transfer object (R6).
- * All backend→frontend communication uses this shape.
+ * Frontend RenderArtifact - contains ImageBitmap ready for rendering.
+ *
+ * This is the FRONTEND representation after conversion from BackendRenderArtifact.
+ * The conversion layer (transport.ts) handles RGBA bytes → ImageBitmap conversion.
+ *
+ * See: src/lib/renderEngine/transport.ts BackendRenderArtifact for the backend shape
  */
 export interface RenderArtifact {
   readonly frameId: string;

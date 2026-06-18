@@ -173,6 +173,8 @@ impl CacheKey {
     }
 }
 
+// CRITICAL: Must match src/types/index.ts DensityLevel enum
+// Serialized as lowercase strings via #[serde(rename_all = "lowercase")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DensityLevel {

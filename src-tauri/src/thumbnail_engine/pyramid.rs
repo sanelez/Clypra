@@ -19,12 +19,17 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use super::geometry::fit_preserving_aspect_aligned;
+
 // ─── SpatialTier ─────────────────────────────────────────────────────────────
 
 /// Four-tier spatial resolution pyramid.
 /// Dims are spec-defined; widths are multiples of 4.
 /// Heights target 16:9; texture alignment (mult of 4) is enforced on the
 /// frontend after DPR multiplication.
+///
+/// CRITICAL: These dimensions MUST match src/lib/renderEngine/types.ts SPATIAL_TIER_DIMS
+/// Any change here must be reflected on the frontend to prevent thumbnail blur/stretching.
 ///
 /// ResolutionTier (Tier1x/Tier2x) is kept as a deprecated alias in
 /// thumbnail_engine.rs during the transition period.
@@ -560,30 +565,14 @@ pub fn downsample_pyramid(
         .collect()
 }
 
-fn align_dimension(value: u32) -> u32 {
-    let aligned = value.max(1).div_ceil(2) * 2;
-    aligned.max(2)
-}
-
+/// Calculate aspect-preserving dimensions for a spatial tier.
+/// 
+/// Wrapper around shared geometry utility with tier-specific logic.
+/// DEPRECATED: Use geometry::fit_preserving_aspect_aligned directly.
+/// Kept for backward compatibility with existing call sites.
 pub fn aspect_preserving_tier_dims(src_w: u32, src_h: u32, tier: SpatialTier) -> (u32, u32) {
-    if src_w == 0 || src_h == 0 {
-        return tier.dims();
-    }
-
     let (tier_w, tier_h) = tier.dims();
-    let long_edge = tier_w.max(tier_h) as f64;
-    let src_w_f = src_w as f64;
-    let src_h_f = src_h as f64;
-
-    let (out_w, out_h) = if src_w >= src_h {
-        let scale = long_edge / src_w_f;
-        (long_edge.round() as u32, (src_h_f * scale).round() as u32)
-    } else {
-        let scale = long_edge / src_h_f;
-        ((src_w_f * scale).round() as u32, long_edge.round() as u32)
-    };
-
-    (align_dimension(out_w), align_dimension(out_h))
+    fit_preserving_aspect_aligned(src_w, src_h, tier_w, tier_h)
 }
 
 /// Scale an RGBA buffer using FFmpeg LANCZOS scaler.

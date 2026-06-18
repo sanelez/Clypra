@@ -171,7 +171,7 @@ export const createClipFromAsset = ({ asset, trackId, startTime, width, height, 
   const { x, y, width: clipWidth, height: clipHeight } = calculateClipDimensions(asset, width, height, fitMode);
 
   // Calculate source aspect ratio for transform constraints
-  const sourceAspectRatio = asset.width && asset.height ? asset.width / asset.height : clipWidth / clipHeight;
+  const sourceAspectRatio = asset.type !== "audio" && asset.width && asset.height ? asset.width / asset.height : clipWidth / clipHeight;
 
   const isSticker = asset.id.startsWith("sticker-");
   const kind = (isSticker ? "sticker" : asset.type) as Clip["kind"];
@@ -194,8 +194,10 @@ export const createClipFromAsset = ({ asset, trackId, startTime, width, height, 
     aspectRatioLocked: true, // Lock aspect ratio by default for video/images
     sourceAspectRatio,
     fitMode: fitMode as Clip["fitMode"],
-    stickerFormat: asset.stickerFormat,
-    stickerAnimationPath: asset.stickerAnimationPath,
-    stickerSourceId: asset.stickerSourceId,
+    ...(asset.type !== "audio" && {
+      stickerFormat: asset.stickerFormat,
+      stickerAnimationPath: asset.stickerAnimationPath,
+      stickerSourceId: asset.stickerSourceId,
+    }),
   };
 };
