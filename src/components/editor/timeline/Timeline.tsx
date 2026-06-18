@@ -318,6 +318,8 @@ export const Timeline: React.FC = () => {
     <div className="h-60 md:h-80 flex flex-col select-none relative" style={{ backgroundColor: "var(--color-timeline-bg)" }}>
       <TimelineToolbar />
 
+      <div className="absolute top-[40px] left-0 right-0 bottom-0 bg-(--color-timeline-ruler-bg)" style={{ zIndex: 120, width: `${TIMELINE_TRACK_LABEL_WIDTH_PX}px`, minWidth: `${TIMELINE_TRACK_LABEL_WIDTH_PX}px` }}></div>
+
       <div className="flex-1 overflow-hidden">
         {/* ── Single scroll container with CSS Grid ─────────────────────── */}
         <div
@@ -344,7 +346,7 @@ export const Timeline: React.FC = () => {
                 position: "sticky",
                 top: 0,
                 left: 0,
-                zIndex: 120,
+                zIndex: 150,
                 height: "24px",
                 width: `${TIMELINE_TRACK_LABEL_WIDTH_PX}px`,
                 minWidth: `${TIMELINE_TRACK_LABEL_WIDTH_PX}px`,

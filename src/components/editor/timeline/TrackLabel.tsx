@@ -31,7 +31,7 @@ export const TrackLabel: React.FC<TrackLabelProps> = ({ track }) => {
         height: `${track.height}px`,
         position: "sticky",
         left: 0,
-        zIndex: 120,
+        zIndex: 150,
         width: `${TIMELINE_TRACK_LABEL_WIDTH_PX}px`,
         minWidth: `${TIMELINE_TRACK_LABEL_WIDTH_PX}px`,
         flexShrink: 0,
