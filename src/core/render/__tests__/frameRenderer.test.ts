@@ -73,6 +73,7 @@ class MockOffscreenCanvas {
       arc: vi.fn(),
       stroke: vi.fn(),
       fill: vi.fn(),
+      setTransform: vi.fn(),
     };
   }
 

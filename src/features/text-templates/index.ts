@@ -4,7 +4,7 @@
  */
 
 export { useTemplateStore } from "./templateStore";
-export { injectText, injectColor, hexToLottieColor } from "./TemplateInjector";
 export { renderToFrameSequence, renderFrameSequenceToTauri } from "./FrameRenderer";
+export { TemplatePreviewPlayer, type TemplatePreviewPlayerHandle } from "./TemplatePreviewPlayer";
 
 export type { TemplateDefinition } from "./types";

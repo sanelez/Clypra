@@ -437,7 +437,9 @@ function evaluateTransitionState(clip: Clip, transitionWindows: ActiveTransition
 export function evaluateTimelineSceneCached(time: number, clips: Clip[], tracks: Track[], assets: MediaAsset[], project: Project | null, epoch: number = 0, transitions: TransitionTimelineItem[] = []): EvaluatedScene {
   const cache = getEvaluationCache();
   const clipVersion = computeClipVersion(clips, transitions);
-  const cacheKey = { time, epoch, clipVersion };
+  const canvasWidth = project?.canvasWidth ?? 1920;
+  const canvasHeight = project?.canvasHeight ?? 1080;
+  const cacheKey = { time, epoch, clipVersion, canvasWidth, canvasHeight };
 
   const cached = cache.get(cacheKey);
   if (cached) {

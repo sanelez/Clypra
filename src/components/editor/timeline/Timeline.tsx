@@ -6,7 +6,7 @@ import { RippleDeleteCommand } from "@/core/history/commands/RippleDeleteCommand
 import { DeleteClipCommand } from "@/core/history/commands/DeleteClipCommand";
 import { GapManager } from "@/lib/timeline/gapManager";
 import { usePreviewMode } from "@/hooks/usePreviewMode";
-import { usePlaybackClock, usePlaybackControls } from "@/hooks/usePlaybackClock";
+import { usePlaybackClock, usePlaybackControls, getPlaybackClock } from "@/hooks/usePlaybackClock";
 import { getTimelineViewportEnd } from "@/lib/timeline/timelineClip";
 import { useTimelineDrag } from "@/hooks/useTimelineDrag";
 import { useTimelineTauriDrop } from "@/hooks/useTimelineTauriDrop";
@@ -93,6 +93,7 @@ export const Timeline: React.FC = () => {
   const SCROLL_STATE_THROTTLE = 100; // Update React state only every 100ms during playback
 
   // Auto-scroll during playback: viewport tracking
+  // SMOOTH-2 fix: read clock inside RAF tick — effect only re-runs on isPlaying/pps/duration change
   useEffect(() => {
     const container = containerRef.current;
 
@@ -134,11 +135,13 @@ export const Timeline: React.FC = () => {
       if (!isPlaying || !container) return;
 
       const now = performance.now();
-      const playheadX = Math.round(currentTime * pixelsPerSecond);
+      // SMOOTH-2: Read live clock inside tick instead of closing over stale currentTime
+      const liveTime = getPlaybackClock().time;
+      const playheadX = Math.round(liveTime * pixelsPerSecond);
       const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
       let newScrollLeft = container.scrollLeft;
 
-      const isAtAbsoluteEnd = currentTime >= duration - 0.01;
+      const isAtAbsoluteEnd = liveTime >= duration - 0.01;
 
       if (isAtAbsoluteEnd) {
         newScrollLeft = maxScrollLeft;
@@ -185,7 +188,7 @@ export const Timeline: React.FC = () => {
         autoScrollRafRef.current = null;
       }
     };
-  }, [currentTime, pixelsPerSecond, isPlaying, duration, setScrollLeft, hasClips]);
+  }, [pixelsPerSecond, isPlaying, duration, setScrollLeft, hasClips]);
 
   // Handle keyboard shortcuts for timeline operations
   useEffect(() => {
@@ -467,6 +470,7 @@ export const Timeline: React.FC = () => {
                                 targetTrackId: dragState.targetTrackId,
                                 placementPreview: dragState.placementPreview,
                                 draggedBlockDuration: dragState.draggedBlockDuration,
+                                originalPlacements: dragState.originalPlacements,
                               }
                             : undefined
                         }

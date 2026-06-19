@@ -412,6 +412,56 @@ describe("Timeline Store - Gap Operations", () => {
       const gapAtPosition = trackGaps.find((g) => g.startTime >= 5 && g.startTime + g.duration <= 13);
       expect(gapAtPosition).toBeDefined();
     });
+
+    it("should preserve manual gap even if truncated/overlapped from the left", () => {
+      const store = useTimelineStore.getState();
+
+      // Clear all clips and set up specifically
+      store.hydrateFromProject({
+        tracks: [{ id: trackId, type: "video", name: "Video 1", height: 68, visible: true, muted: false, locked: false }],
+        clips: [
+          { id: "clip-1", trackId, mediaId: "media1", startTime: 0, duration: 5 },
+          { id: "clip-2", trackId, mediaId: "media2", startTime: 15, duration: 5 }
+        ],
+        transitions: [],
+        gaps: []
+      } as any);
+
+      // We should have a natural gap at 5-15 (10s)
+      store.detectAndSyncGaps(trackId);
+      let freshStore = useTimelineStore.getState();
+      expect(freshStore.gaps).toHaveLength(1);
+      expect(freshStore.gaps[0].startTime).toBe(5);
+      expect(freshStore.gaps[0].duration).toBe(10);
+      expect(freshStore.gaps[0].protected).toBe(false);
+
+      // Protect this gap (makes it a manual/protected gap)
+      const gapId = freshStore.gaps[0].id;
+      store.toggleGapProtection(gapId);
+
+      // Now add a clip that partially overlaps the protected gap from the left
+      // E.g. a clip from 0 to 7s, so it overlaps the gap at 5-7s
+      store.hydrateFromProject({
+        tracks: [{ id: trackId, type: "video", name: "Video 1", height: 68, visible: true, muted: false, locked: false }],
+        clips: [
+          { id: "clip-1", trackId, mediaId: "media1", startTime: 0, duration: 7 }, // Truncates gap from left
+          { id: "clip-2", trackId, mediaId: "media2", startTime: 15, duration: 5 }
+        ],
+        transitions: [],
+        gaps: useTimelineStore.getState().gaps // Pass the gaps containing our protected gap
+      } as any);
+
+      // Detect and sync gaps
+      store.detectAndSyncGaps(trackId);
+
+      // The gap should now start at 7s instead of 5s, have duration 8s, and still have the same ID and protected status
+      freshStore = useTimelineStore.getState();
+      expect(freshStore.gaps).toHaveLength(1);
+      expect(freshStore.gaps[0].id).toBe(gapId);
+      expect(freshStore.gaps[0].startTime).toBe(7);
+      expect(freshStore.gaps[0].duration).toBe(8);
+      expect(freshStore.gaps[0].protected).toBe(true);
+    });
   });
 
   describe("packTrackGaps", () => {

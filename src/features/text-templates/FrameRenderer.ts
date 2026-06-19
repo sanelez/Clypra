@@ -1,50 +1,58 @@
-import lottie from "lottie-web";
-import { TemplateDefinition, RenderedFrameSequence } from "./types";
+import { TemplateRenderer } from "@clypra/engine";
+import { TextTemplate, TemplateCustomization, RenderedFrameSequence } from "./types";
 
 /**
- * Renders a complete Lottie animation frame-by-frame to a sequence of PNG Blobs.
+ * Renders a complete Canvas template frame-by-frame to a sequence of PNG Blobs.
  * Designed to execute synchronously per frame in the browser WebView context.
  */
 export async function renderToFrameSequence(
-  lottieData: object,
-  definition: TemplateDefinition,
+  template: TextTemplate,
+  customization: TemplateCustomization,
   onProgress?: (progress: number) => void
 ): Promise<RenderedFrameSequence> {
-  const container = document.createElement("div");
-  container.style.width = `${definition.width}px`;
-  container.style.height = `${definition.height}px`;
-  container.style.position = "absolute";
-  container.style.left = "-9999px";
-  container.style.top = "-9999px";
-  document.body.appendChild(container);
+  const canvas = document.createElement("canvas");
+  canvas.width = template.canvasWidth;
+  canvas.height = template.canvasHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Failed to get 2D context");
+  }
 
-  // Load Lottie with canvas renderer, autoplay & loop disabled
-  const anim = lottie.loadAnimation({
-    container,
-    renderer: "canvas",
-    autoplay: false,
-    loop: false,
-    animationData: JSON.parse(JSON.stringify(lottieData)),
-  });
+  const renderer = new TemplateRenderer(template);
 
-  // Force Lottie to draw its first frame to initialize the inner canvas
-  anim.goToAndStop(0, true);
-  await Promise.resolve();
-
-  const canvas = container.querySelector("canvas") as HTMLCanvasElement;
-  if (!canvas) {
-    anim.destroy();
-    document.body.removeChild(container);
-    throw new Error("Lottie canvas renderer failed to initialize");
+  // Apply customizations to the renderer's overrides
+  for (const layer of template.layers) {
+    if (layer.kind === "text") {
+      const changes: any = {};
+      if (layer.role === "primary") {
+        changes.content = customization.primaryText;
+        if (customization.primaryColor) changes.color = customization.primaryColor;
+      } else if (layer.role === "secondary") {
+        changes.content = customization.secondaryText ?? "";
+        if (customization.secondaryColor) changes.color = customization.secondaryColor;
+      } else if (layer.role === "accent") {
+        changes.content = customization.accentText ?? "";
+      }
+      renderer.updateLayer(layer.id, changes);
+    } else if (layer.kind === "shape") {
+      const colorOverride = layer.id === "primary-fill-layer" 
+        ? customization.primaryColor 
+        : layer.id === "secondary-fill-layer" 
+          ? customization.secondaryColor 
+          : undefined;
+      if (colorOverride) {
+        renderer.updateLayer(layer.id, { fill: colorOverride });
+      }
+    }
   }
 
   const frames: Blob[] = [];
-  const totalFrames = definition.durationFrames;
+  const fps = 30; // standard output frame rate
+  const totalFrames = Math.round(template.duration * fps);
 
   for (let f = 0; f < totalFrames; f++) {
-    anim.goToAndStop(f, true);
-    // Wait a microtask for draw sequence to settle
-    await Promise.resolve();
+    const time = f / fps;
+    renderer.drawFrame(ctx, time);
 
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((b) => {
@@ -60,14 +68,11 @@ export async function renderToFrameSequence(
     }
   }
 
-  anim.destroy();
-  document.body.removeChild(container);
-
   return {
     frames,
-    fps: definition.fps,
-    width: definition.width,
-    height: definition.height,
+    fps,
+    width: template.canvasWidth,
+    height: template.canvasHeight,
     durationFrames: totalFrames,
   };
 }

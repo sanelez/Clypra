@@ -34,6 +34,7 @@ interface ClipProps {
   onDragStart?: (clipId: string, startX: number, startY: number, pointerOffsetFromLeft?: number) => void;
   onDragMove?: (clipId: string, deltaX: number, deltaY: number, clientX: number, clientY: number) => void;
   onDragEnd?: (clipId: string) => void;
+  isBeingShifted?: boolean;
   dragState?: {
     isDragging: boolean;
     offsetX: number;
@@ -42,15 +43,24 @@ interface ClipProps {
   };
 }
 
-const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, selected, locked = false, onDragStart, onDragMove, onDragEnd, dragState }) => {
+const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, selected, locked = false, onDragStart, onDragMove, onDragEnd, isBeingShifted = false, dragState }) => {
   const { selectClip, toggleClipSelection } = useUIStore();
-  const { clips, updateClip, rippleEditEnabled, rippleTrimClip, scrollLeft, viewportWidth, snapEnabled, setSnapGuides, clearSnapGuides } = useTimelineStore();
+  // PERF-4 fix: granular selectors prevent all clips re-rendering on every scroll/clip change
+  const updateClip = useTimelineStore((s) => s.updateClip);
+  const rippleEditEnabled = useTimelineStore((s) => s.rippleEditEnabled);
+  const rippleTrimClip = useTimelineStore((s) => s.rippleTrimClip);
+  const scrollLeft = useTimelineStore((s) => s.scrollLeft);
+  const viewportWidth = useTimelineStore((s) => s.viewportWidth);
+  const snapEnabled = useTimelineStore((s) => s.snapEnabled);
+  const setSnapGuides = useTimelineStore((s) => s.setSnapGuides);
+  const clearSnapGuides = useTimelineStore((s) => s.clearSnapGuides);
   const clockState = usePlaybackClock();
   const currentTime = clockState.time;
   const { pause } = useTransportControls();
   const [isResizing, setIsResizing] = useState<"left" | "right" | null>(null);
   const [isHovered, setIsHovered] = useState(false);
-  const [resizeStart, setResizeStart] = useState<{ x: number; startTime: number; duration: number; trimIn: number; trimOut: number; isRipple: boolean } | null>(null);
+  const resizeStartRef = useRef<{ x: number; startTime: number; duration: number; trimIn: number; trimOut: number; isRipple: boolean } | null>(null);
+  const [isRippleResize, setIsRippleResize] = useState(false);
   const clipRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<{ startX: number; startY: number; startTime: number; hasMoved: boolean; hasDragStarted: boolean; pointerId: number; pointerOffsetFromLeft?: number } | null>(null);
   const isPointerOnResizeHandle = (target: EventTarget | null) => {
@@ -193,51 +203,20 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
     }
 
     setIsResizing(side);
-    setResizeStart({
+    setIsRippleResize(isRipple);
+    resizeStartRef.current = {
       x: e.clientX,
       startTime: clip.startTime,
       duration: clip.duration,
       trimIn: clip.trimIn,
       trimOut: clip.trimOut,
       isRipple,
-    });
+    };
 
     // Let's prevent text selection during resize
     document.body.style.userSelect = "none";
   };
 
-  const handleResizeStartMouse = (e: React.MouseEvent, side: "left" | "right") => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (e.button !== 0) return;
-    if (locked) return;
-
-    pause();
-
-    const isRipple = e.shiftKey || rippleEditEnabled;
-    traceResize("mousedown-fallback", {
-      clipId: clip.id,
-      side,
-      button: e.button,
-      clientX: e.clientX,
-      clientY: e.clientY,
-      isRipple,
-      selected,
-      locked,
-    });
-    resizePointerIdRef.current = null;
-    activeResizeHandleRef.current = e.currentTarget as HTMLElement;
-    setIsResizing(side);
-    setResizeStart({
-      x: e.clientX,
-      startTime: clip.startTime,
-      duration: clip.duration,
-      trimIn: clip.trimIn,
-      trimOut: clip.trimOut,
-      isRipple,
-    });
-    document.body.style.userSelect = "none";
-  };
 
   useEffect(() => {
     if (!RESIZE_TRACE) return;
@@ -263,22 +242,28 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
   }, [clip.id]);
 
   useEffect(() => {
-    if (!isResizing || !resizeStart) return;
+    const initialResizeStart = resizeStartRef.current;
+    if (!isResizing || !initialResizeStart) return;
     traceResize("resize-started", {
       clipId: clip.id,
       side: isResizing,
       pointerId: resizePointerIdRef.current,
-      resizeStart,
+      resizeStart: initialResizeStart,
     });
 
     const handlePointerMove = (e: PointerEvent) => {
       if (resizePointerIdRef.current !== null && e.pointerId !== resizePointerIdRef.current) return;
+      const resizeStart = resizeStartRef.current;
+      if (!resizeStart) return;
       const deltaX = e.clientX - resizeStart.x;
       const deltaTime = deltaX / pixelsPerSecond;
       const isRippleActive = e.shiftKey || rippleEditEnabled;
 
-      const trackClips = clips.filter((c) => c.trackId === clip.trackId && c.id !== clip.id);
-      const allClips = clips.filter((c) => c.id !== clip.id);
+      // BUG-3 fix: read clips from store snapshot instead of stale closure
+      const storeState = useTimelineStore.getState();
+      const liveClips = storeState.clips;
+      const trackClips = liveClips.filter((c) => c.trackId === clip.trackId && c.id !== clip.id);
+      const allClips = liveClips.filter((c) => c.id !== clip.id);
 
       const prevClipEnd = trackClips.reduce((maxEnd, c) => {
         const end = c.startTime + c.duration;
@@ -358,10 +343,10 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
         rippleTrimClip(clip.id, isResizing, deltaTime);
 
         // Update resizeStart to track cumulative changes
-        setResizeStart({
+        resizeStartRef.current = {
           ...resizeStart,
           x: e.clientX,
-        });
+        };
       } else {
         // STANDARD MODE: Normal trim (no ripple)
 
@@ -449,7 +434,8 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
         }
       }
       setIsResizing(null);
-      setResizeStart(null);
+      setIsRippleResize(false);
+      resizeStartRef.current = null;
       activeResizeHandleRef.current = null;
       resizePointerIdRef.current = null;
       document.body.style.userSelect = "";
@@ -495,7 +481,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
         side: isResizing,
       });
     };
-  }, [isResizing, resizeStart, clip.id, pixelsPerSecond, updateClip, rippleTrimClip, mediaAsset, clips, snapEnabled, currentTime, setSnapGuides, clearSnapGuides]);
+  }, [isResizing, clip.id, pixelsPerSecond, updateClip, rippleTrimClip, mediaAsset, snapEnabled, currentTime, setSnapGuides, clearSnapGuides]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -567,7 +553,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
       onPointerCancel={handlePointerCancel}
       onPointerEnter={() => setIsHovered(true)}
       onPointerLeave={() => setIsHovered(false)}
-      className={`absolute rounded-sm h-full overflow-hidden border ${selected ? "border-white" : ""} ${isResizing ? (resizeStart?.isRipple ? "ring-2 ring-yellow-500" : "ring-2 ring-cyan-500") : ""} ${locked ? "cursor-not-allowed" : isDragging ? (isInvalidPosition ? "cursor-not-allowed" : "cursor-grabbing") : "cursor-default"} ${getClipStyle()} ${isDragging || isResizing ? "transition-none" : "transition-[left] duration-150 ease-out"}`}
+      className={`absolute rounded-sm h-full overflow-hidden border ${selected ? "border-white" : ""} ${isResizing ? (isRippleResize ? "ring-2 ring-yellow-500" : "ring-2 ring-cyan-500") : ""} ${locked ? "cursor-not-allowed" : isDragging ? (isInvalidPosition ? "cursor-not-allowed" : "cursor-grabbing") : "cursor-default"} ${getClipStyle()} ${isDragging || isResizing || isBeingShifted ? "transition-none" : "transition-[left] duration-150 ease-out"}`}
       style={{
         left: `${displayLeft}px`,
         width: `${width}px`,
@@ -586,7 +572,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
       <div
         data-testid={`clip-${clip.id}-resize-left`}
         data-clip-resize-handle="true"
-        className={`absolute left-0 top-0 w-3 h-full z-30 cursor-col-resize ${showResizeHandles ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"} ${isResizing === "left" ? (resizeStart?.isRipple ? "bg-yellow-300/60" : "bg-cyan-300/60") : "bg-white/25 hover:bg-white/35"} transition-colors`}
+        className={`absolute left-0 top-0 w-3 h-full z-30 cursor-col-resize ${showResizeHandles ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"} ${isResizing === "left" ? (isRippleResize ? "bg-yellow-300/60" : "bg-cyan-300/60") : "bg-white/25 hover:bg-white/35"} transition-colors`}
         style={{ touchAction: "none", cursor: "col-resize" }}
         onPointerDownCapture={(e) => {
           traceResize("left-handle pointerdown-capture", {
@@ -613,10 +599,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
           e.stopPropagation(); // Prevent drag when clicking resize handle
           handleResizeStart(e, "left");
         }}
-        onMouseDown={(e) => {
-          traceResize("left-handle mousedown", { clipId: clip.id, clientX: e.clientX, clientY: e.clientY, button: e.button });
-          handleResizeStartMouse(e, "left");
-        }}
+        // BUG-6 fix: removed duplicate onMouseDown (PointerEvents sufficient for Chromium/Tauri)
         title={rippleEditEnabled ? "Ripple trim (Shift to disable)" : "Normal trim (Shift for ripple)"}
       >
         <div className="absolute left-[5px] top-1/2 h-[70%] w-[2px] -translate-y-1/2 rounded bg-white/90" />
@@ -688,7 +671,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
       <div
         data-testid={`clip-${clip.id}-resize-right`}
         data-clip-resize-handle="true"
-        className={`absolute right-0 top-0 w-3 h-full z-30 cursor-col-resize ${showResizeHandles ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"} ${isResizing === "right" ? (resizeStart?.isRipple ? "bg-yellow-300/60" : "bg-cyan-300/60") : "bg-white/25 hover:bg-white/35"} transition-colors`}
+        className={`absolute right-0 top-0 w-3 h-full z-30 cursor-col-resize ${showResizeHandles ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"} ${isResizing === "right" ? (isRippleResize ? "bg-yellow-300/60" : "bg-cyan-300/60") : "bg-white/25 hover:bg-white/35"} transition-colors`}
         style={{ touchAction: "none", cursor: "col-resize" }}
         onPointerDownCapture={(e) => {
           traceResize("right-handle pointerdown-capture", {
@@ -715,10 +698,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
           e.stopPropagation(); // Prevent drag when clicking resize handle
           handleResizeStart(e, "right");
         }}
-        onMouseDown={(e) => {
-          traceResize("right-handle mousedown", { clipId: clip.id, clientX: e.clientX, clientY: e.clientY, button: e.button });
-          handleResizeStartMouse(e, "right");
-        }}
+        // BUG-6 fix: removed duplicate onMouseDown (PointerEvents sufficient for Chromium/Tauri)
         title={rippleEditEnabled ? "Ripple trim (Shift to disable)" : "Normal trim (Shift for ripple)"}
       >
         <div className="absolute right-[5px] top-1/2 h-[70%] w-[2px] -translate-y-1/2 rounded bg-white/90" />

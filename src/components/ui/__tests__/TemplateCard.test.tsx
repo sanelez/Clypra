@@ -21,7 +21,9 @@ describe("TemplateCard Component", () => {
     id: "template-1",
     category: "lower-third",
     name: "Minimal Lower Third",
+    label: "Minimal Lower Third",
     thumbnail: "", // API returns empty string
+    preview: "",
     thumbnailUrl: "http://example.com/template-thumbnail.png", // fallback
     durationFrames: 60,
     thumbnailFrame: 10,
@@ -31,7 +33,11 @@ describe("TemplateCard Component", () => {
     fps: 30,
     width: 1920,
     height: 1080,
+    canvasWidth: 1920,
+    canvasHeight: 1080,
+    duration: 2,
     textLayers: [],
+    layers: [],
     defaultPlacement: "lower-third",
     lottieFile: "mock.json",
   };
@@ -60,7 +66,17 @@ describe("TemplateCard Component", () => {
   });
 
   it("prefetches Lottie data from API on mouse enter/hover", async () => {
-    const mockLottieData = { v: "5.5.0", fr: 30, ip: 0, op: 60 };
+    const mockLottieData = {
+      id: "template-1",
+      category: "lower-third",
+      label: "Minimal Lower Third",
+      duration: 2,
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      thumbnail: "",
+      preview: "",
+      layers: []
+    };
     vi.mocked(TextEffectsApi.getLottieTemplate).mockResolvedValue(mockLottieData);
 
     render(<TemplateCard {...defaultProps} />);

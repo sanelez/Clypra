@@ -25,6 +25,7 @@ interface TrackProps {
     targetTrackId?: string | null;
     placementPreview?: any; // PlacementPreview type
     draggedBlockDuration?: number;
+    originalPlacements?: any;
   };
 }
 
@@ -69,10 +70,9 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
       return { displayPositions: null, gapIndicator: null };
     }
 
-    const isDraggedFromThisTrack = dragState.draggedClipIds.some((clipId) => {
-      const clip = clips.find((c) => c.id === clipId);
-      return clip?.trackId === track.id;
-    });
+    const isDraggedFromThisTrack = dragState.draggedClipIds.some((clipId) =>
+      sortedTrackClips.some((c) => c.id === clipId)
+    );
 
     const isTargetTrack = dragState.targetTrackId === track.id;
 
@@ -98,6 +98,9 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
 
     // Target track: Show insertion preview
     if (isTargetTrack && dragState.placementPreview) {
+      if (dragState.isInvalidPosition) {
+        return { displayPositions: null, gapIndicator: null };
+      }
       const preview = dragState.placementPreview;
 
       switch (preview.type) {
@@ -112,9 +115,10 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
 
         case "position":
           // Gap indicator follows cursor (uses offsetX for live position)
-          const draggedClip = clips.find((c) => dragState.draggedClipIds?.includes(c.id));
-          if (draggedClip) {
-            const clipLeftOriginal = draggedClip.startTime * pixelsPerSecond;
+          const firstDraggedClipId = dragState.draggedClipIds[0];
+          const placement = firstDraggedClipId ? dragState.originalPlacements[firstDraggedClipId] : null;
+          if (placement) {
+            const clipLeftOriginal = placement.startTime * pixelsPerSecond;
             const clipLeftLive = clipLeftOriginal + (dragState.offsetX || 0);
             const liveStartTime = clipLeftLive / pixelsPerSecond;
 
@@ -140,7 +144,7 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
     }
 
     return { displayPositions: null, gapIndicator: null };
-  }, [dragState, track.id, clips, sortedTrackClips]);
+  }, [dragState, track.id, sortedTrackClips, pixelsPerSecond]);
 
   const { displayPositions, gapIndicator } = displayInfo;
 
@@ -180,6 +184,7 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
               onDragStart={onClipDragStart}
               onDragMove={onClipDragMove}
               onDragEnd={onClipDragEnd}
+              isBeingShifted={isShifted}
               dragState={
                 isDragging
                   ? {
@@ -221,7 +226,21 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
         })}
 
       {/* Gaps layer - render permanent gaps */}
-      {track.visible && trackGaps.map((gap) => <GapIndicator key={gap.id} gap={gap} pixelsPerSecond={pixelsPerSecond} selected={selectedGapId === gap.id} locked={track.locked} />)}
+      {track.visible &&
+        !(
+          dragState &&
+          (dragState.targetTrackId === track.id ||
+            dragState.draggedClipIds?.some((id) => sortedTrackClips.some((c) => c.id === id)))
+        ) &&
+        trackGaps.map((gap) => (
+          <GapIndicator
+            key={gap.id}
+            gap={gap}
+            pixelsPerSecond={pixelsPerSecond}
+            selected={selectedGapId === gap.id}
+            locked={track.locked}
+          />
+        ))}
 
       {/* Gap indicator (blue dashed background) - temporary drag preview */}
       {gapIndicator && (

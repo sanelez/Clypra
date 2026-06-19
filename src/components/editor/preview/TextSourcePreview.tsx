@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback } from "react";
-import { LottiePlayer } from "@/features/text-templates/LottiePlayer";
+import { TemplatePreviewPlayer } from "@/features/text-templates";
 import { renderTextEffectCore, type TextEffectConfig, _buildConfig } from "@clypra/engine";
 import { getFontLoader } from "@/core/fonts/FontLoader";
 
@@ -210,7 +210,7 @@ export const TextSourcePreview: React.FC<TextSourcePreviewProps> = ({ preset }) 
   if (isTemplate) {
     return (
       <div className="w-full aspect-video bg-black flex items-center justify-center relative p-8 shadow-[0_0_40px_rgba(0,0,0,0.8)] border border-white/5 overflow-hidden">
-        <LottiePlayer lottieData={(preset as any).injectedData || (preset as any).lottieData} autoplay={true} loop={true} className="w-full h-full object-contain" />
+        <TemplatePreviewPlayer lottieData={(preset as any).injectedData || (preset as any).lottieData || preset} autoplay={true} loop={true} className="w-full h-full object-contain" />
       </div>
     );
   }

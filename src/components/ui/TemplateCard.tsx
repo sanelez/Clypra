@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { TemplateDefinition } from "@/features/text-templates/types";
 import { Star, Loader2, Check, Plus } from "lucide-react";
-import { LottiePlayer, LottiePlayerHandle } from "@/features/text-templates/LottiePlayer";
+import { TemplatePreviewPlayer, type TemplatePreviewPlayerHandle } from "@/features/text-templates";
 import { TextEffectsApi } from "@/features/text-effects/api/textEffectsApi";
 
 interface TemplateCardProps {
@@ -25,7 +25,7 @@ export const TemplateCard: React.FC<TemplateCardProps> = ({
   onApply,
   onPreview,
 }) => {
-  const lottieRef = useRef<LottiePlayerHandle>(null);
+  const lottieRef = useRef<TemplatePreviewPlayerHandle>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
   const [lottieData, setLottieData] = useState<any>(template.lottieData || null);
@@ -153,7 +153,7 @@ export const TemplateCard: React.FC<TemplateCardProps> = ({
             <span className="text-xs font-medium">Loading...</span>
           </div>
         ) : lottieData ? (
-          <LottiePlayer
+          <TemplatePreviewPlayer
             ref={lottieRef}
             lottieData={lottieData}
             autoplay={false} // Manual control via ref

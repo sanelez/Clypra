@@ -61,12 +61,18 @@ export function useTimelineAutoScroll(containerRef: RefObject<HTMLDivElement | n
 
     if (rafRef.current) return; // loop already running
 
+    // BUG-5 fix: only start loop when speed is non-zero, stop when speed drops to 0
+    if (speedRef.current === 0) return;
+
     function loop() {
       if (speedRef.current !== 0 && containerRef.current) {
         containerRef.current.scrollLeft += speedRef.current;
         useTimelineStore.getState().setScrollLeft(containerRef.current.scrollLeft);
+        rafRef.current = requestAnimationFrame(loop);
+      } else {
+        // Stop loop when speed is 0 (cursor in safe zone)
+        rafRef.current = null;
       }
-      rafRef.current = requestAnimationFrame(loop);
     }
 
     rafRef.current = requestAnimationFrame(loop);

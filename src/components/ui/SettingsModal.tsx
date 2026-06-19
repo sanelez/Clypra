@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, Palette, SlidersHorizontal, Info, Paintbrush, RotateCcw, Copy, Download, Upload, HardDrive, Captions } from "lucide-react";
+import { Check, Palette, SlidersHorizontal, Info, Paintbrush, RotateCcw, Copy, Download, Upload, HardDrive, Captions, RefreshCw } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Modal } from "./Modal";
 import { useSettingsStore, Theme, FontFamily, THEME_META, FONT_META, getThemeColors, getBaseThemeForCustomization, getThemeColorKeys } from "@/store/settingsStore";
@@ -8,6 +8,7 @@ import { useTimelineStore } from "@/store/timelineStore";
 import { CacheSettings } from "@/components/settings/CacheSettings";
 import { WhisperSettings } from "@/components/settings/WhisperSettings";
 import { refitClipsForCanvasChange } from "@/lib/timeline/refitClips";
+import { checkAppUpdate, installAndRelaunchUpdate, isTauriDesktop } from "@/services/updaterService";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -388,13 +389,15 @@ function EditorTab() {
     if (!dims) return;
 
     const [width, height] = dims.dimensions.split("×").map(Number);
+    const oldW = project.canvasWidth;
+    const oldH = project.canvasHeight;
 
     updateProject({
       aspectRatio: aspectRatio as any,
       canvasWidth: width,
       canvasHeight: height,
     });
-    refitClipsForCanvasChange(width, height);
+    refitClipsForCanvasChange(width, height, oldW, oldH);
   };
 
   return (
@@ -500,6 +503,47 @@ const XIcon = (props: React.SVGProps<SVGSVGElement>) => (
 
 // ─── About Tab ───────────────────────────────────────────────────────────
 function AboutTab() {
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "up-to-date" | "available" | "downloading" | "error">("idle");
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; body?: string } | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<number>(0);
+  const [updateObject, setUpdateObject] = useState<any>(null);
+
+  const isDesktop = isTauriDesktop();
+
+  const handleCheckUpdate = async () => {
+    setUpdateStatus("checking");
+    setUpdateError(null);
+    const result = await checkAppUpdate();
+    if (result.error) {
+      setUpdateStatus("error");
+      setUpdateError(result.error);
+    } else if (result.hasUpdate) {
+      setUpdateStatus("available");
+      setUpdateInfo({ version: result.version!, body: result.body });
+      setUpdateObject(result.updateObject);
+    } else {
+      setUpdateStatus("up-to-date");
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    if (!updateObject) return;
+    setUpdateStatus("downloading");
+    setDownloadProgress(0);
+    try {
+      await installAndRelaunchUpdate(updateObject, (progress) => {
+        if (progress.event === "Progress" && progress.contentLength) {
+          const pct = Math.round((progress.downloaded / progress.contentLength) * 100);
+          setDownloadProgress(pct);
+        }
+      });
+    } catch (err: any) {
+      setUpdateStatus("error");
+      setUpdateError(err?.message || "Failed to install update");
+    }
+  };
+
   return (
     <div className="flex flex-col items-center text-center py-6 gap-4">
       <div className="w-16 h-16 flex items-center justify-center relative">
@@ -511,6 +555,131 @@ function AboutTab() {
         <p className="text-xs text-text-muted mt-1">Version 1.0.1</p>
       </div>
       <p className="text-xs text-text-muted max-w-[280px] leading-relaxed">A modern, native video editor built with Tauri, React, and FFmpeg. Designed for speed and creative freedom.</p>
+      
+      {/* Auto-updater card */}
+      <div className="w-full max-w-[340px] bg-gradient-to-b from-white/[0.04] to-white/[0.01] border border-white/10 rounded-2xl p-5 flex flex-col items-center gap-4 shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-2 w-full justify-between pb-3 border-b border-white/5">
+          <span className="text-xs font-semibold text-text-primary tracking-wide uppercase">Software Update</span>
+          {updateStatus === "up-to-date" ? (
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+            </span>
+          ) : updateStatus === "available" ? (
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col items-center gap-1.5 w-full">
+          {!isDesktop ? (
+            <p className="text-[11px] text-text-muted">Auto-updates are only available in the desktop app.</p>
+          ) : (
+            <>
+              {updateStatus === "idle" && (
+                <>
+                  <p className="text-[11px] text-text-muted mb-2">Keep Clypra running at peak performance.</p>
+                  <button
+                    onClick={handleCheckUpdate}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-text-primary rounded-xl text-xs font-semibold cursor-pointer shadow-sm transition-all duration-200 active:scale-95"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Check for Updates
+                  </button>
+                </>
+              )}
+
+              {updateStatus === "checking" && (
+                <div className="flex flex-col items-center gap-3 py-2">
+                  <div className="relative flex items-center justify-center">
+                    <div className="w-8 h-8 border-[3px] border-accent/20 border-t-accent rounded-full animate-spin"></div>
+                  </div>
+                  <p className="text-xs text-text-muted">Searching for newer releases...</p>
+                </div>
+              )}
+
+              {updateStatus === "up-to-date" && (
+                <div className="flex flex-col items-center gap-2 py-1">
+                  <div className="w-8 h-8 rounded-full bg-green-500/10 border border-green-500/20 flex items-center justify-center">
+                    <Check className="w-4 h-4 text-green-400" />
+                  </div>
+                  <p className="text-xs text-green-400 font-medium">Clypra is up to date</p>
+                  <p className="text-[10px] text-text-muted">You are currently running the latest version.</p>
+                  <button
+                    onClick={handleCheckUpdate}
+                    className="mt-2 text-[10px] text-text-muted hover:text-text-primary transition-colors hover:underline cursor-pointer"
+                  >
+                    Check again
+                  </button>
+                </div>
+              )}
+
+              {updateStatus === "available" && updateInfo && (
+                <div className="flex flex-col items-center gap-3 w-full">
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="text-xs text-text-primary font-bold">New Version Available</p>
+                    <p className="text-[10px] text-accent font-semibold">v{updateInfo.version}</p>
+                  </div>
+                  
+                  {updateInfo.body && (
+                    <div className="w-full text-left">
+                      <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-1">Release Notes</p>
+                      <div className="text-[10px] text-text-muted max-h-20 overflow-y-auto px-2.5 py-2 w-full leading-normal border border-white/5 bg-white/[0.02] rounded-xl scrollbar-thin">
+                        {updateInfo.body}
+                      </div>
+                    </div>
+                  )}
+                  
+                  <button
+                    onClick={handleInstallUpdate}
+                    className="w-full py-2 bg-gradient-to-r from-accent to-violet-500 hover:from-accent-hover hover:to-violet-600 text-white rounded-xl text-xs font-semibold cursor-pointer shadow-[0_0_15px_rgba(96,165,250,0.2)] hover:shadow-[0_0_20px_rgba(96,165,250,0.4)] transition-all duration-200 active:scale-[0.98]"
+                  >
+                    Download & Install Update
+                  </button>
+                </div>
+              )}
+
+              {updateStatus === "downloading" && (
+                <div className="flex flex-col items-center gap-3 w-full py-1">
+                  <div className="flex justify-between text-[11px] text-text-primary font-medium w-full">
+                    <span>Downloading update...</span>
+                    <span className="font-semibold text-accent">{downloadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-white/5 border border-white/5 h-2 rounded-full overflow-hidden p-[1px]">
+                    <div
+                      className="bg-gradient-to-r from-accent to-violet-500 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${downloadProgress}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-[9px] text-text-muted">The application will automatically restart once complete.</p>
+                </div>
+              )}
+
+              {updateStatus === "error" && (
+                <div className="flex flex-col items-center gap-2.5 py-1">
+                  <div className="w-8 h-8 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                    <span className="text-red-400 text-sm font-bold">!</span>
+                  </div>
+                  <p className="text-xs text-red-400 font-medium">Update Check Failed</p>
+                  <p className="text-[10px] text-text-muted max-w-[260px] leading-normal line-clamp-2">
+                    {updateError || "An unknown error occurred."}
+                  </p>
+                  <button
+                    onClick={handleCheckUpdate}
+                    className="mt-1 flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-text-primary rounded-xl text-xs font-semibold cursor-pointer transition-all duration-200 active:scale-95"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Try Again
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
       <div className="flex items-center gap-4 mt-2">
         <button onClick={() => openUrl("https://github.com/AIEraDev/clypra")} className="text-xs font-medium text-text-muted hover:text-accent transition-colors flex items-center gap-1.5">
           <GithubIcon className="w-3.5 h-3.5" />

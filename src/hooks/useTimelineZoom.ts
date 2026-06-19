@@ -59,8 +59,12 @@ export function useTimelineZoom(containerRef: RefObject<HTMLDivElement | null>) 
         hasClips,
       });
 
-      container.scrollLeft = nextScrollLeft;
       state.setScrollLeft(nextScrollLeft);
+      requestAnimationFrame(() => {
+        if (containerRef.current) {
+          containerRef.current.scrollLeft = nextScrollLeft;
+        }
+      });
     };
 
     const onWheel = (e: WheelEvent) => {

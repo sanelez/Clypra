@@ -1066,80 +1066,54 @@ async function rasterizeTextLayer(ctx: CanvasRenderingContext2D | OffscreenCanva
     const templates = useTemplateStore.getState().templates;
     const template = templates.find((t) => t.id === layer.templateId);
 
-    if (template && template.lottieData) {
-      const customizationSig = JSON.stringify(layer.customization || {});
-      const cacheKey = `${layer.clipId}-${layer.templateId}-${customizationSig}`;
+    if (template) {
+      const customization = layer.customization || {
+        primaryText: layer.text || "",
+        secondaryText: "",
+        accentText: "",
+        primaryColor: "#ffffff",
+        secondaryColor: "#ffffff",
+      };
 
-      let cacheEntry = lottieRenderCache.get(layer.clipId);
-      if (cacheEntry && cacheEntry.cacheKey !== cacheKey) {
-        cacheEntry.anim.destroy();
-        cacheEntry.container.remove();
-        lottieRenderCache.delete(layer.clipId);
-        cacheEntry = undefined;
-      }
+      const { TemplateRenderer } = await import("@clypra/engine");
+      const renderer = new TemplateRenderer(template);
 
-      if (!cacheEntry) {
-        try {
-          const { injectText, injectColor } = await import("@/features/text-templates/TemplateInjector");
-
-          const customization = layer.customization || {
-            primaryText: layer.text || "",
-            secondaryText: "",
-            accentText: "",
-            primaryColor: "#ffffff",
-            secondaryColor: "#ffffff",
-          };
-
-          let injectedLottie = injectText(template.lottieData, customization, template.textLayers);
-          if (customization.primaryColor) {
-            injectedLottie = injectColor(injectedLottie, "primary-fill-layer", customization.primaryColor);
+      // Apply customization overrides to the renderer
+      for (const tLayer of template.layers) {
+        if (tLayer.kind === "text") {
+          const changes: any = {};
+          if (tLayer.role === "primary") {
+            changes.content = customization.primaryText;
+            if (customization.primaryColor) changes.color = customization.primaryColor;
+          } else if (tLayer.role === "secondary") {
+            changes.content = customization.secondaryText ?? "";
+            if (customization.secondaryColor) changes.color = customization.secondaryColor;
+          } else if (tLayer.role === "accent") {
+            changes.content = customization.accentText ?? "";
           }
-          if (customization.secondaryColor) {
-            injectedLottie = injectColor(injectedLottie, "secondary-fill-layer", customization.secondaryColor);
+          renderer.updateLayer(tLayer.id, changes);
+        } else if (tLayer.kind === "shape") {
+          const colorOverride = tLayer.id === "primary-fill-layer" 
+            ? customization.primaryColor 
+            : tLayer.id === "secondary-fill-layer" 
+              ? customization.secondaryColor 
+              : undefined;
+          if (colorOverride) {
+            renderer.updateLayer(tLayer.id, { fill: colorOverride });
           }
-
-          const container = document.createElement("div");
-          container.style.width = `${width}px`;
-          container.style.height = `${height}px`;
-          container.style.position = "absolute";
-          container.style.left = "-9999px";
-          container.style.top = "-9999px";
-          document.body.appendChild(container);
-
-          const anim = lottie.loadAnimation({
-            container,
-            renderer: "canvas",
-            autoplay: false,
-            loop: true,
-            animationData: JSON.parse(JSON.stringify(injectedLottie)),
-          });
-
-          anim.goToAndStop(0, true);
-          await Promise.resolve();
-
-          const canvas = container.querySelector("canvas") as HTMLCanvasElement;
-          if (canvas) {
-            cacheEntry = { anim, canvas, container, stickerId: layer.templateId, cacheKey };
-            lottieRenderCache.set(layer.clipId, cacheEntry);
-          }
-        } catch (err) {
-          console.error("[Rasterizer] Failed to load text template Lottie animation:", err);
         }
       }
 
-      if (cacheEntry) {
-        const totalFrames = cacheEntry.anim.totalFrames;
-        const frameRate = cacheEntry.anim.frameRate || 30;
-
-        const localTime = layer.time !== undefined && layer.clipStartTime !== undefined ? layer.time - layer.clipStartTime : 0;
-        const frame = Math.floor(localTime * frameRate) % totalFrames;
-
-        cacheEntry.anim.goToAndStop(frame, true);
-        await Promise.resolve();
-
-        ctx.drawImage(cacheEntry.canvas, 0, 0, width, height);
-        return;
-      }
+      const localTime = layer.time !== undefined && layer.clipStartTime !== undefined ? layer.time - layer.clipStartTime : 0;
+      
+      ctx.save();
+      const sX = width / template.canvasWidth;
+      const sY = height / template.canvasHeight;
+      ctx.scale(sX, sY);
+      
+      renderer.drawFrame(ctx as CanvasRenderingContext2D, localTime);
+      ctx.restore();
+      return;
     }
   }
 

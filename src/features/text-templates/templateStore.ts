@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { TemplateDefinition, TemplateCustomization, TemplateCategory, RenderedFrameSequence } from "./types";
-import { injectText, injectColor } from "./TemplateInjector";
 import { renderToFrameSequence } from "./FrameRenderer";
 import { TextEffectsApi } from "@/features/text-effects/api/textEffectsApi";
 import { ALL_TEMPLATES } from "./templates/index";
@@ -104,9 +103,10 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     }
 
     // Initialize customisation with defaults from the selected template
-    const primary = loadedTemplate.textLayers.find((tl) => tl.role === "primary")?.defaultText || "Clypra";
-    const secondary = loadedTemplate.textLayers.find((tl) => tl.role === "secondary")?.defaultText || "";
-    const accent = loadedTemplate.textLayers.find((tl) => tl.role === "accent")?.defaultText || "";
+    const textLayers = (loadedTemplate.layers || []).filter((l) => l.kind === "text") as any[];
+    const primary = textLayers.find((tl) => tl.role === "primary")?.content || "Clypra";
+    const secondary = textLayers.find((tl) => tl.role === "secondary")?.content || "";
+    const accent = textLayers.find((tl) => tl.role === "accent")?.content || "";
 
     set({
       selectedTemplate: loadedTemplate,
@@ -146,31 +146,22 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     const activeToken = renderCancelToken;
 
     try {
-      // 1. Prepare customizable Lottie JSON
-      let data = selected.lottieData || {};
+      // 1. Prepare customizable Template object
+      let data = selected.lottieData || selected;
 
-      // Ensure Lottie data is dynamically fetched if we bypass standard select
-      if (Object.keys(data).length === 0) {
+      // Ensure template data is dynamically fetched if we bypass standard select
+      if (!data.layers || data.layers.length === 0) {
         try {
           data = await TextEffectsApi.getLottieTemplate(selected.category, selected.id);
         } catch (e) {
           // Fallback to static meta
           const staticFallback = ALL_TEMPLATES.find((t) => t.id === selected.id);
-          data = staticFallback?.lottieData || {};
+          data = staticFallback?.lottieData || staticFallback || selected;
         }
       }
 
-      data = injectText(data, get().customization, selected.textLayers);
-
-      if (get().customization.primaryColor) {
-        data = injectColor(data, "primary-fill-layer", get().customization.primaryColor!);
-      }
-      if (get().customization.secondaryColor) {
-        data = injectColor(data, "secondary-fill-layer", get().customization.secondaryColor!);
-      }
-
       // 2. Perform the frame-by-frame render
-      const sequence = await renderToFrameSequence(data, selected, (progress) => {
+      const sequence = await renderToFrameSequence(data, get().customization, (progress) => {
         if (activeToken.cancelled) {
           throw new Error("Render cancelled by user");
         }

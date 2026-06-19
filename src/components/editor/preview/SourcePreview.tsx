@@ -18,7 +18,7 @@ import { PreviewTransport } from "./PreviewTransport";
 import { createTextClip } from "@/lib/text/textClip";
 import { TextSourcePreview } from "./TextSourcePreview";
 import { useEffectsStore } from "@/features/text-effects/store/effectsStore";
-import LottiePlayer, { type LottiePlayerHandle } from "@/features/text-templates/LottiePlayer";
+import { TemplatePreviewPlayer, type TemplatePreviewPlayerHandle } from "@/features/text-templates";
 import { useStickersStore } from "@/features/stickers/store/stickersStore";
 
 const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
@@ -34,7 +34,7 @@ export const SourcePreview: React.FC = () => {
   const { project, updateProject, addMediaAsset } = useProjectStore();
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const lottiePlayerRef = useRef<LottiePlayerHandle>(null);
+  const lottiePlayerRef = useRef<TemplatePreviewPlayerHandle>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -523,7 +523,7 @@ export const SourcePreview: React.FC = () => {
               lottieError ? (
                 <div className="text-red-400 text-xs">{lottieError}</div>
               ) : lottieData ? (
-                <LottiePlayer ref={lottiePlayerRef} lottieData={lottieData} autoplay={isPlaying} loop={true} className="max-w-full max-h-full" />
+                <TemplatePreviewPlayer ref={lottiePlayerRef} lottieData={lottieData} autoplay={isPlaying} loop={true} className="max-w-full max-h-full" />
               ) : (
                 <div className="text-text-muted text-xs flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />

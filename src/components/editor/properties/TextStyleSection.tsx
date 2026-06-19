@@ -179,11 +179,17 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({ textClip, pr
     handleUpdateMultiple(updates);
   };
 
-  const textLayers = templateDef?.textLayers || [
-    { role: "primary", defaultText: "Title", layerName: "Primary" },
-    { role: "secondary", defaultText: "Subtitle", layerName: "Secondary" },
-    { role: "accent", defaultText: "Accent", layerName: "Accent" }
-  ];
+  const textLayers: Array<{ role: string; defaultText: string; layerName: string }> =
+    templateDef?.textLayers ||
+    (templateDef?.layers?.filter((l) => l.kind === "text") as any[])?.map((l) => ({
+      role: l.role || "primary",
+      defaultText: l.content || "",
+      layerName: l.label || l.id || "Text Layer",
+    })) || [
+      { role: "primary", defaultText: "Title", layerName: "Primary" },
+      { role: "secondary", defaultText: "Subtitle", layerName: "Secondary" },
+      { role: "accent", defaultText: "Accent", layerName: "Accent" }
+    ];
 
   // Quick switch text effects
   const applyEffectPreset = (effect: TextEffectDefinition) => {

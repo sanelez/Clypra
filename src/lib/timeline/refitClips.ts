@@ -12,6 +12,7 @@
 import { useTimelineStore } from "@/store/timelineStore";
 import { useProjectStore } from "@/store/projectStore";
 import { calculateClipDimensions, type ClipFitModeExtended } from "./timelineClip";
+import { DEFAULT_PLACEMENT_POLICY } from "./placementPolicy";
 
 /**
  * Re-fit all visual clips to the new canvas dimensions.
@@ -20,21 +21,49 @@ import { calculateClipDimensions, type ClipFitModeExtended } from "./timelineCli
  * Text clips are excluded — they have independent positioning that should
  * not be overridden by a fit algorithm.
  */
-export function refitClipsForCanvasChange(newCanvasWidth: number, newCanvasHeight: number): void {
+export function refitClipsForCanvasChange(
+  newCanvasWidth: number,
+  newCanvasHeight: number,
+  oldCanvasWidth?: number,
+  oldCanvasHeight?: number
+): void {
   const { clips, updateClip } = useTimelineStore.getState();
   const { mediaAssets } = useProjectStore.getState();
 
   const assetMap = new Map(mediaAssets.map((a) => [a.id, a]));
 
+  const oW = oldCanvasWidth ?? 1920;
+  const oH = oldCanvasHeight ?? 1080;
+  const scaleX = newCanvasWidth / oW;
+  const scaleY = newCanvasHeight / oH;
+
   for (const clip of clips) {
-    // Skip text clips — they have user-positioned text boxes
-    if (clip.kind === "text") continue;
+    if (clip.kind === "text") {
+      // Scale text clips proportionally when canvas dimensions change
+      if (oldCanvasWidth && oldCanvasHeight) {
+        const newX = clip.x * scaleX;
+        const newY = clip.y * scaleY;
+        const newWidth = clip.width * scaleX;
+        const newHeight = clip.height * scaleY;
+        const currentFontSize = (clip as any).fontSize || 32;
+        const newFontSize = Math.max(10, Math.min(300, Math.round(currentFontSize * scaleX)));
+
+        updateClip(clip.id, {
+          x: newX,
+          y: newY,
+          width: newWidth,
+          height: newHeight,
+          fontSize: newFontSize,
+        } as any);
+      }
+      continue;
+    }
 
     const asset = assetMap.get(clip.mediaId);
     if (!asset) continue;
     if (asset.type !== "video" && asset.type !== "image") continue;
 
-    const fitMode: ClipFitModeExtended = (clip as any).fitMode ?? "cover";
+    const fitMode: ClipFitModeExtended = (clip as any).fitMode ?? DEFAULT_PLACEMENT_POLICY.defaultVisualFitMode;
     const newDims = calculateClipDimensions(asset, newCanvasWidth, newCanvasHeight, fitMode);
 
     // Only update if dimensions actually changed

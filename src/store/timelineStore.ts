@@ -1110,8 +1110,16 @@ export const useTimelineStore = create<TimelineStore>(
         // For each protected gap, check if it still exists and update its duration
         const validProtectedGaps: Gap[] = [];
         for (const protectedGap of existingProtectedGaps) {
-          // Check if there's a detected gap at this position
-          const matchingGap = detectedGaps.find((detected) => Math.abs(detected.startTime - protectedGap.startTime) < 0.001);
+          // Check if there's a detected gap that overlaps with this protected gap
+          // This ensures the protected gap is preserved (with its ID/protection)
+          // even if it was truncated/shifted (e.g. from the left)
+          const matchingGap = detectedGaps.find((detected) => {
+            const detectedEnd = detected.startTime + detected.duration;
+            const protectedEnd = protectedGap.startTime + protectedGap.duration;
+            const overlapStart = Math.max(detected.startTime, protectedGap.startTime);
+            const overlapEnd = Math.min(detectedEnd, protectedEnd);
+            return overlapStart < overlapEnd - 0.001; // Overlaps by at least 1ms
+          });
 
           if (matchingGap) {
             // Gap still exists - update duration and mark as protected
@@ -1139,9 +1147,30 @@ export const useTimelineStore = create<TimelineStore>(
       // Merge adjacent auto-detected gaps to reduce visual clutter
       const mergedGaps = mergeAdjacentGaps(newGaps);
 
-      set((state) => ({
-        gaps: mergedGaps,
-      }));
+      // Local helper to check if two gaps arrays are equal to avoid unnecessary updates/re-renders
+      const areGapsEqual = (a: Gap[], b: Gap[]): boolean => {
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+          const ga = a[i];
+          const gb = b[i];
+          if (
+            ga.id !== gb.id ||
+            ga.trackId !== gb.trackId ||
+            Math.abs(ga.startTime - gb.startTime) > 0.001 ||
+            Math.abs(ga.duration - gb.duration) > 0.001 ||
+            ga.type !== gb.type ||
+            ga.source !== gb.source ||
+            ga.protected !== gb.protected
+          ) {
+            return false;
+          }
+        }
+        return true;
+      };
+
+      if (!areGapsEqual(state.gaps, mergedGaps)) {
+        set({ gaps: mergedGaps });
+      }
     },
 
     packTrackGaps: (trackId) => {

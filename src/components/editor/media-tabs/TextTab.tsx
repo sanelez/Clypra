@@ -422,7 +422,7 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
     // We can pass the customization into the timeline payload for rendering later
     onAddToTimeline?.(
       {
-        name: template.name,
+        name: template.name || template.label,
         presetType: "template",
         templateId: template.id,
         customization: customization,
@@ -469,7 +469,7 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
     );
   }
   // Filter items - templates only (effects are handled by EffectGrid)
-  const filteredTemplates = templates.filter((template) => template.category.toLowerCase().replace("-", " ") === activeCategory.toLowerCase() && template.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredTemplates = templates.filter((template) => template.category.toLowerCase().replace("-", " ") === activeCategory.toLowerCase() && (template.name || template.label).toLowerCase().includes(searchQuery.toLowerCase()));
 
   const favoriteTemplatesList = templates.filter((t) => favorites.includes(t.id));
 

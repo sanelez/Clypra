@@ -22,6 +22,12 @@ interface CacheKey {
 
   /** Clip version (hash of clip IDs and properties) */
   clipVersion: string;
+
+  /** Canvas width in pixels */
+  canvasWidth?: number;
+
+  /** Canvas height in pixels */
+  canvasHeight?: number;
 }
 
 /**
@@ -198,7 +204,9 @@ export class EvaluationCache {
   private serializeKey(key: CacheKey): string {
     // Round time to 3 decimal places (millisecond precision)
     const roundedTime = Math.round(key.time * 1000) / 1000;
-    return `${roundedTime}:${key.epoch}:${key.clipVersion}`;
+    const w = key.canvasWidth ?? 1920;
+    const h = key.canvasHeight ?? 1080;
+    return `${roundedTime}:${key.epoch}:${w}x${h}:${key.clipVersion}`;
   }
 }
 

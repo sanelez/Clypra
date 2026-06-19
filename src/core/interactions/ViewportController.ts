@@ -37,7 +37,7 @@ export type ViewportListener = (viewport: Viewport) => void;
 
 const VIEWPORT_ZOOM_MIN = 0.1;
 const VIEWPORT_ZOOM_MAX = 5.0;
-const VIEWPORT_ZOOM_SNAP_EPSILON = 0.005; // Magnetic snap around 1.0 (fit)
+const VIEWPORT_ZOOM_SNAP_EPSILON = 0.005; // Magnetic snap band around snap targets
 
 /**
  * Viewport Controller - Imperative viewport state.
@@ -49,6 +49,11 @@ export class ViewportController {
   private _zoom: number = 1.0;
   private _panX: number = 0;
   private _panY: number = 0;
+
+  // Dynamic fit-zoom target — updated when canvas/container dimensions change.
+  // This is the zoom level at which the canvas fits perfectly inside the container.
+  // Used for magnetic snap during wheel zoom (e.g., 0.56 for 9:16 in a wide container).
+  private _fitZoomTarget: number = 1.0;
 
   // Listeners (for UI snapshots only, not every frame)
   private _listeners = new Set<ViewportListener>();
@@ -92,23 +97,44 @@ export class ViewportController {
 
   /**
    * Set zoom level.
-   * Clamps to valid range and applies magnetic snap around 1.0 (fit).
+   * Clamps to valid range and applies magnetic snap around both:
+   * - 1.0 (100% / actual pixels)
+   * - fitZoomTarget (the "fit" level where canvas fills container)
    */
   setZoom(zoom: number): void {
     const prevZoom = this._zoom;
     let clamped = Math.max(VIEWPORT_ZOOM_MIN, Math.min(VIEWPORT_ZOOM_MAX, zoom));
 
-    // Magnetic snap around fit zoom (1.0)
-    const prevNearFit = Math.abs(prevZoom - 1.0) <= VIEWPORT_ZOOM_SNAP_EPSILON;
-    const nextNearFit = Math.abs(clamped - 1.0) <= VIEWPORT_ZOOM_SNAP_EPSILON;
-    const crossedFit = (prevZoom < 1.0 && clamped > 1.0) || (prevZoom > 1.0 && clamped < 1.0);
+    // Magnetic snap targets: 1.0 (100%) and the dynamic fit-zoom level.
+    // We snap to whichever target the zoom is crossing through.
+    const snapTargets = [1.0];
+    // Only add fit target if it's meaningfully different from 1.0
+    if (Math.abs(this._fitZoomTarget - 1.0) > VIEWPORT_ZOOM_SNAP_EPSILON * 2) {
+      snapTargets.push(this._fitZoomTarget);
+    }
 
-    if (nextNearFit && (crossedFit || !prevNearFit)) {
-      clamped = 1.0;
+    for (const target of snapTargets) {
+      const prevNear = Math.abs(prevZoom - target) <= VIEWPORT_ZOOM_SNAP_EPSILON;
+      const nextNear = Math.abs(clamped - target) <= VIEWPORT_ZOOM_SNAP_EPSILON;
+      const crossed = (prevZoom < target && clamped > target) || (prevZoom > target && clamped < target);
+
+      if (nextNear && (crossed || !prevNear)) {
+        clamped = target;
+        break; // Only snap to one target per zoom step
+      }
     }
 
     this._zoom = clamped;
     this._throttledNotify();
+  }
+
+  /**
+   * Set the dynamic fit-zoom target.
+   * Call this whenever canvas or container dimensions change so that
+   * magnetic snap targets the actual "fit" level instead of just 1.0.
+   */
+  setFitZoomTarget(fitZoom: number): void {
+    this._fitZoomTarget = Math.max(VIEWPORT_ZOOM_MIN, Math.min(VIEWPORT_ZOOM_MAX, fitZoom));
   }
 
   /**
@@ -138,6 +164,7 @@ export class ViewportController {
     const scaleY = viewportHeight / canvasHeight;
     const zoom = Math.min(scaleX, scaleY, 1.0); // Never zoom in beyond 100%
 
+    this._fitZoomTarget = zoom;
     this._zoom = zoom;
     this._panX = 0;
     this._panY = 0;

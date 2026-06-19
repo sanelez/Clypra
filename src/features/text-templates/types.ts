@@ -1,50 +1,120 @@
-export interface TextLayer {
-  layerName: string; // matches Lottie layer nm field
-  defaultText: string; // placeholder shown before user types
-  maxCharacters: number; // hard cap — longer text breaks layout
-  role: "primary" | "secondary" | "accent";
+export type TemplateCategory =
+  | "lower-third"    // name + title bars — most used in creator content
+  | "title-card"     // full-screen openers
+  | "caption"        // subtitle-style, bottom of frame
+  | "callout"        // arrow + label pointing to something
+  | "social"         // follow/subscribe CTAs
+  | "countdown";     // timer overlays
+
+export const TEMPLATE_CATEGORIES = [
+  "lower-third",
+  "title-card",
+  "caption",
+  "callout",
+  "social",
+  "countdown"
+] as const;
+
+export type AnimationPreset =
+  | "fade"
+  | "slide-up"
+  | "slide-down"
+  | "slide-left"
+  | "slide-right"
+  | "scale-in"
+  | "scale-out"
+  | "blur-in"
+  | "blur-out"
+  | "typewriter"
+  | "none";
+
+export interface LayerAnimation {
+  in: AnimationPreset;
+  out: AnimationPreset;
+  inDuration: number;
+  outDuration: number;
+  hold: "full" | number;
 }
+
+export interface TextLayer {
+  kind: "text";
+  id: string;
+  content: string;
+  fontFamily: string;
+  fontSize: number;
+  color: string;
+  align: "left" | "center" | "right";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  animation: LayerAnimation;
+  role?: "primary" | "secondary" | "accent";
+}
+
+export interface ShapeLayer {
+  kind: "shape";
+  id: string;
+  shape: "rect" | "line" | "circle";
+  fill: string;
+  stroke?: { color: string; width: number };
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  animation: LayerAnimation;
+}
+
+export interface ImageLayer {
+  kind: "image";
+  id: string;
+  url: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  animation: LayerAnimation;
+}
+
+export type TemplateLayer = TextLayer | ShapeLayer | ImageLayer;
+
+export interface TextTemplate {
+  id: string;
+  label: string;
+  name?: string;             // backwards compatibility
+  category: TemplateCategory;
+  duration: number;          // seconds
+  canvasWidth: number;       // design canvas (e.g. 1080)
+  canvasHeight: number;      // design canvas (e.g. 1920 for 9:16)
+  thumbnail: string;         // static preview URL
+  preview: string;           // short loop video URL
+  layers: TemplateLayer[];   // ordered bottom to top
+  
+  // Optional and legacy properties for backwards compatibility
+  lottieData?: any;
+  thumbnailUrl?: string;
+  thumbnailFrame?: number;
+  durationFrames?: number;
+  description?: string;
+  tags?: string[];
+  fps?: number;
+  width?: number;
+  height?: number;
+  textLayers?: any[];
+  defaultPlacement?: string;
+  lottieFile?: string;
+}
+
+// Map TemplateDefinition to TextTemplate for backwards compatibility
+export type TemplateDefinition = TextTemplate;
 
 export interface TemplateCustomization {
   primaryText: string;
   secondaryText?: string;
   accentText?: string;
-  primaryColor?: string; // hex — overrides Lottie color if supported
+  primaryColor?: string; // hex
   secondaryColor?: string;
 }
-
-export interface TemplateDefinition {
-  id: string;
-  name: string;
-  category: TemplateCategory;
-  description: string;
-  tags: string[];
-
-  // Animation properties
-  durationFrames: number; // total frames
-  fps: number; // frames per second (24 or 30)
-  width: number; // canvas width in px
-  height: number; // canvas height in px
-
-  // Text injection points
-  textLayers: TextLayer[];
-
-  // Where this template sits on video
-  defaultPlacement: "lower-third" | "center" | "top" | "full-frame";
-
-  // File reference
-  lottieFile: string; // relative path to .json
-
-  // Preview thumbnail (first frame or keyframe)
-  thumbnailFrame: number; // which frame to use as picker thumbnail
-  thumbnail?: string; // URL to thumbnail image (from API)
-  thumbnailUrl?: string; // Alternative field name for thumbnail URL
-
-  lottieData?: any; // The imported JSON payload for the animation
-}
-
-export const TEMPLATE_CATEGORIES = ["title", "lower-third", "caption", "callout", "social", "outro"] as const;
-export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];
 
 export interface RenderedFrameSequence {
   frames: Blob[]; // PNG blobs, one per frame

@@ -13,7 +13,7 @@
  *   - Dims slightly during ballistic scroll (ISM hint)
  */
 
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useState } from "react";
 import { platform } from "@/core/platform";
 import { cn } from "@/lib/utils";
 import { createRasterSurface, type AnyRasterSurface } from "@/lib/renderEngine/webglRasterSurface";
@@ -53,6 +53,15 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
   const surfaceRef = useRef<AnyRasterSurface | null>(null);
   const imageCanvasRef = useRef<HTMLCanvasElement>(null);
   const cachedImageRef = useRef<HTMLImageElement | null>(null);
+
+  // PERF-5: Debounce image redraws during active resize to avoid canvas reallocation overhead
+  const [debouncedClipWidthPx, setDebouncedClipWidthPx] = useState(clipWidthPx);
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedClipWidthPx(clipWidthPx);
+    }, 50);
+    return () => clearTimeout(handler);
+  }, [clipWidthPx]);
 
   const isVideoSource = useMemo(() => {
     const path = mediaAsset.path ?? "";
@@ -138,7 +147,7 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
     const drawTiles = (img: HTMLImageElement) => {
       if (cancelled) return;
       const dpr = window.devicePixelRatio || 1;
-      const w = Math.max(1, clipWidthPx);
+      const w = Math.max(1, debouncedClipWidthPx);
       const h = stripHeightPx;
 
       canvas.width = w * dpr;
@@ -209,7 +218,7 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
     return () => {
       cancelled = true;
     };
-  }, [mediaAsset.type, mediaAsset.path, mediaAsset.posterFrame, clipWidthPx, stripHeightPx]);
+  }, [mediaAsset.type, mediaAsset.path, mediaAsset.posterFrame, debouncedClipWidthPx, stripHeightPx]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -218,8 +227,8 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
     return (
       <div data-testid="clip-filmstrip" className={cn("relative overflow-hidden rounded-[2px] border border-timeline-filmstrip-border bg-timeline-filmstrip-bg", className)} style={{ height: stripHeightPx, width: "100%", opacity: 1, transition: "opacity 80ms linear" }}>
         <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />
-        {/* Poster overlay while artifacts load — fades out once canvas has content */}
-        {isFallback && mediaAsset.posterFrame && (
+        {/* SMOOTH-4 fix: poster cross-fades out instead of hard pop */}
+        {mediaAsset.posterFrame && (
           <img
             src={resolveMediaSrc(mediaAsset.posterFrame)}
             alt=""
@@ -232,6 +241,8 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
               objectFit: "cover",
               objectPosition: "center",
               pointerEvents: "none",
+              opacity: isFallback ? 1 : 0,
+              transition: "opacity 200ms ease-out",
             }}
             draggable={false}
           />

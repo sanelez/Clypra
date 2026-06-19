@@ -118,7 +118,8 @@ export const PropertiesPanel: React.FC = () => {
   const selectedClip = clips.find((c) => c.id === selectedClipId);
   const selectedAsset = mediaAssets.find((a) => a.id === selectedClip?.mediaId);
   const isVisualClip = selectedAsset?.type === "video" || selectedAsset?.type === "image";
-  const isAudioClip = selectedAsset?.type === "audio";
+  // Audio library clips have kind="audio" and audioPath on the clip but no matching mediaAsset entry
+  const isAudioClip = selectedAsset?.type === "audio" || selectedClip?.kind === "audio" || !!(selectedClip as any)?.audioPath;
   const isVideoClip = selectedAsset?.type === "video"; // Video clips have audio tracks
   const isTextClip = selectedClip && "text" in selectedClip;
   const hasAudioTrack = isAudioClip || isVideoClip; // Both audio clips and video clips have audio
@@ -190,10 +191,11 @@ export const PropertiesPanel: React.FC = () => {
   const isFilter = selectedClip?.kind === "filter" || selectedClip?.id.startsWith("filter-clip-");
   const isTimelineEffectClip = isFilter || selectedClip?.kind === "video-effect" || selectedClip?.kind === "body-effect";
 
-  // Clip type info for the header
-  const typeInfo = getClipTypeInfo(selectedAsset?.type, selectedClip.kind, !!isTextClip, isSticker);
+  // Clip type info for the header. For audio library clips, selectedAsset is undefined; derive type from kind.
+  const effectiveAssetType = selectedAsset?.type ?? (selectedClip.kind === "audio" ? "audio" : undefined);
+  const typeInfo = getClipTypeInfo(effectiveAssetType, selectedClip.kind, !!isTextClip, isSticker);
   const TypeIcon = typeInfo.icon;
-  const clipName = isTextClip ? (textClip.text || "Text").slice(0, 24) : isTimelineEffectClip ? (selectedClip.name || typeInfo.label) : selectedAsset?.name || "Clip";
+  const clipName = isTextClip ? (textClip.text || "Text").slice(0, 24) : isTimelineEffectClip ? (selectedClip.name || typeInfo.label) : selectedAsset?.name || (selectedClip as any)?.audioPath?.split("/").pop() || "Clip";
   const clipDuration = selectedClip.duration.toFixed(1);
 
   return (

@@ -23,6 +23,10 @@ import { screenToCanvas, canvasToScreen, hitTestClip, type ViewportTransform } f
 import { textRenderTrace } from "@/lib/debug/textRenderTrace";
 import { hasTextClipContentTransformDrift, resolveTextClipContentTransform } from "@/lib/text/textClip";
 import type { Clip, TextClip, TransformHandle, TransformState } from "@/types";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import type { ContextMenuItem } from "@/components/ui/ContextMenu";
+import { useProjectStore } from "@/store/projectStore";
+import { Maximize2, Minimize2, RotateCcw } from "lucide-react";
 
 const SELECT_TRACE = import.meta.env.DEV;
 const traceSelect = (...args: unknown[]) => {
@@ -182,10 +186,33 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
   const [isDragging, setIsDragging] = useState(false);
   const [snappedX, setSnappedX] = useState(false);
   const [snappedY, setSnappedY] = useState(false);
+  const [snappedLeft, setSnappedLeft] = useState(false);
+  const [snappedRight, setSnappedRight] = useState(false);
+  const [snappedTop, setSnappedTop] = useState(false);
+  const [snappedBottom, setSnappedBottom] = useState(false);
+
+  const [snapGuideX, setSnapGuideX] = useState<number | null>(null);
+  const [snapGuideY, setSnapGuideY] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+
   const snappedXRef = useRef<boolean>(false);
   const snappedYRef = useRef<boolean>(false);
+  const snappedLeftRef = useRef<boolean>(false);
+  const snappedRightRef = useRef<boolean>(false);
+  const snappedTopRef = useRef<boolean>(false);
+  const snappedBottomRef = useRef<boolean>(false);
+
+  const snapGuideXRef = useRef<number | null>(null);
+  const snapGuideYRef = useRef<number | null>(null);
+  const snapClipXOffsetRef = useRef<number>(0);
+  const snapClipYOffsetRef = useRef<number>(0);
+
   const snapMouseXRef = useRef<number>(0);
   const snapMouseYRef = useRef<number>(0);
+  const snapMouseLeftRef = useRef<number>(0);
+  const snapMouseRightRef = useRef<number>(0);
+  const snapMouseTopRef = useRef<number>(0);
+  const snapMouseBottomRef = useRef<number>(0);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const clickCycleRef = useRef<{ signature: string; index: number }>({ signature: "", index: -1 });
@@ -309,10 +336,30 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
       setIsDragging(true);
       setSnappedX(false);
       setSnappedY(false);
+      setSnappedLeft(false);
+      setSnappedRight(false);
+      setSnappedTop(false);
+      setSnappedBottom(false);
+      setSnapGuideX(null);
+      setSnapGuideY(null);
+
       snappedXRef.current = false;
       snappedYRef.current = false;
+      snappedLeftRef.current = false;
+      snappedRightRef.current = false;
+      snappedTopRef.current = false;
+      snappedBottomRef.current = false;
+      snapGuideXRef.current = null;
+      snapGuideYRef.current = null;
+      snapClipXOffsetRef.current = 0;
+      snapClipYOffsetRef.current = 0;
+
       snapMouseXRef.current = 0;
       snapMouseYRef.current = 0;
+      snapMouseLeftRef.current = 0;
+      snapMouseRightRef.current = 0;
+      snapMouseTopRef.current = 0;
+      snapMouseBottomRef.current = 0;
 
       const rect = overlayRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -419,42 +466,323 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
 
         const SNAP_IN_THRESHOLD = 8;
         const ESCAPE_THRESHOLD = 20;
+        const rotation = selectedClip.rotation ?? 0;
 
-        // X Axis Magnet Snapping
-        if (snappedXRef.current) {
-          const deltaMouseX = Math.abs(canvasCoords.x - snapMouseXRef.current);
-          if (deltaMouseX > ESCAPE_THRESHOLD) {
-            snappedXRef.current = false;
-            setSnappedX(false);
+        if (activeTransform.handle === "move") {
+          const activeClips = clips.filter((c) => c.id !== selectedClip.id && isClipActiveAtTime(c, currentTime));
+
+          // X Axis Snapping (Left, Right, Center)
+          if (snappedXRef.current) {
+            const deltaMouseX = Math.abs(canvasCoords.x - snapMouseXRef.current);
+            if (deltaMouseX > ESCAPE_THRESHOLD) {
+              snappedXRef.current = false;
+              snappedLeftRef.current = false;
+              snappedRightRef.current = false;
+              snapGuideXRef.current = null;
+              setSnappedX(false);
+              setSnappedLeft(false);
+              setSnappedRight(false);
+              setSnapGuideX(null);
+            } else {
+              newTransform.x = snapGuideXRef.current! + snapClipXOffsetRef.current;
+            }
           } else {
-            // Keep locked to center
-            newTransform.x = canvasCenterX - nextW / 2;
+            // Gather all target X coordinates
+            const targetXCandidates: { value: number; type: 'canvas-left' | 'canvas-center' | 'canvas-right' | 'clip' }[] = [
+              { value: 0, type: 'canvas-left' },
+              { value: canvasWidth / 2, type: 'canvas-center' },
+              { value: canvasWidth, type: 'canvas-right' },
+            ];
+
+            activeClips.forEach(c => {
+              targetXCandidates.push({ value: c.x, type: 'clip' });
+              targetXCandidates.push({ value: c.x + c.width / 2, type: 'clip' });
+              targetXCandidates.push({ value: c.x + c.width, type: 'clip' });
+            });
+
+            let bestSnapX: { targetVal: number; clipOffset: number; type: string } | null = null;
+            let minDistanceX = Infinity;
+
+            const sourceXCandidates = rotation === 0
+              ? [
+                  { val: nextX, offset: 0 }, // left edge
+                  { val: nextCenterX, offset: -nextW / 2 }, // center X
+                  { val: nextX + nextW, offset: -nextW }, // right edge
+                ]
+              : [
+                  { val: nextCenterX, offset: -nextW / 2 }, // center X only
+                ];
+
+            for (const source of sourceXCandidates) {
+              for (const target of targetXCandidates) {
+                const dist = Math.abs(source.val - target.value);
+                if (dist <= SNAP_IN_THRESHOLD && dist < minDistanceX) {
+                  minDistanceX = dist;
+                  bestSnapX = {
+                    targetVal: target.value,
+                    clipOffset: source.offset,
+                    type: target.type,
+                  };
+                }
+              }
+            }
+
+            if (bestSnapX) {
+              snappedXRef.current = true;
+              snapMouseXRef.current = canvasCoords.x;
+              snapGuideXRef.current = bestSnapX.targetVal;
+              snapClipXOffsetRef.current = bestSnapX.clipOffset;
+
+              setSnapGuideX(bestSnapX.targetVal);
+              if (bestSnapX.type === 'canvas-left') {
+                setSnappedLeft(true);
+              } else if (bestSnapX.type === 'canvas-right') {
+                setSnappedRight(true);
+              } else if (bestSnapX.type === 'canvas-center') {
+                setSnappedX(true);
+              } else {
+                setSnappedX(true);
+              }
+
+              newTransform.x = bestSnapX.targetVal + bestSnapX.clipOffset;
+            }
+          }
+
+          // Y Axis Snapping (Top, Bottom, Center)
+          if (snappedYRef.current) {
+            const deltaMouseY = Math.abs(canvasCoords.y - snapMouseYRef.current);
+            if (deltaMouseY > ESCAPE_THRESHOLD) {
+              snappedYRef.current = false;
+              snappedTopRef.current = false;
+              snappedBottomRef.current = false;
+              snapGuideYRef.current = null;
+              setSnappedY(false);
+              setSnappedTop(false);
+              setSnappedBottom(false);
+              setSnapGuideY(null);
+            } else {
+              newTransform.y = snapGuideYRef.current! + snapClipYOffsetRef.current;
+            }
+          } else {
+            // Gather all target Y coordinates
+            const targetYCandidates: { value: number; type: 'canvas-top' | 'canvas-center' | 'canvas-bottom' | 'clip' }[] = [
+              { value: 0, type: 'canvas-top' },
+              { value: canvasHeight / 2, type: 'canvas-center' },
+              { value: canvasHeight, type: 'canvas-bottom' },
+            ];
+
+            activeClips.forEach(c => {
+              targetYCandidates.push({ value: c.y, type: 'clip' });
+              targetYCandidates.push({ value: c.y + c.height / 2, type: 'clip' });
+              targetYCandidates.push({ value: c.y + c.height, type: 'clip' });
+            });
+
+            let bestSnapY: { targetVal: number; clipOffset: number; type: string } | null = null;
+            let minDistanceY = Infinity;
+
+            const sourceYCandidates = rotation === 0
+              ? [
+                  { val: nextY, offset: 0 }, // top edge
+                  { val: nextCenterY, offset: -nextH / 2 }, // center Y
+                  { val: nextY + nextH, offset: -nextH }, // bottom edge
+                ]
+              : [
+                  { val: nextCenterY, offset: -nextH / 2 }, // center Y only
+                ];
+
+            for (const source of sourceYCandidates) {
+              for (const target of targetYCandidates) {
+                const dist = Math.abs(source.val - target.value);
+                if (dist <= SNAP_IN_THRESHOLD && dist < minDistanceY) {
+                  minDistanceY = dist;
+                  bestSnapY = {
+                    targetVal: target.value,
+                    clipOffset: source.offset,
+                    type: target.type,
+                  };
+                }
+              }
+            }
+
+            if (bestSnapY) {
+              snappedYRef.current = true;
+              snapMouseYRef.current = canvasCoords.y;
+              snapGuideYRef.current = bestSnapY.targetVal;
+              snapClipYOffsetRef.current = bestSnapY.clipOffset;
+
+              setSnapGuideY(bestSnapY.targetVal);
+              if (bestSnapY.type === 'canvas-top') {
+                setSnappedTop(true);
+              } else if (bestSnapY.type === 'canvas-bottom') {
+                setSnappedBottom(true);
+              } else if (bestSnapY.type === 'canvas-center') {
+                setSnappedY(true);
+              } else {
+                setSnappedY(true);
+              }
+
+              newTransform.y = bestSnapY.targetVal + bestSnapY.clipOffset;
+            }
           }
         } else {
-          if (Math.abs(nextCenterX - canvasCenterX) <= SNAP_IN_THRESHOLD) {
-            snappedXRef.current = true;
-            snapMouseXRef.current = canvasCoords.x;
-            setSnappedX(true);
-            newTransform.x = canvasCenterX - nextW / 2;
-          }
-        }
+          // Resize snapping
+          const handle = activeTransform.handle;
+          const isLeftResize = handle === "w" || handle === "nw" || handle === "sw";
+          const isRightResize = handle === "e" || handle === "ne" || handle === "se";
+          const isTopResize = handle === "n" || handle === "nw" || handle === "ne";
+          const isBottomResize = handle === "s" || handle === "sw" || handle === "se";
 
-        // Y Axis Magnet Snapping
-        if (snappedYRef.current) {
-          const deltaMouseY = Math.abs(canvasCoords.y - snapMouseYRef.current);
-          if (deltaMouseY > ESCAPE_THRESHOLD) {
-            snappedYRef.current = false;
-            setSnappedY(false);
-          } else {
-            // Keep locked to center
-            newTransform.y = canvasCenterY - nextH / 2;
-          }
-        } else {
-          if (Math.abs(nextCenterY - canvasCenterY) <= SNAP_IN_THRESHOLD) {
-            snappedYRef.current = true;
-            snapMouseYRef.current = canvasCoords.y;
-            setSnappedY(true);
-            newTransform.y = canvasCenterY - nextH / 2;
+          if (rotation === 0) {
+            let horizontalSnapped = false;
+
+            const applyLeftResizeSnap = () => {
+              if (handle === "w") {
+                const rightBound = startClip.x + startClip.width;
+                newTransform.x = 0;
+                newTransform.width = rightBound;
+              } else {
+                const centerX = startClip.x + startClip.width / 2;
+                const newWidth = centerX * 2;
+                newTransform.x = 0;
+                newTransform.width = newWidth;
+                if (activeTransform.aspectRatioLocked) {
+                  const aspectRatio = startClip.sourceAspectRatio ?? startClip.width / startClip.height;
+                  const newHeight = newWidth / aspectRatio;
+                  const centerY = startClip.y + startClip.height / 2;
+                  newTransform.y = centerY - newHeight / 2;
+                  newTransform.height = newHeight;
+                }
+              }
+            };
+
+            const applyRightResizeSnap = () => {
+              if (handle === "e") {
+                const leftBound = startClip.x;
+                newTransform.width = canvasWidth - leftBound;
+              } else {
+                const centerX = startClip.x + startClip.width / 2;
+                const newWidth = (canvasWidth - centerX) * 2;
+                newTransform.width = newWidth;
+                newTransform.x = centerX - newWidth / 2;
+                if (activeTransform.aspectRatioLocked) {
+                  const aspectRatio = startClip.sourceAspectRatio ?? startClip.width / startClip.height;
+                  const newHeight = newWidth / aspectRatio;
+                  const centerY = startClip.y + startClip.height / 2;
+                  newTransform.y = centerY - newHeight / 2;
+                  newTransform.height = newHeight;
+                }
+              }
+            };
+
+            const applyTopResizeSnap = () => {
+              if (handle === "n") {
+                const bottomBound = startClip.y + startClip.height;
+                newTransform.y = 0;
+                newTransform.height = bottomBound;
+              } else {
+                const centerY = startClip.y + startClip.height / 2;
+                const newHeight = centerY * 2;
+                newTransform.y = 0;
+                newTransform.height = newHeight;
+                if (activeTransform.aspectRatioLocked) {
+                  const aspectRatio = startClip.sourceAspectRatio ?? startClip.width / startClip.height;
+                  const newWidth = newHeight * aspectRatio;
+                  const centerX = startClip.x + startClip.width / 2;
+                  newTransform.x = centerX - newWidth / 2;
+                  newTransform.width = newWidth;
+                }
+              }
+            };
+
+            const applyBottomResizeSnap = () => {
+              if (handle === "s") {
+                const topBound = startClip.y;
+                newTransform.height = canvasHeight - topBound;
+              } else {
+                const centerY = startClip.y + startClip.height / 2;
+                const newHeight = (canvasHeight - centerY) * 2;
+                newTransform.height = newHeight;
+                newTransform.y = centerY - newHeight / 2;
+                if (activeTransform.aspectRatioLocked) {
+                  const aspectRatio = startClip.sourceAspectRatio ?? startClip.width / startClip.height;
+                  const newWidth = newHeight * aspectRatio;
+                  const centerX = startClip.x + startClip.width / 2;
+                  newTransform.x = centerX - newWidth / 2;
+                  newTransform.width = newWidth;
+                }
+              }
+            };
+
+            if (isLeftResize) {
+              if (snappedLeftRef.current) {
+                const deltaMouseX = Math.abs(canvasCoords.x - snapMouseLeftRef.current);
+                if (deltaMouseX > ESCAPE_THRESHOLD) {
+                  snappedLeftRef.current = false;
+                  setSnappedLeft(false);
+                } else {
+                  horizontalSnapped = true;
+                  applyLeftResizeSnap();
+                }
+              } else if (Math.abs(nextX - 0) <= SNAP_IN_THRESHOLD) {
+                snappedLeftRef.current = true;
+                snapMouseLeftRef.current = canvasCoords.x;
+                setSnappedLeft(true);
+                horizontalSnapped = true;
+                applyLeftResizeSnap();
+              }
+            } else if (isRightResize) {
+              if (snappedRightRef.current) {
+                const deltaMouseX = Math.abs(canvasCoords.x - snapMouseRightRef.current);
+                if (deltaMouseX > ESCAPE_THRESHOLD) {
+                  snappedRightRef.current = false;
+                  setSnappedRight(false);
+                } else {
+                  horizontalSnapped = true;
+                  applyRightResizeSnap();
+                }
+              } else if (Math.abs(nextX + nextW - canvasWidth) <= SNAP_IN_THRESHOLD) {
+                snappedRightRef.current = true;
+                snapMouseRightRef.current = canvasCoords.x;
+                setSnappedRight(true);
+                horizontalSnapped = true;
+                applyRightResizeSnap();
+              }
+            }
+
+            const canSnapVertical = !activeTransform.aspectRatioLocked || !horizontalSnapped;
+            if (canSnapVertical) {
+              if (isTopResize) {
+                if (snappedTopRef.current) {
+                  const deltaMouseY = Math.abs(canvasCoords.y - snapMouseTopRef.current);
+                  if (deltaMouseY > ESCAPE_THRESHOLD) {
+                    snappedTopRef.current = false;
+                    setSnappedTop(false);
+                  } else {
+                    applyTopResizeSnap();
+                  }
+                } else if (Math.abs(nextY - 0) <= SNAP_IN_THRESHOLD) {
+                  snappedTopRef.current = true;
+                  snapMouseTopRef.current = canvasCoords.y;
+                  setSnappedTop(true);
+                  applyTopResizeSnap();
+                }
+              } else if (isBottomResize) {
+                if (snappedBottomRef.current) {
+                  const deltaMouseY = Math.abs(canvasCoords.y - snapMouseBottomRef.current);
+                  if (deltaMouseY > ESCAPE_THRESHOLD) {
+                    snappedBottomRef.current = false;
+                    setSnappedBottom(false);
+                  } else {
+                    applyBottomResizeSnap();
+                  }
+                } else if (Math.abs(nextY + nextH - canvasHeight) <= SNAP_IN_THRESHOLD) {
+                  snappedBottomRef.current = true;
+                  snapMouseBottomRef.current = canvasCoords.y;
+                  setSnappedBottom(true);
+                  applyBottomResizeSnap();
+                }
+              }
+            }
           }
         }
       }
@@ -466,7 +794,7 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
       // The overlay reads from selectedClip (timeline store) for handle positioning
       updateClip(activeTransform.clipId, { ...newTransform, _skipEpochIncrement: false } as any);
     },
-    [isDragging, activeTransform, selectedClip, scale, viewport, canvasWidth, canvasHeight, updateClip, transformController],
+    [isDragging, activeTransform, selectedClip, scale, viewport, canvasWidth, canvasHeight, updateClip, transformController, clips, currentTime],
   );
 
   const handleMouseUp = useCallback(() => {
@@ -476,8 +804,22 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
     setIsDragging(false);
     setSnappedX(false);
     setSnappedY(false);
+    setSnappedLeft(false);
+    setSnappedRight(false);
+    setSnappedTop(false);
+    setSnappedBottom(false);
+    setSnapGuideX(null);
+    setSnapGuideY(null);
     snappedXRef.current = false;
     snappedYRef.current = false;
+    snappedLeftRef.current = false;
+    snappedRightRef.current = false;
+    snappedTopRef.current = false;
+    snappedBottomRef.current = false;
+    snapGuideXRef.current = null;
+    snapGuideYRef.current = null;
+    snapClipXOffsetRef.current = 0;
+    snapClipYOffsetRef.current = 0;
     if (dragCursorRef.current) {
       const cursorClass = getCursorClass(dragCursorRef.current);
       if (cursorClass) {
@@ -517,6 +859,161 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
 
     transformController.endTransform();
   }, [isDragging, activeTransform, execute, selectedClipIds, transformController]);
+
+  const getClipAspect = useCallback(() => {
+    if (!selectedClip) return 16 / 9;
+    if (selectedClip.sourceAspectRatio) return selectedClip.sourceAspectRatio;
+    const asset = useProjectStore.getState().mediaAssets.find((a) => a.id === selectedClip.mediaId);
+    if (asset && asset.width && asset.height) {
+      return asset.width / asset.height;
+    }
+    return selectedClip.width / selectedClip.height;
+  }, [selectedClip]);
+
+  const handleFitCanvas = useCallback(() => {
+    if (!selectedClip) return;
+    const oldVal = {
+      x: selectedClip.x,
+      y: selectedClip.y,
+      width: selectedClip.width,
+      height: selectedClip.height,
+      ...(("fontSize" in selectedClip) ? { fontSize: (selectedClip as any).fontSize } : {})
+    };
+
+    const canvasAspect = canvasWidth / canvasHeight;
+    const clipAspect = getClipAspect();
+
+    let newWidth: number;
+    let newHeight: number;
+    if (clipAspect > canvasAspect) {
+      newWidth = canvasWidth;
+      newHeight = canvasWidth / clipAspect;
+    } else {
+      newHeight = canvasHeight;
+      newWidth = canvasHeight * clipAspect;
+    }
+    const newX = (canvasWidth - newWidth) / 2;
+    const newY = (canvasHeight - newHeight) / 2;
+
+    let newVal: Record<string, any> = {
+      x: newX,
+      y: newY,
+      width: newWidth,
+      height: newHeight,
+    };
+
+    if ("fontSize" in selectedClip) {
+      const sizeScale = newWidth / Math.max(1, selectedClip.width);
+      const currentFontSize = (selectedClip as any).fontSize || 48;
+      newVal.fontSize = Math.max(10, Math.min(300, Math.round(currentFontSize * sizeScale)));
+    }
+
+    execute(new TransformClipCommand(selectedClip.id, oldVal, newVal));
+  }, [selectedClip, canvasWidth, canvasHeight, getClipAspect, execute]);
+
+  const handleFillCanvas = useCallback(() => {
+    if (!selectedClip) return;
+    const oldVal = {
+      x: selectedClip.x,
+      y: selectedClip.y,
+      width: selectedClip.width,
+      height: selectedClip.height,
+      ...(("fontSize" in selectedClip) ? { fontSize: (selectedClip as any).fontSize } : {})
+    };
+
+    const canvasAspect = canvasWidth / canvasHeight;
+    const clipAspect = getClipAspect();
+
+    let newWidth: number;
+    let newHeight: number;
+    if (clipAspect > canvasAspect) {
+      newHeight = canvasHeight;
+      newWidth = canvasHeight * clipAspect;
+    } else {
+      newWidth = canvasWidth;
+      newHeight = canvasWidth / clipAspect;
+    }
+    const newX = (canvasWidth - newWidth) / 2;
+    const newY = (canvasHeight - newHeight) / 2;
+
+    let newVal: Record<string, any> = {
+      x: newX,
+      y: newY,
+      width: newWidth,
+      height: newHeight,
+    };
+
+    if ("fontSize" in selectedClip) {
+      const sizeScale = newWidth / Math.max(1, selectedClip.width);
+      const currentFontSize = (selectedClip as any).fontSize || 48;
+      newVal.fontSize = Math.max(10, Math.min(300, Math.round(currentFontSize * sizeScale)));
+    }
+
+    execute(new TransformClipCommand(selectedClip.id, oldVal, newVal));
+  }, [selectedClip, canvasWidth, canvasHeight, getClipAspect, execute]);
+
+  const handleResetTransform = useCallback(() => {
+    if (!selectedClip) return;
+    const oldVal = {
+      x: selectedClip.x,
+      y: selectedClip.y,
+      width: selectedClip.width,
+      height: selectedClip.height,
+      rotation: selectedClip.rotation,
+      ...(("fontSize" in selectedClip) ? { fontSize: (selectedClip as any).fontSize } : {})
+    };
+
+    let newVal: Record<string, any> = {
+      x: 0,
+      y: 0,
+      rotation: 0,
+    };
+
+    if ("fontSize" in selectedClip) {
+      const defaultFontSize = (selectedClip as any).styleDefinition?.fontSize || 48;
+      const currentFontSize = (selectedClip as any).fontSize || 48;
+      const sizeScale = defaultFontSize / Math.max(1, currentFontSize);
+      newVal.fontSize = defaultFontSize;
+      newVal.width = selectedClip.width * sizeScale;
+      newVal.height = selectedClip.height * sizeScale;
+    } else {
+      const asset = useProjectStore.getState().mediaAssets.find((a) => a.id === selectedClip.mediaId);
+      if (asset && asset.width && asset.height) {
+        newVal.width = asset.width;
+        newVal.height = asset.height;
+      } else {
+        newVal.width = canvasWidth;
+        newVal.height = canvasHeight;
+      }
+    }
+
+    execute(new TransformClipCommand(selectedClip.id, oldVal, newVal));
+  }, [selectedClip, canvasWidth, canvasHeight, execute]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!selectedClip) return;
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }, [selectedClip]);
+
+  const contextMenuItems = React.useMemo(() => [
+    {
+      label: "Fit Canvas",
+      icon: Maximize2,
+      onClick: handleFitCanvas,
+    },
+    {
+      label: "Fill Canvas",
+      icon: Minimize2,
+      onClick: handleFillCanvas,
+    },
+    {
+      label: "Reset Transform",
+      icon: RotateCcw,
+      onClick: handleResetTransform,
+    },
+  ], [handleFitCanvas, handleFillCanvas, handleResetTransform]);
 
   // Attach global mouse listeners during drag
   React.useEffect(() => {
@@ -584,6 +1081,10 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
   const canvasCenterY = canvasHeight / 2;
   const showVerticalCenterGuide = isDragging && snappedX;
   const showHorizontalCenterGuide = isDragging && snappedY;
+  const showLeftGuide = isDragging && snappedLeft;
+  const showRightGuide = isDragging && snappedRight;
+  const showTopGuide = isDragging && snappedTop;
+  const showBottomGuide = isDragging && snappedBottom;
   const centerScreen = canvasToScreen(canvasCenterX, canvasCenterY, viewport, { width: canvasWidth, height: canvasHeight }, scale, zeroOffset);
 
   textRenderTrace("text-overlay-bounds", {
@@ -608,6 +1109,7 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
     <div
       ref={overlayRef}
       className="absolute inset-0 pointer-events-auto z-50"
+      onContextMenu={handleContextMenu}
       style={{
         width: displayWidth,
         height: displayHeight,
@@ -709,6 +1211,67 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
         />
       )}
 
+      {/* Left alignment guide */}
+      {showLeftGuide && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: 0,
+            top: 0,
+            width: "1px",
+            height: `${displayHeight}px`,
+            backgroundColor: "var(--color-handle)",
+            boxShadow: "0 0 4px var(--color-handle)",
+            zIndex: 14,
+          }}
+        />
+      )}
+      {/* Right alignment guide */}
+      {showRightGuide && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: `${displayWidth}px`,
+            top: 0,
+            width: "1px",
+            height: `${displayHeight}px`,
+            backgroundColor: "var(--color-handle)",
+            boxShadow: "0 0 4px var(--color-handle)",
+            zIndex: 14,
+          }}
+        />
+      )}
+      {/* Top alignment guide */}
+      {showTopGuide && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: 0,
+            top: 0,
+            width: `${displayWidth}px`,
+            height: "1px",
+            backgroundColor: "var(--color-handle)",
+            boxShadow: "0 0 4px var(--color-handle)",
+            zIndex: 14,
+          }}
+        />
+      )}
+      {/* Bottom alignment guide */}
+      {showBottomGuide && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: 0,
+            top: `${displayHeight}px`,
+            width: `${displayWidth}px`,
+            height: "1px",
+            backgroundColor: "var(--color-handle)",
+            boxShadow: "0 0 4px var(--color-handle)",
+            zIndex: 14,
+          }}
+        />
+      )}
+
       {/* Rotation degree indicator - shows current rotation angle when rotating */}
       {isDragging && activeTransform?.handle === "rotate" && (
         <div
@@ -724,6 +1287,46 @@ export const TransformOverlay: React.FC<TransformOverlayProps> = ({ canvasWidth,
             {Math.round(rotation)}°
           </div>
         </div>
+      )}
+
+      {/* General vertical snap guide */}
+      {isDragging && snapGuideX !== null && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: `${canvasToScreen(snapGuideX, 0, viewport, { width: canvasWidth, height: canvasHeight }, scale, zeroOffset).x}px`,
+            top: 0,
+            width: "1px",
+            height: `${displayHeight}px`,
+            backgroundColor: "var(--color-handle)",
+            boxShadow: "0 0 4px var(--color-handle)",
+            zIndex: 14,
+          }}
+        />
+      )}
+
+      {/* General horizontal snap guide */}
+      {isDragging && snapGuideY !== null && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: 0,
+            top: `${canvasToScreen(0, snapGuideY, viewport, { width: canvasWidth, height: canvasHeight }, scale, zeroOffset).y}px`,
+            width: `${displayWidth}px`,
+            height: "1px",
+            backgroundColor: "var(--color-handle)",
+            boxShadow: "0 0 4px var(--color-handle)",
+            zIndex: 14,
+          }}
+        />
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          items={contextMenuItems}
+          position={contextMenu}
+          onClose={() => setContextMenu(null)}
+        />
       )}
     </div>
   );

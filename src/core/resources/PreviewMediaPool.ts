@@ -125,16 +125,16 @@ export class PreviewMediaPool {
 
     for (const clip of clips) {
       const asset = assets.find((a) => a.id === clip.mediaId);
-      if (!asset) continue;
       const track = this.trackMap.get(clip.trackId);
       if (track?.visible === false) continue;
 
       const key = `${clip.id}-${clip.mediaId}`;
-      if (asset.type === "video") {
+      if (asset?.type === "video") {
         desiredVideoKeys.add(key);
         // Video clip audio is handled by the video element decode clock.
         // Keep audio elements for explicit audio assets only.
-      } else if (asset.type === "audio") {
+      } else if (asset?.type === "audio" || (clip.kind === "audio" && (clip as any).audioPath)) {
+        // Handle both registered media assets and audio library clips (audioPath on clip)
         desiredAudioKeys.add(key);
       }
     }
@@ -192,12 +192,16 @@ export class PreviewMediaPool {
     // Create or update audio elements
     for (const clip of clips) {
       const asset = assets.find((a) => a.id === clip.mediaId);
-      if (!asset || asset.type !== "audio") continue;
+      // Resolve audio source: registered media asset OR direct audioPath on clip (audio library items)
+      const directAudioPath = (clip as any).audioPath as string | undefined;
+      const isAudioClip = asset?.type === "audio" || (clip.kind === "audio" && !!directAudioPath);
+      if (!isAudioClip) continue;
       const track = this.trackMap.get(clip.trackId);
       if (track?.visible === false) continue;
 
+      const rawPath = asset ? asset.path : directAudioPath!;
       const key = `${clip.id}-${clip.mediaId}`;
-      const sourcePath = asset.path.startsWith("asset://") ? asset.path : convertFileSrc(asset.path);
+      const sourcePath = rawPath.startsWith("asset://") ? rawPath : convertFileSrc(rawPath);
 
       let managed = this.audios.get(key);
       if (!managed) {
