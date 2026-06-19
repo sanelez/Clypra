@@ -9,6 +9,14 @@ import type { TextEffectDefinition } from "../../types/types";
 
 // Mock TextEffectsApi
 vi.mock("../../api/textEffectsApi", () => ({
+  TEXT_EFFECT_CATEGORIES: [
+    "3d",
+    "neon",
+    "essentials",
+    "glitch",
+    "gradient",
+    "outline"
+  ] as const,
   TextEffectsApi: {
     getFullEffect: vi.fn(),
   },

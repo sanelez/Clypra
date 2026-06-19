@@ -4,10 +4,28 @@ import { TemplateCard } from "../TemplateCard";
 import { TextEffectsApi } from "@/features/text-effects/api/textEffectsApi";
 import type { TemplateDefinition } from "@/features/text-templates/types";
 
-// Mock the LottiePlayer component
-vi.mock("@/features/text-templates/LottiePlayer", () => ({
-  LottiePlayer: vi.fn(() => <div data-testid="mock-lottie-player" />),
-}));
+// Mock the TemplatePreviewPlayer component
+vi.mock("@/features/text-templates", () => {
+  const React = require("react");
+  const MockPlayer = React.forwardRef((props: any, ref: any) => {
+    React.useImperativeHandle(ref, () => ({
+      play: vi.fn(),
+      pause: vi.fn(),
+      stop: vi.fn(),
+      goToFrame: vi.fn(),
+      getAnimation: vi.fn(() => ({
+        totalFrames: 100,
+        frameRate: 30,
+        isLoaded: true,
+      })),
+    }));
+    return React.createElement("div", { "data-testid": "mock-lottie-player" });
+  });
+  MockPlayer.displayName = "MockTemplatePreviewPlayer";
+  return {
+    TemplatePreviewPlayer: MockPlayer,
+  };
+});
 
 // Mock TextEffectsApi
 vi.mock("@/features/text-effects/api/textEffectsApi", () => ({

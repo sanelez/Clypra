@@ -350,20 +350,16 @@ describe("useEffectsStore", () => {
     } as any);
 
     // 2. Scanning categories: first few categories return 404/empty, outline returns the match
-    // ALL_CATEGORIES order: ["3d", "neon", "metallic", "glitch", "retro", "gradient", "grunge", "outline", ...]
+    // ALL_CATEGORIES order: ["3d", "neon", "essentials", "glitch", "gradient", "outline"]
     // 3d (not found)
     fetchMock.mockResolvedValueOnce({ ok: false, status: 404 } as any);
     // neon (not found)
     fetchMock.mockResolvedValueOnce({ ok: false, status: 404 } as any);
-    // metallic (not found)
+    // essentials (not found)
     fetchMock.mockResolvedValueOnce({ ok: false, status: 404 } as any);
     // glitch (not found)
     fetchMock.mockResolvedValueOnce({ ok: false, status: 404 } as any);
-    // retro (not found)
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 404 } as any);
     // gradient (not found)
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 404 } as any);
-    // grunge (not found)
     fetchMock.mockResolvedValueOnce({ ok: false, status: 404 } as any);
     // outline (found!)
     fetchMock.mockResolvedValueOnce({

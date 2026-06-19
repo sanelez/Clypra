@@ -117,8 +117,9 @@ export function generateViewportTileAddresses(options: {
   const gridStart = Math.floor(start / interval) * interval;
 
   for (let t = gridStart; t < end; t += interval) {
-    // Clamp timestamp to effective range (respecting video duration)
-    const timestamp = Math.min(Math.max(t, trimIn), effectiveEnd);
+    // Clamp timestamp to effective range (respecting video duration) and round to prevent float precision drift
+    const rawTimestamp = Math.min(Math.max(t, trimIn), effectiveEnd);
+    const timestamp = Math.round(rawTimestamp * 10000) / 10000;
     if (timestamp < start) continue; // Skip tiles before visible region
     if (timestamp >= end) break;
 
