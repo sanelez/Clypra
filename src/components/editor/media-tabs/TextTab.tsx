@@ -77,8 +77,6 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
   // Dynamic API states for Text Effects and Templates
   const { templates, loadTemplates, selectTemplate, isApiConnected: isTemplatesApiConnected, isLoading: isTemplatesLoading } = useTemplateStore();
   const { selectedEffect, clearSelected } = useEffectsStore();
-  const [isEffectsLoading, setIsEffectsLoading] = useState(false);
-  const [isEffectsApiConnected, setIsEffectsApiConnected] = useState(false);
 
   // Load templates only when the "templates" sub-tab is active and templates are not loaded yet
   useEffect(() => {
@@ -86,23 +84,6 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
       loadTemplates();
     }
   }, [activeTab, templates.length]);
-
-  // Load effects health/data only when the "effects" sub-tab is active
-  useEffect(() => {
-    if (activeTab === "effects" && !isEffectsApiConnected) {
-      setIsEffectsLoading(true);
-      TextEffectsApi.checkApiHealth()
-        .then((isOnline: boolean) => {
-          setIsEffectsApiConnected(isOnline);
-        })
-        .catch(() => {
-          setIsEffectsApiConnected(false);
-        })
-        .finally(() => {
-          setIsEffectsLoading(false);
-        });
-    }
-  }, [activeTab, isEffectsApiConnected]);
 
   const hasAudioOrVideoClips = clips.some((clip) => {
     const asset = mediaAssets.find((a) => a.id === clip.mediaId);
@@ -481,8 +462,8 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
   const favoriteTemplatesList = templates.filter((t) => favorites.includes(t.id));
 
   // Global connection status
-  const isCloudConnected = isEffectsApiConnected || isTemplatesApiConnected;
-  const isLibraryLoading = isEffectsLoading || isTemplatesLoading;
+  const isCloudConnected = isTemplatesApiConnected;
+  const isLibraryLoading = isTemplatesLoading;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-surface/5 select-none">
@@ -531,14 +512,7 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
 
           {/* Effects Display Grid */}
           {activeTab === "effects" && (
-            isEffectsLoading ? (
-              <div className="h-40 flex flex-col items-center justify-center gap-2 text-text-muted text-xs">
-                <Loader2 className="w-6 h-6 text-accent animate-spin" />
-                <p className="font-semibold text-text-muted/80">Updating effects library...</p>
-              </div>
-            ) : (
-              <NewEffectGrid searchQuery={searchQuery} onAddToTimeline={onAddToTimeline} />
-            )
+            <NewEffectGrid searchQuery={searchQuery} onAddToTimeline={onAddToTimeline} />
           )}
 
           {/* Templates Display Grid */}
