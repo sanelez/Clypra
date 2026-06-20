@@ -610,14 +610,22 @@ export class FrameScheduler {
                   resolve();
                 };
 
+                const onSeeked = () => {
+                  if (typeof (video as any).requestVideoFrameCallback === "function") {
+                    (video as any).requestVideoFrameCallback(onReady);
+                  } else {
+                    requestAnimationFrame(() => requestAnimationFrame(onReady));
+                  }
+                };
+
                 const cleanup = () => {
-                  video.removeEventListener("seeked", onReady);
+                  video.removeEventListener("seeked", onSeeked);
                   video.removeEventListener("canplay", onReady);
                   video.removeEventListener("error", onReady);
                   job.abortController.signal.removeEventListener("abort", onReady);
                 };
 
-                video.addEventListener("seeked", onReady, { once: true });
+                video.addEventListener("seeked", onSeeked, { once: true });
                 video.addEventListener("canplay", onReady, { once: true });
                 video.addEventListener("error", onReady, { once: true });
                 job.abortController.signal.addEventListener("abort", onReady, { once: true });

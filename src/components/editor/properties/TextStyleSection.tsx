@@ -119,6 +119,16 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({
   const { templates } = useTemplateStore();
   const { definitions } = useEffectsStore();
   const templateDef = templates.find((t) => t.id === textClip.templateId);
+  const innerTemplate = templateDef
+    ? (templateDef.templateData || templateDef.lottieData || templateDef)
+    : null;
+
+  React.useEffect(() => {
+    if (textClip.templateId && templateDef && !templateDef.templateData && !templateDef.lottieData) {
+      useTemplateStore.getState().selectTemplate(templateDef);
+    }
+  }, [textClip.templateId, templateDef]);
+
   const effectFont = textClip.styleId ? definitions[textClip.styleId]?.font : undefined;
   const activeEffectDefinition = textClip.styleId ? definitions[textClip.styleId] : textClip.styleDefinition;
 
@@ -213,7 +223,7 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({
 
     if (newMode === "plain") {
       const textContent = textClip.templateId 
-        ? (customization.layerTexts?.[templateDef?.layers?.find(l => l.kind === "text")?.id || ""] 
+        ? (customization.layerTexts?.[innerTemplate?.layers?.find(l => l.kind === "text")?.id || ""] 
            || customization.primaryText 
            || textClip.text 
            || "Text")
@@ -228,7 +238,7 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({
       });
     } else if (newMode === "effect") {
       const textContent = textClip.templateId 
-        ? (customization.layerTexts?.[templateDef?.layers?.find(l => l.kind === "text")?.id || ""] 
+        ? (customization.layerTexts?.[innerTemplate?.layers?.find(l => l.kind === "text")?.id || ""] 
            || customization.primaryText 
            || textClip.text 
            || "Text")
@@ -381,10 +391,10 @@ export const TextStyleSection: React.FC<TextStyleSectionProps> = ({
                 </button>
               </div>
               <TemplateLayerEditor
-                template={templateDef}
+                template={innerTemplate!}
                 customization={customization}
                 onChange={(nextCust) => {
-                  const firstTextLayer = templateDef.layers.find(l => l.kind === "text");
+                  const firstTextLayer = innerTemplate?.layers?.find(l => l.kind === "text");
                   const primaryTextVal = nextCust.layerTexts?.[firstTextLayer?.id || ""] 
                     || nextCust.primaryText 
                     || textClip.text;

@@ -293,6 +293,27 @@ export class PreviewMediaPool {
       "loadedmetadata",
       () => {
         managed.ready = true;
+        import("../../store/timelineStore")
+          .then(({ useTimelineStore }) => {
+            useTimelineStore.getState().incrementEpoch();
+          })
+          .catch((err) => {
+            console.error("[PreviewMediaPool] Failed to import useTimelineStore on loadedmetadata", err);
+          });
+      },
+      { once: true },
+    );
+
+    video.addEventListener(
+      "loadeddata",
+      () => {
+        import("../../store/timelineStore")
+          .then(({ useTimelineStore }) => {
+            useTimelineStore.getState().incrementEpoch();
+          })
+          .catch((err) => {
+            console.error("[PreviewMediaPool] Failed to import useTimelineStore on loadeddata", err);
+          });
       },
       { once: true },
     );
@@ -308,6 +329,18 @@ export class PreviewMediaPool {
       },
       { once: true },
     );
+
+    video.addEventListener("seeked", () => {
+      if (video.paused) {
+        import("../../store/timelineStore")
+          .then(({ useTimelineStore }) => {
+            useTimelineStore.getState().incrementEpoch();
+          })
+          .catch((err) => {
+            console.error("[PreviewMediaPool] Failed to import useTimelineStore on seeked", err);
+          });
+      }
+    });
 
     video.src = sourcePath;
 
@@ -388,7 +421,10 @@ export class PreviewMediaPool {
         managed.lastHardSeekAtMs = now;
       }
     } else {
-      video.currentTime = clampedTime;
+      const drift = Math.abs(video.currentTime - clampedTime);
+      if (drift > 0.01) {
+        video.currentTime = clampedTime;
+      }
     }
 
     // Play/pause based on clock state
