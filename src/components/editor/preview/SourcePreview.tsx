@@ -13,13 +13,15 @@ import { getPlaybackClock } from "@/hooks/usePlaybackClock";
 import type { SourcePlaybackContext } from "@/core/playback";
 import type { MediaAsset } from "@/types";
 import { GPUPreview } from "./GPUPreview";
-import { AudioWaveform } from "../media-panel/AudioWaveform";
 import { PreviewTransport } from "./PreviewTransport";
 import { createTextClip } from "@/lib/text/textClip";
 import { TextSourcePreview } from "./TextSourcePreview";
 import { useEffectsStore } from "@/features/text-effects/store/effectsStore";
-import { TemplatePreviewPlayer, type TemplatePreviewPlayerHandle } from "@/features/text-templates";
 import { useStickersStore } from "@/features/stickers/store/stickersStore";
+import { VideoSourcePreview } from "./VideoSourcePreview";
+import { AudioSourcePreview } from "./AudioSourcePreview";
+import { ImageSourcePreview } from "./ImageSourcePreview";
+import { StickerSourcePreview, type StickerSourcePreviewHandle } from "./StickerSourcePreview";
 
 const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
 
@@ -34,7 +36,7 @@ export const SourcePreview: React.FC = () => {
   const { project, updateProject, addMediaAsset } = useProjectStore();
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const lottiePlayerRef = useRef<TemplatePreviewPlayerHandle>(null);
+  const lottiePlayerRef = useRef<StickerSourcePreviewHandle>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -111,7 +113,9 @@ export const SourcePreview: React.FC = () => {
 
   // Load Lottie JSON from cache on demand
   useEffect(() => {
-    if (!sourceAsset || sourceAsset.type !== "image" || !sourceAsset.path || !sourceAsset.path.endsWith(".json")) {
+    const isLottie = sourceAsset && sourceAsset.type === "image" && (sourceAsset.stickerFormat === "lottie" || sourceAsset.path?.endsWith(".json"));
+    const lottiePath = sourceAsset?.stickerAnimationPath || sourceAsset?.path;
+    if (!isLottie || !lottiePath) {
       setLottieData(null);
       setLottieError(null);
       return;
@@ -122,7 +126,7 @@ export const SourcePreview: React.FC = () => {
 
     import("@/features/stickers/cache/stickerCache")
       .then(({ stickerCacheManager }) => {
-        return stickerCacheManager.readLottieJson(sourceAsset.path!);
+        return stickerCacheManager.readLottieJson(lottiePath);
       })
       .then((data) => {
         if (active) {
@@ -139,7 +143,7 @@ export const SourcePreview: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [sourceAsset?.id, sourceAsset?.path]);
+  }, [sourceAsset?.id, sourceAsset?.path, sourceAsset?.stickerAnimationPath, sourceAsset?.stickerFormat]);
 
   // Compute Lottie animation duration
   const lottieDuration = useMemo(() => {
@@ -155,19 +159,21 @@ export const SourcePreview: React.FC = () => {
   useEffect(() => {
     setUseGPU(USE_GPU_PREVIEW && sourceAsset?.type === "video");
     setGpuFailed(false);
-    if (sourceAsset?.path && sourceAsset.path.endsWith(".json")) {
+    const isLottie = sourceAsset && sourceAsset.type === "image" && (sourceAsset.stickerFormat === "lottie" || sourceAsset.path?.endsWith(".json"));
+    if (isLottie) {
       setDuration(lottieDuration);
       setCurrentTime(0);
       setIsPlaying(true);
     }
-  }, [sourceAsset?.id, lottieDuration]);
+  }, [sourceAsset?.id, lottieDuration, sourceAsset?.stickerFormat]);
 
   // Set duration when Lottie duration changes
   useEffect(() => {
-    if (sourceAsset?.path && sourceAsset.path.endsWith(".json")) {
+    const isLottie = sourceAsset && sourceAsset.type === "image" && (sourceAsset.stickerFormat === "lottie" || sourceAsset.path?.endsWith(".json"));
+    if (isLottie) {
       setDuration(lottieDuration);
     }
-  }, [lottieDuration, sourceAsset?.path]);
+  }, [lottieDuration, sourceAsset?.path, sourceAsset?.stickerFormat]);
 
   // Keep Lottie play state in sync with isPlaying
   useEffect(() => {
@@ -181,7 +187,8 @@ export const SourcePreview: React.FC = () => {
 
   // Virtual clock for Lottie playback
   useEffect(() => {
-    if (!sourceAsset || !sourceAsset.path || !sourceAsset.path.endsWith(".json")) return;
+    const isLottie = sourceAsset && sourceAsset.type === "image" && (sourceAsset.stickerFormat === "lottie" || sourceAsset.path?.endsWith(".json"));
+    if (!isLottie) return;
     if (!isPlaying) return;
 
     const timer = setInterval(() => {
@@ -211,7 +218,7 @@ export const SourcePreview: React.FC = () => {
     }, 16);
 
     return () => clearInterval(timer);
-  }, [isPlaying, duration, lottieData, sourceAsset?.id, sourceAsset?.path]);
+  }, [isPlaying, duration, lottieData, sourceAsset?.id, sourceAsset?.path, sourceAsset?.stickerFormat]);
 
   const handleSeek = useCallback(
     (time: number) => {
@@ -219,7 +226,8 @@ export const SourcePreview: React.FC = () => {
         setCurrentTime(Math.max(0, Math.min(time, 3.0)));
         return;
       }
-      if (sourceAsset?.path && sourceAsset.path.endsWith(".json")) {
+      const isLottie = sourceAsset && sourceAsset.type === "image" && (sourceAsset.stickerFormat === "lottie" || sourceAsset.path?.endsWith(".json"));
+      if (isLottie) {
         const targetTime = Math.max(0, Math.min(time, duration));
         setCurrentTime(targetTime);
         if (lottiePlayerRef.current && lottieData) {
@@ -231,7 +239,7 @@ export const SourcePreview: React.FC = () => {
       }
       sourceCtxRef.current?.seek(time);
     },
-    [sourceAsset?.type, sourceAsset?.path, duration, lottieData],
+    [sourceAsset?.type, sourceAsset?.path, sourceAsset?.stickerFormat, duration, lottieData],
   );
 
   const handlePlayPause = useCallback(() => {
@@ -245,7 +253,8 @@ export const SourcePreview: React.FC = () => {
       });
       return;
     }
-    if (sourceAsset?.path && sourceAsset.path.endsWith(".json")) {
+    const isLottie = sourceAsset && sourceAsset.type === "image" && (sourceAsset.stickerFormat === "lottie" || sourceAsset.path?.endsWith(".json"));
+    if (isLottie) {
       setIsPlaying((prev) => {
         const next = !prev;
         if (next && currentTime >= duration) {
@@ -270,7 +279,7 @@ export const SourcePreview: React.FC = () => {
         ctx.play();
       }
     }
-  }, [useGPU, sourceAsset?.type, sourceAsset?.path, currentTime, duration]);
+  }, [useGPU, sourceAsset?.type, sourceAsset?.path, sourceAsset?.stickerFormat, currentTime, duration]);
 
   const handlePlayMarkedRegion = useCallback(() => {
     sourceCtxRef.current?.playMarkedRegion();
@@ -497,33 +506,36 @@ export const SourcePreview: React.FC = () => {
       <div className="flex-1 flex items-center justify-center overflow-hidden checkerboard relative">
         <div className="w-full h-full flex items-center justify-center relative z-10">
           {sourceAsset.type === "video" ? (
-            useGPU && !gpuFailed ? (
-              <GPUPreview
-                videoPath={sourceAsset.path}
-                currentTime={currentTime}
-                isPlaying={isPlaying}
-                width={sourceAsset.width || 1920}
-                height={sourceAsset.height || 1080}
-                duration={sourceAsset.duration}
-                frameRate={30}
-                onTimeUpdate={(time: number) => {
-                  setCurrentTime(time);
-                  // Stop playing when reaching end
-                  if (time >= duration && duration > 0) {
-                    setIsPlaying(false);
-                  }
-                }}
-                className="max-w-full max-h-full shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 bg-black"
-              />
-            ) : (
-              <video ref={videoRef} src={sourcePath} className="max-w-full max-h-full shadow-[0_0_40px_rgba(0,0,0,0.8)] ring-1 ring-white/10 bg-black" playsInline preload="auto" />
-            )
+            <VideoSourcePreview
+              videoRef={videoRef}
+              src={sourcePath}
+              currentTime={currentTime}
+              isPlaying={isPlaying}
+              width={sourceAsset.width || 1920}
+              height={sourceAsset.height || 1080}
+              duration={sourceAsset.duration}
+              useGPU={useGPU}
+              gpuFailed={gpuFailed}
+              onTimeUpdate={(time: number) => {
+                setCurrentTime(time);
+                if (time >= duration && duration > 0) {
+                  setIsPlaying(false);
+                }
+              }}
+            />
           ) : sourceAsset.type === "image" ? (
-            sourceAsset.path?.endsWith(".json") ? (
+            (sourceAsset.stickerFormat === "lottie" || sourceAsset.path?.endsWith(".json")) ? (
               lottieError ? (
                 <div className="text-red-400 text-xs">{lottieError}</div>
               ) : lottieData ? (
-                <TemplatePreviewPlayer ref={lottiePlayerRef} lottieData={lottieData} autoplay={isPlaying} loop={true} mode="canvas" className="max-w-full max-h-full" />
+                <StickerSourcePreview
+                  ref={lottiePlayerRef}
+                  lottieData={lottieData}
+                  isPlaying={isPlaying}
+                  loop={true}
+                  speed={1}
+                  className="max-w-full max-h-full"
+                />
               ) : (
                 <div className="text-text-muted text-xs flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -531,16 +543,20 @@ export const SourcePreview: React.FC = () => {
                 </div>
               )
             ) : (
-              <img src={sourcePath} alt={sourceAsset.name} className="max-w-full max-h-full object-contain" />
+              <ImageSourcePreview src={sourcePath} alt={sourceAsset.name} />
             )
           ) : sourceAsset.type === "text" ? (
             <TextSourcePreview preset={sourceTextPreset} />
           ) : (
-            <AudioWaveform audioElement={audioRef.current} isPlaying={isPlaying} coverImage={sourceAsset.coverArt} audioName={sourceAsset.name} className="w-full h-full" />
+            <AudioSourcePreview
+              audioRef={audioRef}
+              src={sourcePath}
+              isPlaying={isPlaying}
+              coverImage={sourceAsset.coverArt}
+              audioName={sourceAsset.name}
+            />
           )}
         </div>
-        {/* Hidden audio element for audio playback */}
-        {sourceAsset.type === "audio" && <audio ref={audioRef} src={sourcePath} preload="auto" style={{ display: "none" }} />}
       </div>
 
       {sourceAsset.type === "text" ? (

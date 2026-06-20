@@ -179,15 +179,19 @@ const StickerCard: React.FC<{ sticker: StickerItem; onAddToTimeline?: (item: any
       }
 
       const appCache = await import("@tauri-apps/api/path").then((m) => m.appCacheDir());
-      const absolutePath = await import("@tauri-apps/api/path").then((m) => m.join(appCache, cached.localAnimationPath));
+      const absoluteImagePath = cached.localImagePath ? await import("@tauri-apps/api/path").then((m) => m.join(appCache, cached.localImagePath)) : "";
+      const absoluteAnimationPath = cached.localAnimationPath ? await import("@tauri-apps/api/path").then((m) => m.join(appCache, cached.localAnimationPath)) : "";
 
       const mediaAsset: MediaAsset = {
         id: `sticker-${sticker.id}`,
         name: sticker.name || "Sticker",
-        path: absolutePath,
+        path: absoluteImagePath,
         type: "image",
-        duration: 0,
+        duration: 3.0,
         size: 0,
+        stickerFormat: "lottie",
+        stickerAnimationPath: absoluteAnimationPath,
+        stickerSourceId: sticker.id,
       };
 
       previewAsset(mediaAsset);
@@ -234,27 +238,8 @@ const StickerCard: React.FC<{ sticker: StickerItem; onAddToTimeline?: (item: any
 
       {/* Preview area - with hover scale animation like TemplateCard */}
       <div className="flex-1 flex items-center justify-center w-full select-none relative overflow-hidden transition-transform duration-500 ease-out group-hover:scale-[1.05]">
-        {/* Preview (shown on hover) - plays .webm or displays .gif without downloading Lottie JSON */}
-        {sticker.preview?.endsWith(".gif") || sticker.preview?.includes("-preview.gif") ? (
-          <img
-            src={sticker.preview}
-            alt={`${sticker.name} preview`}
-            className={`max-w-full max-h-full object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)] select-none pointer-events-none transition-opacity duration-300 absolute inset-0 m-auto ${
-              isHovered ? "opacity-100 z-10" : "opacity-0 z-0"
-            }`}
-          />
-        ) : (
-          <video
-            src={sticker.preview}
-            autoPlay={isHovered}
-            loop
-            muted
-            playsInline
-            className={`max-w-full max-h-full object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)] select-none pointer-events-none transition-opacity duration-300 absolute inset-0 m-auto ${
-              isHovered ? "opacity-100 z-10" : "opacity-0 z-0"
-            }`}
-          />
-        )}
+        {/* GIF Preview (shown on hover) */}
+        <img src={sticker.preview} alt={`${sticker.name} Preview`} className={`max-w-full max-h-full object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)] select-none pointer-events-none transition-opacity duration-300 absolute inset-0 m-auto ${isHovered ? "opacity-100 z-10" : "opacity-0 z-0"}`} />
 
         {/* Static Thumbnail */}
         {!imageError ? (
