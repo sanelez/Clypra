@@ -315,12 +315,16 @@ export const EditorLayout: React.FC = () => {
         useProjectStore.getState().showToast("Select two adjacent clips or place the playhead at a cut", "warning");
         return;
       }
-      const transitionType = item?.preview === "dissolve" || item?.name?.toLowerCase?.() === "dissolve" ? "dissolve" : "fade";
-      const result = createTransitionBetweenClips(pair[0], pair[1], transitionType, Number(item?.duration) || 0.5);
+
+      // Use the transition renderer from the API instead of hardcoding
+      const transitionType = item?.renderer || item?.category || "fade";
+      const transitionDuration = item?.duration?.default || Number(item?.duration) || 0.5;
+
+      const result = createTransitionBetweenClips(pair[0], pair[1], transitionType, transitionDuration);
       if (result.error) {
         useProjectStore.getState().showToast(result.error, "warning");
       } else {
-        useProjectStore.getState().showToast(`${item?.name || "Transition"} added`);
+        useProjectStore.getState().showToast(`${item?.name || "Transition"} added between clips`);
       }
     } else if (type === "effects") {
       const selectedClipId = selectedClipIds[0] ?? null;
