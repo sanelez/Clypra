@@ -123,15 +123,22 @@ const TransitionCard: React.FC<{ transition: TransitionAsset; onAddToTimeline: (
 
   // Handle video playback on hover
   useEffect(() => {
-    if (videoRef.current) {
-      if (isHovered) {
-        videoRef.current.play().catch(() => {
-          // Autoplay failed, ignore
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (isHovered) {
+      // Reset to start and play
+      video.currentTime = 0;
+      const playPromise = video.play();
+
+      if (playPromise !== undefined) {
+        playPromise.catch((error) => {
+          console.error("Video play failed:", error);
         });
-      } else {
-        videoRef.current.pause();
-        videoRef.current.currentTime = 0;
       }
+    } else {
+      video.pause();
+      video.currentTime = 0;
     }
   }, [isHovered]);
 
@@ -153,7 +160,7 @@ const TransitionCard: React.FC<{ transition: TransitionAsset; onAddToTimeline: (
       {/* Preview area - with hover scale animation */}
       <div className="flex-1 flex items-center justify-center w-full select-none relative overflow-hidden transition-transform duration-500 ease-out group-hover:scale-[1.05]">
         {/* WebM Video Preview (shown on hover) */}
-        {transition.preview && <video ref={videoRef} src={transition.preview} loop muted playsInline preload="metadata" className={`max-w-full max-h-full object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)] select-none pointer-events-none transition-opacity duration-300 absolute inset-0 m-auto ${isHovered ? "opacity-100 z-10" : "opacity-0 z-0"}`} />}
+        {transition.preview && <video ref={videoRef} src={transition.preview} loop muted playsInline preload="auto" controls={false} disablePictureInPicture style={{ pointerEvents: "none" }} className={`max-w-full max-h-full object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)] select-none transition-opacity duration-300 absolute inset-0 m-auto ${isHovered ? "opacity-100 z-10" : "opacity-0 z-0"}`} />}
 
         {/* Static Thumbnail */}
         {!imageError ? (
