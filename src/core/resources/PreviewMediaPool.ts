@@ -13,6 +13,19 @@
  * Architecture:
  *   Timeline clips → PreviewMediaPool.sync() → hidden DOM elements
  *   FrameScheduler ← getVideoElements() ─────┘
+ *
+ * ARCHITECTURAL FIX (2025-01):
+ * Fixed autoplay blocking and element churn during playback by decoupling:
+ * 1. Clip existence (timeline state)
+ * 2. Render eligibility (active playback window)
+ * 3. Element residency (DOM cache)
+ *
+ * Key changes:
+ * - Elements keyed by media source, not clip ID (persistent across splits)
+ * - Elements stay cached when clips leave active window (no disposal on boundary)
+ * - play() moved to separate playback controller with proper guards
+ * - NotAllowedError latch prevents infinite retry loops
+ * - LRU eviction based on time/memory, not activity window
  */
 
 import type { Clip, MediaAsset } from "@/types";
@@ -33,6 +46,7 @@ export interface PreviewSyncState {
 
 interface ManagedVideo {
   element: HTMLVideoElement;
+  /** Currently bound clip ID (can change as clips are reassigned) */
   clipId: string;
   mediaId: string;
   sourcePath: string;
@@ -43,6 +57,19 @@ interface ManagedVideo {
   lastHardSeekAtMs: number;
   /** True when element is being intentionally disposed/cleared */
   disposing: boolean;
+  /** Play attempt tracking for debugging */
+  playAttempts: number;
+  lastPlayAttemptMs: number;
+  playPromiseInFlight: boolean;
+  lastPlayFailure: { error: string; timestamp: number } | null;
+  autoplayBlocked: boolean;
+  createdAt: number;
+  /** Last time this element was used (for LRU eviction) */
+  lastUsedAt: number;
+  /** Whether element is currently active in render window */
+  isActive: boolean;
+  /** Playback state machine */
+  playbackState: "idle" | "playing" | "paused" | "blocked";
 }
 
 interface ManagedAudio {
@@ -78,12 +105,21 @@ function findPrimaryVideoClip(videoClips: Clip[], tracks: Array<{ id: string; ty
 
 /**
  * Calculate the source time for a clip at a given clock time.
+ *
+ * BOUNDARY HANDLING: Uses a small tolerance (16ms ~= 1 frame at 60fps) to keep
+ * clips active slightly beyond their boundaries. This prevents stuttering during
+ * split transitions by ensuring continuous decode/playback.
  */
 function getClipSourceTime(clip: Clip, clockTime: number): number | null {
   const clipLocalTime = clockTime - clip.startTime;
-  if (clipLocalTime < 0 || clipLocalTime > clip.duration) {
+
+  // Allow small tolerance beyond boundaries to prevent stutter at splits
+  const BOUNDARY_TOLERANCE = 0.016; // ~1 frame at 60fps
+
+  if (clipLocalTime < -BOUNDARY_TOLERANCE || clipLocalTime > clip.duration + BOUNDARY_TOLERANCE) {
     return null; // Clip not active
   }
+
   const trimIn = clip.trimIn || 0;
   const trimOut = clip.trimOut ?? trimIn + clip.duration;
   const sourceTime = Math.max(0, trimIn + clipLocalTime);
@@ -100,14 +136,44 @@ function getClipPrewarmSourceTime(clip: Clip, clockTime: number): number | null 
 
 export class PreviewMediaPool {
   private container: HTMLDivElement;
-  private videos = new Map<string, ManagedVideo>();
+
+  // NEW ARCHITECTURE: Separate element cache from clip-to-element mapping
+  // Element cache is keyed by media source (persistent across clip changes)
+  private videoCache = new Map<string, ManagedVideo>();
+  // Active clip-to-element binding (changes as clips move in/out of window)
+  private activeClipBindings = new Map<string, string>(); // clipId -> cacheKey
+
   private audios = new Map<string, ManagedAudio>();
   private lastSyncState: PreviewSyncState | null = null;
   private trackMap = new Map<string, { id: string; type: string; visible?: boolean; muted?: boolean }>();
   private _isDisposed = false;
 
+  // Playback controller state (separate from sync)
+  private sessionAutoplayBlocked = false;
+  private lastUserGestureTime = 0;
+
   /** Whether requestVideoFrameCallback is available */
   private hasRVFC = typeof HTMLVideoElement !== "undefined" && "requestVideoFrameCallback" in HTMLVideoElement.prototype;
+
+  // ─── INSTRUMENTATION ────────────────────────────────────────────────────
+  private syncCallCount = 0;
+  private lastSyncClipIds = new Set<string>();
+  private playAttemptLog: Array<{
+    timestamp: number;
+    elementKey: string;
+    clipId: string;
+    wasPlaying: boolean;
+    promiseInFlight: boolean;
+    elementAge: number;
+    source: string;
+    result: "success" | "rejected" | "pending";
+    error?: string;
+  }> = [];
+  private maxLogSize = 100;
+
+  // LRU cache limits
+  private readonly MAX_CACHED_VIDEOS = 20;
+  private readonly CACHE_EVICTION_AGE_MS = 30000; // 30 seconds unused
 
   constructor() {
     this.container = document.createElement("div");
@@ -115,11 +181,23 @@ export class PreviewMediaPool {
     // Browsers suspend decoding for completely offscreen or display:none elements.
     this.container.style.cssText = "position:fixed;left:0;top:0;width:256px;height:256px;opacity:0.001;pointer-events:none;z-index:-9999;overflow:hidden;";
     document.body.appendChild(this.container);
+
+    // ─── INSTRUMENTATION: Register pool for console access ────────────────
+    if (typeof window !== "undefined") {
+      if (!(window as any).__previewMediaPools) {
+        (window as any).__previewMediaPools = [];
+      }
+      (window as any).__previewMediaPools.push(this);
+    }
+    // ───────────────────────────────────────────────────────────────────────
   }
 
   /**
    * Synchronize the pool with current timeline clips and clock state.
    * Creates/destroys elements as needed and updates playback state.
+   *
+   * ARCHITECTURAL CHANGE: This method now only reconciles state.
+   * It does NOT initiate playback. Playback is controlled separately.
    */
   sync(clips: Clip[], assets: MediaAsset[], tracks: Array<{ id: string; type: string }>, syncState: PreviewSyncState): void {
     if (this._isDisposed) {
@@ -127,10 +205,27 @@ export class PreviewMediaPool {
       return;
     }
 
+    // ─── INSTRUMENTATION: Track sync frequency and structural changes ────────
+    this.syncCallCount++;
+    const currentClipIds = new Set(clips.map((c) => c.id));
+    const structuralChange = this.detectStructuralChange(currentClipIds);
+
+    if (structuralChange.changed) {
+      console.log(`[PreviewMediaPool INSTRUMENTATION] Sync #${this.syncCallCount} - STRUCTURAL CHANGE detected:`, {
+        added: structuralChange.added,
+        removed: structuralChange.removed,
+        playbackState: syncState.state,
+        time: syncState.time.toFixed(3),
+      });
+    }
+
+    this.lastSyncClipIds = currentClipIds;
+    // ─────────────────────────────────────────────────────────────────────────
+
     this.trackMap = new Map(tracks.map((track) => [track.id, track]));
 
-    // Determine which clips need video/audio elements
-    const desiredVideoKeys = new Set<string>();
+    // NEW ARCHITECTURE: Build desired state without immediate disposal
+    const desiredVideoBindings = new Map<string, { cacheKey: string; clip: Clip; asset: MediaAsset; isActive: boolean }>();
     const desiredAudioKeys = new Set<string>();
 
     for (const clip of clips) {
@@ -138,72 +233,88 @@ export class PreviewMediaPool {
       const track = this.trackMap.get(clip.trackId);
       if (track?.visible === false) continue;
 
-      const key = `${clip.id}-${clip.mediaId}`;
-
       if (asset?.type === "video") {
-        desiredVideoKeys.add(key);
-        // Video clip audio is handled by the video element decode clock.
-        // Keep audio elements for explicit audio assets only.
+        const sourcePath = asset.path.startsWith("asset://") ? asset.path : convertFileSrc(asset.path);
+        const cacheKey = `${clip.mediaId}-${sourcePath}`; // Key by MEDIA, not clip
+        const sourceTime = getClipSourceTime(clip, syncState.time);
+        const isActive = sourceTime !== null; // Is clip in active playback window?
+
+        desiredVideoBindings.set(clip.id, { cacheKey, clip, asset, isActive });
       } else if (asset?.type === "audio" || (clip.kind === "audio" && (clip as any).audioPath)) {
-        // Handle both registered media assets and audio library clips (audioPath on clip)
+        const key = `${clip.id}-${clip.mediaId}`;
         desiredAudioKeys.add(key);
       }
     }
 
-    // Remove obsolete video elements
-    for (const [key, managed] of this.videos) {
-      if (!desiredVideoKeys.has(key)) {
-        this.disposeVideo(key, managed);
-      }
-    }
-
-    // Remove obsolete audio elements
+    // Remove obsolete audio elements (audio disposal is simpler, keep existing logic)
     for (const [key, managed] of this.audios) {
       if (!desiredAudioKeys.has(key)) {
         this.disposeAudio(key, managed);
       }
     }
 
-    // Pick one primary ACTIVE video clip for audible playback (prevents overlapping voices)
-    const activeVisibleVideoClips = clips.filter((clip) => {
-      const asset = assets.find((a) => a.id === clip.mediaId);
-      if (!asset || asset.type !== "video") return false;
-      const track = this.trackMap.get(clip.trackId);
-      if (track?.visible === false) return false;
-      return getClipSourceTime(clip, syncState.time) !== null;
-    });
-    const primaryVideoClip = findPrimaryVideoClip(activeVisibleVideoClips, tracks);
+    // Update active clip bindings and mark inactive elements
+    const newActiveBindings = new Map<string, string>();
 
-    // Create or update video elements
-    for (const clip of clips) {
-      const asset = assets.find((a) => a.id === clip.mediaId);
-      if (!asset || asset.type !== "video") continue;
-      const track = this.trackMap.get(clip.trackId);
-      if (track?.visible === false) continue;
+    for (const [clipId, { cacheKey, clip, asset, isActive }] of desiredVideoBindings) {
+      newActiveBindings.set(clipId, cacheKey);
 
-      const key = `${clip.id}-${clip.mediaId}`;
-      const sourcePath = asset.path.startsWith("asset://") ? asset.path : convertFileSrc(asset.path);
-
-      let managed = this.videos.get(key);
+      // Get or create cached element
+      let managed = this.videoCache.get(cacheKey);
       if (!managed) {
-        managed = this.createVideo(key, clip.id, clip.mediaId, sourcePath);
-      } else if (managed.sourcePath !== sourcePath) {
-        // Source changed — recycle element
-        this.disposeVideo(key, managed);
-        managed = this.createVideo(key, clip.id, clip.mediaId, sourcePath);
+        const sourcePath = asset.path.startsWith("asset://") ? asset.path : convertFileSrc(asset.path);
+        managed = this.createVideo(cacheKey, clip.id, clip.mediaId, sourcePath);
+      } else {
+        // Element exists - update its binding
+        managed.clipId = clip.id;
+        managed.lastUsedAt = performance.now();
       }
 
-      if (managed) {
+      // Mark activity state (does NOT dispose when inactive)
+      managed.isActive = isActive;
+
+      if (isActive) {
+        // Only update active elements
+        const track = this.trackMap.get(clip.trackId);
         const isTrackMuted = track?.muted === true;
+
+        // Find primary video for audio routing
+        const activeVisibleVideoClips = clips.filter((c) => {
+          const a = assets.find((x) => x.id === c.mediaId);
+          if (!a || a.type !== "video") return false;
+          const t = this.trackMap.get(c.trackId);
+          if (t?.visible === false) return false;
+          return getClipSourceTime(c, syncState.time) !== null;
+        });
+        const primaryVideoClip = findPrimaryVideoClip(activeVisibleVideoClips, tracks);
         const isPrimaryAudibleVideo = primaryVideoClip?.id === clip.id;
+
         this.updateVideoElement(managed, clip, syncState, tracks, isPrimaryAudibleVideo, isTrackMuted);
+      } else {
+        // Inactive element: pause but don't dispose
+        if (!managed.element.paused) {
+          managed.element.pause();
+        }
+        if (managed.rvfcHandle !== null && this.hasRVFC) {
+          try {
+            managed.element.cancelVideoFrameCallback(managed.rvfcHandle);
+          } catch {
+            // ignore
+          }
+          managed.rvfcHandle = null;
+        }
+        managed.playbackState = "idle";
       }
     }
 
-    // Create or update audio elements
+    this.activeClipBindings = newActiveBindings;
+
+    // LRU eviction: Remove unused cached elements (not just inactive ones)
+    this.evictUnusedElements();
+
+    // Create or update audio elements (unchanged logic)
     for (const clip of clips) {
       const asset = assets.find((a) => a.id === clip.mediaId);
-      // Resolve audio source: registered media asset OR direct audioPath on clip (audio library items)
       const directAudioPath = (clip as any).audioPath as string | undefined;
       const isAudioClip = asset?.type === "audio" || (clip.kind === "audio" && !!directAudioPath);
       if (!isAudioClip) continue;
@@ -233,14 +344,21 @@ export class PreviewMediaPool {
 
   /**
    * Get video elements for scheduler rasterization bypass.
-   * Returns ALL elements so the scheduler can use them even before metadata loads;
-   * the rasterizer checks readyState itself.
+   * Returns ALL cached elements (not just active ones) so scheduler can query readyState.
    */
   getVideoElements(): Map<string, HTMLVideoElement> {
     const result = new Map<string, HTMLVideoElement>();
-    for (const [key, managed] of this.videos) {
-      result.set(key, managed.element);
+
+    // Map by clip-media composite key that rasterizer expects
+    for (const [clipId, cacheKey] of this.activeClipBindings) {
+      const managed = this.videoCache.get(cacheKey);
+      if (managed) {
+        // Use legacy key format: ${clipId}-${mediaId}
+        const legacyKey = `${clipId}-${managed.mediaId}`;
+        result.set(legacyKey, managed.element);
+      }
     }
+
     return result;
   }
 
@@ -260,7 +378,7 @@ export class PreviewMediaPool {
    * Used when the desktop app loses foreground before RAF has a chance to sync.
    */
   pauseAll(): void {
-    for (const managed of this.videos.values()) {
+    for (const managed of this.videoCache.values()) {
       if (managed.rvfcHandle !== null && this.hasRVFC) {
         try {
           managed.element.cancelVideoFrameCallback(managed.rvfcHandle);
@@ -270,6 +388,7 @@ export class PreviewMediaPool {
         managed.rvfcHandle = null;
       }
       managed.element.pause();
+      managed.playbackState = "paused";
     }
 
     for (const managed of this.audios.values()) {
@@ -284,10 +403,15 @@ export class PreviewMediaPool {
     if (this._isDisposed) return;
     this._isDisposed = true;
 
-    for (const [key, managed] of this.videos) {
+    // ─── INSTRUMENTATION: Print final diagnostics ─────────────────────────
+    this.printDiagnostics();
+    // ──────────────────────────────────────────────────────────────────────
+
+    for (const [key, managed] of this.videoCache) {
       this.disposeVideo(key, managed);
     }
-    this.videos.clear();
+    this.videoCache.clear();
+    this.activeClipBindings.clear();
 
     for (const [key, managed] of this.audios) {
       this.disposeAudio(key, managed);
@@ -304,20 +428,32 @@ export class PreviewMediaPool {
    * MUST be called synchronously inside a user gesture event handler (like click).
    */
   unlockAudio(): void {
-    for (const managed of this.videos.values()) {
+    // Record user gesture time for playback controller
+    this.lastUserGestureTime = performance.now();
+    this.sessionAutoplayBlocked = false;
+
+    console.log("[PreviewMediaPool] Unlocking audio from user gesture - clearing autoplay blocks");
+
+    for (const managed of this.videoCache.values()) {
+      // Clear autoplay block on user gesture
+      managed.autoplayBlocked = false;
+      managed.playbackState = "idle";
+
       const video = managed.element;
       const wasMuted = video.muted;
       video.muted = true;
       const promise = video.play();
       if (promise !== undefined) {
-        promise.then(() => {
-          video.pause();
-          video.muted = wasMuted;
-        }).catch(() => {
-          // Promise might be aborted, but user activation is registered anyway
-          video.pause();
-          video.muted = wasMuted;
-        });
+        promise
+          .then(() => {
+            video.pause();
+            video.muted = wasMuted;
+          })
+          .catch(() => {
+            // Promise might be aborted, but user activation is registered anyway
+            video.pause();
+            video.muted = wasMuted;
+          });
       } else {
         video.pause();
         video.muted = wasMuted;
@@ -330,13 +466,15 @@ export class PreviewMediaPool {
       audio.muted = true;
       const promise = audio.play();
       if (promise !== undefined) {
-        promise.then(() => {
-          audio.pause();
-          audio.muted = wasMuted;
-        }).catch(() => {
-          audio.pause();
-          audio.muted = wasMuted;
-        });
+        promise
+          .then(() => {
+            audio.pause();
+            audio.muted = wasMuted;
+          })
+          .catch(() => {
+            audio.pause();
+            audio.muted = wasMuted;
+          });
       } else {
         audio.pause();
         audio.muted = wasMuted;
@@ -364,6 +502,18 @@ export class PreviewMediaPool {
       ready: false,
       lastHardSeekAtMs: 0,
       disposing: false,
+      // ─── INSTRUMENTATION ────────────────────────────────────────────────
+      playAttempts: 0,
+      lastPlayAttemptMs: 0,
+      playPromiseInFlight: false,
+      lastPlayFailure: null,
+      autoplayBlocked: false,
+      createdAt: performance.now(),
+      // ─── NEW ARCHITECTURE ───────────────────────────────────────────────
+      lastUsedAt: performance.now(),
+      isActive: false,
+      playbackState: "idle",
+      // ────────────────────────────────────────────────────────────────────
     };
 
     // Wait for metadata before marking ready
@@ -427,7 +577,7 @@ export class PreviewMediaPool {
 
     this.container.appendChild(video);
 
-    this.videos.set(key, managed);
+    this.videoCache.set(key, managed);
 
     return managed;
   }
@@ -451,7 +601,7 @@ export class PreviewMediaPool {
       managed.element.parentNode.removeChild(managed.element);
     }
 
-    this.videos.delete(key);
+    this.videoCache.delete(key);
   }
 
   private updateVideoElement(managed: ManagedVideo, clip: Clip, syncState: PreviewSyncState, tracks: Array<{ id: string; type: string }>, isPrimaryAudibleVideo: boolean, isTrackMuted: boolean): void {
@@ -459,7 +609,7 @@ export class PreviewMediaPool {
     const sourceTime = getClipSourceTime(clip, syncState.time);
 
     // Combine global preview volume with per-clip volume
-    const clipVolume = clip.volume ?? 1.0; // Default to 1.0 if not set
+    const clipVolume = clip.volume ?? 1.0;
     const combinedVolume = (syncState.volume / 100) * clipVolume;
 
     // Only one primary video clip is audible; others stay muted.
@@ -486,6 +636,7 @@ export class PreviewMediaPool {
       // Clip not active at current time
       if (!video.paused) {
         video.pause();
+        managed.playbackState = "paused";
       }
       return;
     }
@@ -515,26 +666,14 @@ export class PreviewMediaPool {
       }
     }
 
-    // Play/pause based on clock state
+    // NEW ARCHITECTURE: Playback control moved to separate method
+    // sync() only updates state, does NOT initiate playback
     if (syncState.state === "playing") {
-      if (video.paused && video.readyState >= 3) {
-        const promise = video.play();
-        if (promise !== undefined) {
-          promise.catch((err: Error) => {
-            if (err.name !== "AbortError") {
-              console.warn(`[PreviewMediaPool] play() failed for ${managed.clipId}-${managed.mediaId}:`, err);
-            }
-          });
-        }
-      }
-
-      // Register RVFC for frame-accurate sync (eliminates fake drift from RAF jitter)
-      if (this.hasRVFC && managed.rvfcHandle === null) {
-        this.registerRVFC(managed, clip, syncState, tracks, isPrimaryAudibleVideo);
-      }
+      this.requestPlayback(managed, clip, syncState, tracks, isPrimaryAudibleVideo);
     } else {
       if (!video.paused) {
         video.pause();
+        managed.playbackState = "paused";
       }
       if (managed.rvfcHandle !== null) {
         try {
@@ -547,6 +686,176 @@ export class PreviewMediaPool {
     }
   }
 
+  // ─── NEW: Playback Controller (Separated from sync) ────────────────────
+
+  /**
+   * Request playback for an element (separated from sync logic).
+   * Implements proper state machine with guards and latch.
+   */
+  private requestPlayback(managed: ManagedVideo, clip: Clip, syncState: PreviewSyncState, tracks: Array<{ id: string; type: string }>, isPrimaryAudibleVideo: boolean): void {
+    const video = managed.element;
+
+    // Guard 1: Already playing → no-op
+    if (!video.paused) {
+      managed.playbackState = "playing";
+
+      // Register RVFC for frame-accurate sync
+      if (this.hasRVFC && managed.rvfcHandle === null) {
+        this.registerRVFC(managed, clip, syncState, tracks, isPrimaryAudibleVideo);
+      }
+      return;
+    }
+
+    // Guard 2: Not ready → wait
+    if (video.readyState < 3) {
+      return;
+    }
+
+    // Guard 3: Session-level autoplay block → latch until user gesture
+    if (this.sessionAutoplayBlocked) {
+      console.warn(`[PreviewMediaPool] Session autoplay blocked - waiting for user gesture`);
+      managed.playbackState = "blocked";
+      return;
+    }
+
+    // Guard 4: Element-level autoplay block → latch
+    if (managed.autoplayBlocked) {
+      const now = performance.now();
+      // Only clear block if we have recent user gesture
+      if (now - this.lastUserGestureTime < 1000) {
+        console.log(`[PreviewMediaPool] Clearing element autoplay block for ${managed.clipId} after user gesture`);
+        managed.autoplayBlocked = false;
+      } else {
+        managed.playbackState = "blocked";
+        return;
+      }
+    }
+
+    // Guard 5: Promise in flight → wait
+    if (managed.playPromiseInFlight) {
+      return;
+    }
+
+    // Guard 6: Rate limiting (max 10/sec per element)
+    const now = performance.now();
+    if (now - managed.lastPlayAttemptMs < 100) {
+      return;
+    }
+
+    // All guards passed - attempt play
+    managed.playAttempts++;
+    managed.lastPlayAttemptMs = now;
+    managed.playPromiseInFlight = true;
+
+    const elementAge = now - managed.createdAt;
+
+    console.log(`[PreviewMediaPool] play() attempt #${managed.playAttempts} for ${managed.clipId}:`, {
+      elementAge: `${elementAge.toFixed(0)}ms`,
+      readyState: video.readyState,
+      source: "playback-controller",
+    });
+
+    const promise = video.play();
+    if (promise !== undefined) {
+      promise
+        .then(() => {
+          managed.playPromiseInFlight = false;
+          managed.lastPlayFailure = null;
+          managed.playbackState = "playing";
+
+          // Register RVFC on successful play
+          if (this.hasRVFC && managed.rvfcHandle === null) {
+            this.registerRVFC(managed, clip, syncState, tracks, isPrimaryAudibleVideo);
+          }
+
+          this.logPlayAttempt({
+            timestamp: now,
+            elementKey: `${managed.clipId}-${managed.mediaId}`,
+            clipId: managed.clipId,
+            wasPlaying: false,
+            promiseInFlight: false,
+            elementAge,
+            source: "playback-controller",
+            result: "success",
+          });
+
+          console.log(`[PreviewMediaPool] play() SUCCESS for ${managed.clipId}`);
+        })
+        .catch((err: Error) => {
+          managed.playPromiseInFlight = false;
+
+          if (err.name !== "AbortError") {
+            managed.lastPlayFailure = { error: err.name, timestamp: now };
+
+            // NotAllowedError → latch element AND session
+            if (err.name === "NotAllowedError") {
+              managed.autoplayBlocked = true;
+              managed.playbackState = "blocked";
+              this.sessionAutoplayBlocked = true;
+
+              console.error(`[PreviewMediaPool] play() BLOCKED (NotAllowedError) - latched until user gesture:`, {
+                clipId: managed.clipId,
+                elementAge: `${elementAge.toFixed(0)}ms`,
+                attemptNumber: managed.playAttempts,
+                totalAttempts: this.getTotalPlayAttempts(),
+              });
+            }
+
+            this.logPlayAttempt({
+              timestamp: now,
+              elementKey: `${managed.clipId}-${managed.mediaId}`,
+              clipId: managed.clipId,
+              wasPlaying: false,
+              promiseInFlight: false,
+              elementAge,
+              source: "playback-controller",
+              result: "rejected",
+              error: err.name,
+            });
+          }
+        });
+    }
+  }
+
+  /**
+   * Evict unused elements from cache (LRU policy).
+   * Called from sync() after reconciliation.
+   */
+  private evictUnusedElements(): void {
+    const now = performance.now();
+    const toEvict: string[] = [];
+
+    // Find candidates: unused for CACHE_EVICTION_AGE_MS
+    for (const [key, managed] of this.videoCache) {
+      const age = now - managed.lastUsedAt;
+      if (age > this.CACHE_EVICTION_AGE_MS) {
+        toEvict.push(key);
+      }
+    }
+
+    // If still over limit, evict oldest first
+    if (this.videoCache.size > this.MAX_CACHED_VIDEOS) {
+      const sorted = Array.from(this.videoCache.entries()).sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
+
+      const excess = this.videoCache.size - this.MAX_CACHED_VIDEOS;
+      for (let i = 0; i < excess; i++) {
+        const key = sorted[i][0];
+        if (!toEvict.includes(key)) {
+          toEvict.push(key);
+        }
+      }
+    }
+
+    // Evict
+    for (const key of toEvict) {
+      const managed = this.videoCache.get(key);
+      if (managed) {
+        console.log(`[PreviewMediaPool] Evicting unused element: ${key} (unused for ${((now - managed.lastUsedAt) / 1000).toFixed(1)}s)`);
+        this.disposeVideo(key, managed);
+      }
+    }
+  }
+
   // ─── Private: requestVideoFrameCallback sync ────────────────────────────
 
   private registerRVFC(managed: ManagedVideo, clip: Clip, syncState: PreviewSyncState, tracks: Array<{ id: string; type: string }>, isPrimaryAudibleVideo: boolean): void {
@@ -554,7 +863,10 @@ export class PreviewMediaPool {
 
     const callback = (_now: number, metadata: VideoFrameCallbackMetadata) => {
       if (this._isDisposed) return;
-      if (!this.videos.has(`${managed.clipId}-${managed.mediaId}`)) return;
+
+      // Check if element still exists in cache (by cache key)
+      const cacheKey = `${managed.mediaId}-${managed.sourcePath}`;
+      if (!this.videoCache.has(cacheKey)) return;
 
       // Recalculate expected source time based on latest clock state
       const latestSyncState = this.lastSyncState ?? syncState;
@@ -727,7 +1039,160 @@ export class PreviewMediaPool {
       }
     }
   }
+
+  // ─── INSTRUMENTATION METHODS ────────────────────────────────────────────
+
+  private detectStructuralChange(currentClipIds: Set<string>): {
+    changed: boolean;
+    added: string[];
+    removed: string[];
+  } {
+    const added: string[] = [];
+    const removed: string[] = [];
+
+    for (const id of currentClipIds) {
+      if (!this.lastSyncClipIds.has(id)) {
+        added.push(id);
+      }
+    }
+
+    for (const id of this.lastSyncClipIds) {
+      if (!currentClipIds.has(id)) {
+        removed.push(id);
+      }
+    }
+
+    return {
+      changed: added.length > 0 || removed.length > 0,
+      added,
+      removed,
+    };
+  }
+
+  private logPlayAttempt(log: { timestamp: number; elementKey: string; clipId: string; wasPlaying: boolean; promiseInFlight: boolean; elementAge: number; source: string; result: "success" | "rejected" | "pending"; error?: string }): void {
+    this.playAttemptLog.push(log);
+
+    // Keep log bounded
+    if (this.playAttemptLog.length > this.maxLogSize) {
+      this.playAttemptLog.shift();
+    }
+  }
+
+  private getTotalPlayAttempts(): number {
+    let total = 0;
+    for (const managed of this.videoCache.values()) {
+      total += managed.playAttempts;
+    }
+    return total;
+  }
+
+  private isInUserGesture(): boolean {
+    // Simple heuristic: check if we have user activation
+    // This is not 100% reliable but gives us a signal
+    if (typeof navigator !== "undefined" && "userActivation" in navigator) {
+      const ua = (navigator as any).userActivation;
+      return ua?.isActive === true;
+    }
+    return false;
+  }
+
+  private printDiagnostics(): void {
+    console.group("[PreviewMediaPool INSTRUMENTATION] Final Diagnostics");
+    console.log(`Total sync() calls: ${this.syncCallCount}`);
+    console.log(`Total play() attempts: ${this.getTotalPlayAttempts()}`);
+    console.log(`Play attempt log size: ${this.playAttemptLog.length}`);
+
+    // Group by result
+    const byResult = {
+      success: this.playAttemptLog.filter((l) => l.result === "success").length,
+      rejected: this.playAttemptLog.filter((l) => l.result === "rejected").length,
+      pending: this.playAttemptLog.filter((l) => l.result === "pending").length,
+    };
+    console.log("Play results:", byResult);
+
+    // Group failures by error type
+    const failures = this.playAttemptLog.filter((l) => l.result === "rejected");
+    const byError = failures.reduce(
+      (acc, log) => {
+        const err = log.error || "Unknown";
+        acc[err] = (acc[err] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+    console.log("Failure breakdown:", byError);
+
+    // Show per-element stats
+    const perElement = new Map<string, { attempts: number; blocked: boolean; state: string; active: boolean }>();
+    for (const [key, managed] of this.videoCache) {
+      perElement.set(key, {
+        attempts: managed.playAttempts,
+        blocked: managed.autoplayBlocked,
+        state: managed.playbackState,
+        active: managed.isActive,
+      });
+    }
+    console.log("Per-element stats:", Object.fromEntries(perElement));
+
+    // Show recent attempts (last 20)
+    const recent = this.playAttemptLog.slice(-20);
+    console.log("Recent play attempts:", recent);
+
+    console.groupEnd();
+  }
+
+  // Public method to manually trigger diagnostics from console
+  public debugPrintDiagnostics(): void {
+    this.printDiagnostics();
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
 }
+
+// ─── INSTRUMENTATION HELPERS ───────────────────────────────────────────────
+declare global {
+  interface Window {
+    __previewMediaPools?: PreviewMediaPool[];
+    __previewMediaPoolInstrumentation?: {
+      getPlayAttemptLog: () => any[];
+      getTotalAttempts: () => number;
+      printReport: () => void;
+      clearLog: () => void;
+      getSyncFrequency: () => number;
+    };
+  }
+}
+
+// Make instrumentation accessible from console for debugging
+if (typeof window !== "undefined") {
+  window.__previewMediaPoolInstrumentation = {
+    getPlayAttemptLog: () => {
+      const pools = (window as any).__previewMediaPools || [];
+      return pools.flatMap((p: any) => p.playAttemptLog || []);
+    },
+    getTotalAttempts: () => {
+      const pools = (window as any).__previewMediaPools || [];
+      return pools.reduce((sum: number, p: any) => sum + (p.getTotalPlayAttempts?.() || 0), 0);
+    },
+    printReport: () => {
+      const pools = (window as any).__previewMediaPools || [];
+      pools.forEach((p: any) => p.debugPrintDiagnostics?.());
+    },
+    clearLog: () => {
+      const pools = (window as any).__previewMediaPools || [];
+      pools.forEach((p: any) => {
+        if (p.playAttemptLog) p.playAttemptLog = [];
+      });
+    },
+    getSyncFrequency: () => {
+      const pools = (window as any).__previewMediaPools || [];
+      return pools.reduce((sum: number, p: any) => sum + (p.syncCallCount || 0), 0);
+    },
+  };
+
+  console.log("[PreviewMediaPool] Instrumentation enabled. Use window.__previewMediaPoolInstrumentation to access diagnostics.");
+}
+// ───────────────────────────────────────────────────────────────────────────
 
 // Minimal type for RVFC metadata (not in all TS lib versions)
 interface VideoFrameCallbackMetadata {
