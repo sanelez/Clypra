@@ -502,7 +502,7 @@ export const ProgramPreview: React.FC = () => {
 
       rafId = requestAnimationFrame(renderLoop);
       const session = getActiveSessionOrNull();
-      if (session) {
+      if (session && session.state === "active") {
         try {
           session.syncPreviewMedia(getPreviewMediaSyncClips(state.clips, timeToRender), state.mediaAssets, state.tracks, {
             time: timeToRender,
