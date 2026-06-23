@@ -737,7 +737,7 @@ export class PreviewMediaPool {
             });
         }
       },
-      { once: true }, // ✅ FIX FINDING-004: Auto-remove listener after first seek to prevent leak
+      { once: true }, // Auto-remove listener after first seek to prevent leak
     );
 
     video.src = sourcePath;
@@ -930,6 +930,11 @@ export class PreviewMediaPool {
     // Guard 6: Rate limiting (max 10/sec per element)
     const now = performance.now();
     if (now - managed.lastPlayAttemptMs < 100) {
+      return;
+    }
+
+    // Guard 7: Element must be active in current window
+    if (!managed.isActive) {
       return;
     }
 
