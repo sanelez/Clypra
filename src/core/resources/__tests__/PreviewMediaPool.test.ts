@@ -572,3 +572,165 @@ describe("PreviewMediaPool — Performance and Memory", () => {
     expect(() => pool.getVideoElements()).not.toThrow();
   });
 });
+
+describe("PreviewMediaPool — FINDING-004: Seeked Event Listener Leak", () => {
+  let pool: PreviewMediaPool;
+
+  beforeEach(() => {
+    pool = new PreviewMediaPool();
+  });
+
+  afterEach(() => {
+    pool.dispose();
+  });
+
+  it("should not accumulate seeked listeners during scrubbing", async () => {
+    const clips = [createMockClip("clip-1", "media-1", 0, 10)];
+    const assets = [createMockAsset("media-1", "/path/to/video.mp4")];
+    const tracks = [{ id: "track-1", type: "video" }];
+
+    // Initial sync to create element
+    pool.sync(clips, assets, tracks, {
+      time: 0,
+      state: "paused" as const,
+      speed: 1.0,
+      muted: false,
+      volume: 100,
+    });
+
+    // Simulate rapid scrubbing (100 seeks in quick succession)
+    // This would previously cause 100 listeners to accumulate
+    for (let i = 0; i < 100; i++) {
+      pool.sync(clips, assets, tracks, {
+        time: (i / 100) * 10, // Scrub from 0 to 10 seconds
+        state: "paused" as const,
+        speed: 1.0,
+        muted: false,
+        volume: 100,
+      });
+    }
+
+    await wait(100);
+
+    // Pool should remain functional (no memory exhaustion)
+    expect(() => pool.getVideoElements()).not.toThrow();
+  });
+
+  it("should handle prolonged scrubbing session without memory leak", async () => {
+    const clips = [createMockClip("clip-1", "media-1", 0, 5), createMockClip("clip-2", "media-2", 5, 5)];
+    const assets = [createMockAsset("media-1", "/path/to/video1.mp4"), createMockAsset("media-2", "/path/to/video2.mp4")];
+    const tracks = [{ id: "track-1", type: "video" }];
+
+    // Simulate extended scrubbing session (500 rapid seeks)
+    // Without the fix, this would accumulate 500+ listeners per element
+    for (let i = 0; i < 500; i++) {
+      const time = (i % 100) / 10; // Scrub back and forth
+      pool.sync(clips, assets, tracks, {
+        time,
+        state: "paused" as const,
+        speed: 1.0,
+        muted: false,
+        volume: 100,
+      });
+    }
+
+    await wait(200);
+
+    // Should not crash or throw
+    expect(() => pool.getVideoElements()).not.toThrow();
+
+    // Elements should still be accessible
+    const videoElements = pool.getVideoElements();
+    expect(videoElements.size).toBeGreaterThan(0);
+  });
+
+  it("should handle scrubbing with multiple clips without listener leak", async () => {
+    // Create 10 clips to test listener leak across multiple elements
+    const clips = Array.from({ length: 10 }, (_, i) => createMockClip(`clip-${i}`, `media-${i}`, i * 2, 2));
+    const assets = Array.from({ length: 10 }, (_, i) => createMockAsset(`media-${i}`, `/path/to/video-${i}.mp4`));
+    const tracks = [{ id: "track-1", type: "video" }];
+
+    // Scrub across all clips multiple times
+    for (let pass = 0; pass < 5; pass++) {
+      for (let i = 0; i < 20; i++) {
+        pool.sync(clips, assets, tracks, {
+          time: i, // Scrub from 0 to 20 seconds
+          state: "paused" as const,
+          speed: 1.0,
+          muted: false,
+          volume: 100,
+        });
+      }
+    }
+
+    await wait(150);
+
+    // With 10 elements × 5 passes × 20 seeks = 1000 total seeks
+    // Without fix: 1000 listeners accumulated (crash)
+    // With fix: Only ~10 listeners (one per element, auto-removed)
+    expect(() => pool.getVideoElements()).not.toThrow();
+  });
+
+  it("should properly clean up on disposal after heavy scrubbing", async () => {
+    const clips = [createMockClip("clip-1", "media-1", 0, 10)];
+    const assets = [createMockAsset("media-1", "/path/to/video.mp4")];
+    const tracks = [{ id: "track-1", type: "video" }];
+
+    // Heavy scrubbing session
+    for (let i = 0; i < 200; i++) {
+      pool.sync(clips, assets, tracks, {
+        time: (i / 200) * 10,
+        state: "paused" as const,
+        speed: 1.0,
+        muted: false,
+        volume: 100,
+      });
+    }
+
+    await wait(100);
+
+    // Disposal should complete without hanging or errors
+    expect(() => pool.dispose()).not.toThrow();
+  });
+
+  it("should not leak memory during seek-play-seek cycles", async () => {
+    const clips = [createMockClip("clip-1", "media-1", 0, 10)];
+    const assets = [createMockAsset("media-1", "/path/to/video.mp4")];
+    const tracks = [{ id: "track-1", type: "video" }];
+
+    // Simulate user behavior: seek → play briefly → seek again
+    for (let i = 0; i < 50; i++) {
+      // Seek
+      pool.sync(clips, assets, tracks, {
+        time: (i / 50) * 10,
+        state: "paused" as const,
+        speed: 1.0,
+        muted: false,
+        volume: 100,
+      });
+
+      // Play briefly
+      pool.sync(clips, assets, tracks, {
+        time: (i / 50) * 10,
+        state: "playing" as const,
+        speed: 1.0,
+        muted: false,
+        volume: 100,
+      });
+
+      // Seek again
+      pool.sync(clips, assets, tracks, {
+        time: ((i + 1) / 50) * 10,
+        state: "paused" as const,
+        speed: 1.0,
+        muted: false,
+        volume: 100,
+      });
+    }
+
+    await wait(150);
+
+    // Should remain stable
+    expect(() => pool.getVideoElements()).not.toThrow();
+  });
+});

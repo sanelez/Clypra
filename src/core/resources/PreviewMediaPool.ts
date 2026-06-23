@@ -724,17 +724,21 @@ export class PreviewMediaPool {
       { once: true },
     );
 
-    video.addEventListener("seeked", () => {
-      if (video.paused) {
-        import("../../store/timelineStore")
-          .then(({ useTimelineStore }) => {
-            useTimelineStore.getState().incrementEpoch();
-          })
-          .catch((err) => {
-            console.error("[PreviewMediaPool] Failed to import useTimelineStore on seeked", err);
-          });
-      }
-    });
+    video.addEventListener(
+      "seeked",
+      () => {
+        if (video.paused) {
+          import("../../store/timelineStore")
+            .then(({ useTimelineStore }) => {
+              useTimelineStore.getState().incrementEpoch();
+            })
+            .catch((err) => {
+              console.error("[PreviewMediaPool] Failed to import useTimelineStore on seeked", err);
+            });
+        }
+      },
+      { once: true }, // ✅ FIX FINDING-004: Auto-remove listener after first seek to prevent leak
+    );
 
     video.src = sourcePath;
 
