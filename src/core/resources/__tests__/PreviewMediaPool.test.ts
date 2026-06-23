@@ -3388,3 +3388,122 @@ describe("PreviewMediaPool — FINDING-013: Cache Key Precision", () => {
     expect(cacheKeys[0]).toBe("asset-1-/path/test.mp4-trim5.172");
   });
 });
+
+// ─── FINDING-014: Missing Seeking Guard Before Pause ────────────────────────────
+describe("PreviewMediaPool — FINDING-014: Missing Seeking Guard", () => {
+  let pool: PreviewMediaPool;
+
+  beforeEach(() => {
+    pool = new PreviewMediaPool();
+  });
+
+  afterEach(() => {
+    pool.dispose();
+  });
+
+  it("should not pause element while seeking", () => {
+    const clips = [createMockClip("clip-1", "media-1", 0, 10)];
+    const assets = [createMockAsset("media-1", "/path/to/video.mp4")];
+    const tracks = [{ id: "track-1", type: "video" }];
+
+    pool.sync(clips, assets, tracks, {
+      time: 2.5,
+      state: "playing" as const,
+      speed: 1.0,
+      muted: false,
+      volume: 100,
+    });
+
+    const managed = Array.from((pool as any).videoCache.values())[0];
+    const element = managed.element;
+
+    Object.defineProperty(element, "paused", { value: false, configurable: true });
+    Object.defineProperty(element, "seeking", { value: true, configurable: true });
+
+    let pauseCalled = false;
+    element.pause = () => {
+      pauseCalled = true;
+    };
+
+    pool.sync([], assets, tracks, {
+      time: 15.0,
+      state: "playing" as const,
+      speed: 1.0,
+      muted: false,
+      volume: 100,
+    });
+
+    expect(pauseCalled).toBe(false);
+  });
+
+  it("should pause non-seeking inactive elements", () => {
+    const clips = [createMockClip("clip-1", "media-1", 0, 10)];
+    const assets = [createMockAsset("media-1", "/path/to/video.mp4")];
+    const tracks = [{ id: "track-1", type: "video" }];
+
+    pool.sync(clips, assets, tracks, {
+      time: 2.5,
+      state: "playing" as const,
+      speed: 1.0,
+      muted: false,
+      volume: 100,
+    });
+
+    const managed = Array.from((pool as any).videoCache.values())[0];
+    const element = managed.element;
+
+    Object.defineProperty(element, "paused", { value: false, configurable: true });
+    Object.defineProperty(element, "seeking", { value: false, configurable: true });
+
+    let pauseCalled = false;
+    element.pause = () => {
+      pauseCalled = true;
+    };
+
+    // Move to a different clip time range (clip1 becomes inactive but still in timeline)
+    const clip2 = createMockClip("clip-2", "media-1", 20, 10);
+    pool.sync([clips[0], clip2], assets, tracks, {
+      time: 25.0,
+      state: "playing" as const,
+      speed: 1.0,
+      muted: false,
+      volume: 100,
+    });
+
+    expect(pauseCalled).toBe(true);
+  });
+
+  it("should not call pause on already paused elements", () => {
+    const clips = [createMockClip("clip-1", "media-1", 0, 10)];
+    const assets = [createMockAsset("media-1", "/path/to/video.mp4")];
+    const tracks = [{ id: "track-1", type: "video" }];
+
+    pool.sync(clips, assets, tracks, {
+      time: 2.5,
+      state: "playing" as const,
+      speed: 1.0,
+      muted: false,
+      volume: 100,
+    });
+
+    const managed = Array.from((pool as any).videoCache.values())[0];
+    const element = managed.element;
+
+    Object.defineProperty(element, "paused", { value: true, configurable: true });
+
+    let pauseCalled = false;
+    element.pause = () => {
+      pauseCalled = true;
+    };
+
+    pool.sync([], assets, tracks, {
+      time: 15.0,
+      state: "playing" as const,
+      speed: 1.0,
+      muted: false,
+      volume: 100,
+    });
+
+    expect(pauseCalled).toBe(false);
+  });
+});

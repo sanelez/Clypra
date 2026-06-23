@@ -396,7 +396,8 @@ export class PreviewMediaPool {
         const isInTimeline = timelineCacheKeys.has(cacheKey);
 
         // If element is in timeline but NOT currently active, pause it
-        if (isInTimeline && !isActive && !managed.element.paused) {
+        // FINDING-014: Don't pause if element is currently seeking - can corrupt state
+        if (isInTimeline && !isActive && !managed.element.paused && !managed.element.seeking) {
           managed.element.pause();
           if (managed.rvfcHandle !== null && this.hasRVFC) {
             try {
