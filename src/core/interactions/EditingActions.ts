@@ -122,28 +122,40 @@ export class EditingActions {
     try {
       useHistoryStore.getState().execute(command);
 
-      // Find the new clip IDs (original clip + new clip)
-      const newState = useTimelineStore.getState();
-      const leftClip = newState.clips.find((c) => c.id === clipId);
-      const rightClipId = command.getCreatedClipId();
-      const rightClip = rightClipId ? newState.clips.find((c) => c.id === rightClipId) : undefined;
+      // FINDING-012 FIX: Get both new clip IDs (original clip is removed)
+      const leftClipId = command.getLeftClipId();
+      const rightClipId = command.getRightClipId();
 
-      // NLE-standard ergonomics: after split, select the right-hand clip
-      // so repeated cuts can continue forward quickly.
-      if (rightClip?.id) {
-        useUIStore.getState().selectClip(rightClip.id);
-      } else {
+      if (!leftClipId || !rightClipId) {
         return {
           success: false,
-          error: "Split did not create a right-hand clip",
-          leftClipId: leftClip?.id,
+          error: "Split did not create both clips",
         };
       }
 
+      // Verify both clips exist in timeline
+      const newState = useTimelineStore.getState();
+      const leftClip = newState.clips.find((c) => c.id === leftClipId);
+      const rightClip = newState.clips.find((c) => c.id === rightClipId);
+
+      if (!leftClip || !rightClip) {
+        return {
+          success: false,
+          error: "Split clips not found in timeline",
+        };
+      }
+
+      // FINDING-012 FIX: Select BOTH splits (user expectation: both are "new")
+      // This prevents confusion where only one clip is selected
+      const uiStore = useUIStore.getState();
+      uiStore.clearSelection();
+      uiStore.selectClip(leftClipId);
+      uiStore.selectClip(rightClipId);
+
       return {
         success: true,
-        leftClipId: leftClip?.id,
-        rightClipId: rightClip?.id,
+        leftClipId,
+        rightClipId,
       };
     } catch (error) {
       console.error("[EditingActions] Split failed:", error);

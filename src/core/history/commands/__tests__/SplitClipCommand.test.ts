@@ -41,6 +41,18 @@ describe("SplitClipCommand", () => {
 
       expect(newState.clips).toHaveLength(2);
       expect(newState.epoch).toBe(1);
+
+      // FINDING-012 FIX: Both splits should have NEW IDs (not original)
+      const leftClipId = command.getLeftClipId();
+      const rightClipId = command.getRightClipId();
+      expect(leftClipId).not.toBeNull();
+      expect(rightClipId).not.toBeNull();
+      expect(leftClipId).not.toBe("clip-1"); // Left gets new ID
+      expect(rightClipId).not.toBe("clip-1"); // Right gets new ID
+      expect(leftClipId).not.toBe(rightClipId); // Different IDs
+
+      // Original clip should be removed
+      expect(newState.clips.find((c) => c.id === "clip-1")).toBeUndefined();
     });
 
     it("sets trimOut correctly on left clip", () => {
@@ -54,7 +66,11 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 5.0, 30, clip);
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
-      const leftClip = newState.clips.find((c) => c.id === "clip-1");
+      // FINDING-012 FIX: Left clip has new ID
+      const leftClipId = command.getLeftClipId();
+      const leftClip = newState.clips.find((c) => c.id === leftClipId);
+
+      expect(leftClip).toBeDefined();
       expect(leftClip?.trimOut).toBe(5.0);
       expect(leftClip?.duration).toBe(5.0);
     });
@@ -70,7 +86,11 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 5.0, 30, clip);
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
-      const rightClip = newState.clips.find((c) => c.id !== "clip-1");
+      // FINDING-012 FIX: Right clip has new ID
+      const rightClipId = command.getRightClipId();
+      const rightClip = newState.clips.find((c) => c.id === rightClipId);
+
+      expect(rightClip).toBeDefined();
       expect(rightClip?.trimIn).toBe(5.0);
       expect(rightClip?.trimOut).toBe(10.0);
       expect(rightClip?.startTime).toBe(5.0);
@@ -91,7 +111,9 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 5.467, 30, clip);
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
-      const rightClip = newState.clips.find((c) => c.id !== "clip-1");
+      // FINDING-012 FIX: Use getRightClipId() to find right clip
+      const rightClipId = command.getRightClipId();
+      const rightClip = newState.clips.find((c) => c.id === rightClipId);
 
       // Should snap to nearest frame: 5.467 * 30 = 164.01 → 164 frames → 5.4667s
       const expectedSnap = Math.round(5.467 * 30) / 30;
@@ -109,8 +131,11 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 5.467, 30, clip);
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
-      const leftClip = newState.clips.find((c) => c.id === "clip-1");
-      const rightClip = newState.clips.find((c) => c.id !== "clip-1");
+      // FINDING-012 FIX: Use getLeftClipId() and getRightClipId()
+      const leftClipId = command.getLeftClipId();
+      const rightClipId = command.getRightClipId();
+      const leftClip = newState.clips.find((c) => c.id === leftClipId);
+      const rightClip = newState.clips.find((c) => c.id === rightClipId);
 
       // Critical: must be identical for smooth cuts
       expect(leftClip?.trimOut).toBe(rightClip?.trimIn);
@@ -129,8 +154,11 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 3.0, 30, clip);
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
-      const leftClip = newState.clips.find((c) => c.id === "clip-1");
-      const rightClip = newState.clips.find((c) => c.id !== "clip-1");
+      // FINDING-012 FIX: Use getLeftClipId() and getRightClipId()
+      const leftClipId = command.getLeftClipId();
+      const rightClipId = command.getRightClipId();
+      const leftClip = newState.clips.find((c) => c.id === leftClipId);
+      const rightClip = newState.clips.find((c) => c.id === rightClipId);
 
       // Left: trimIn 2 → trimOut 5 (3s into clip from trimIn 2)
       expect(leftClip?.trimIn).toBe(2);
@@ -153,8 +181,11 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 37.5, 30, middleClip);
       const newState = command.apply({ clips: [middleClip], epoch: 0 });
 
-      const leftClip = newState.clips.find((c) => c.id === "clip-1");
-      const rightClip = newState.clips.find((c) => c.id !== "clip-1");
+      // FINDING-012 FIX: Use getLeftClipId() and getRightClipId()
+      const leftClipId = command.getLeftClipId();
+      const rightClipId = command.getRightClipId();
+      const leftClip = newState.clips.find((c) => c.id === leftClipId);
+      const rightClip = newState.clips.find((c) => c.id === rightClipId);
 
       // Both pieces should have valid trimOut
       expect(leftClip?.trimOut).toBeDefined();
@@ -289,6 +320,122 @@ describe("SplitClipCommand", () => {
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
       expect(newState.clips).toHaveLength(2);
+    });
+  });
+
+  describe("FINDING-012: Both splits get new IDs", () => {
+    it("generates new IDs for both left and right splits", () => {
+      const clip = createTestClip({
+        id: "original-clip",
+        startTime: 0,
+        duration: 10,
+      });
+
+      const command = new SplitClipCommand("original-clip", 5.0, 30, clip);
+      const newState = command.apply({ clips: [clip], epoch: 0 });
+
+      const leftClipId = command.getLeftClipId();
+      const rightClipId = command.getRightClipId();
+
+      // Both should have new IDs
+      expect(leftClipId).not.toBe("original-clip");
+      expect(rightClipId).not.toBe("original-clip");
+      expect(leftClipId).not.toBe(rightClipId);
+
+      // Original clip should be removed from timeline
+      expect(newState.clips.find((c) => c.id === "original-clip")).toBeUndefined();
+
+      // Both new clips should exist
+      expect(newState.clips.find((c) => c.id === leftClipId)).toBeDefined();
+      expect(newState.clips.find((c) => c.id === rightClipId)).toBeDefined();
+    });
+
+    it("prevents property confusion after split", () => {
+      // This is the core issue: volume/effects should NOT bind to wrong clip
+      const clip = createTestClip({
+        id: "clip-with-volume",
+        startTime: 0,
+        duration: 10,
+        volume: 0.5,
+      });
+
+      const command = new SplitClipCommand("clip-with-volume", 5.0, 30, clip);
+      const newState = command.apply({ clips: [clip], epoch: 0 });
+
+      const leftClipId = command.getLeftClipId();
+      const rightClipId = command.getRightClipId();
+      const leftClip = newState.clips.find((c) => c.id === leftClipId);
+      const rightClip = newState.clips.find((c) => c.id === rightClipId);
+
+      // Both clips inherit volume from original
+      expect(leftClip?.volume).toBe(0.5);
+      expect(rightClip?.volume).toBe(0.5);
+
+      // But they have different IDs, so modifying one won't affect the other
+      expect(leftClipId).not.toBe(rightClipId);
+    });
+
+    it("provides backward compatibility with getCreatedClipId()", () => {
+      const clip = createTestClip();
+      const command = new SplitClipCommand("clip-1", 5.0, 30, clip);
+      command.apply({ clips: [clip], epoch: 0 });
+
+      // Old code using getCreatedClipId() should still work (returns right clip)
+      const createdId = command.getCreatedClipId();
+      const rightId = command.getRightClipId();
+
+      expect(createdId).toBe(rightId);
+    });
+
+    it("serializes both new clip IDs", () => {
+      const clip = createTestClip();
+      const command = new SplitClipCommand("clip-1", 5.0, 30, clip);
+      command.apply({ clips: [clip], epoch: 0 });
+
+      const json = command.toJSON();
+
+      expect(json.leftClipId).toBeDefined();
+      expect(json.rightClipId).toBeDefined();
+      expect(json.leftClipId).not.toBe(json.rightClipId);
+
+      // Backward compatibility: newClipId should equal rightClipId
+      expect(json.newClipId).toBe(json.rightClipId);
+    });
+
+    it("deserializes old format (migration)", () => {
+      // Old format: only newClipId, left kept original ID
+      const oldJson = {
+        type: "SplitClip",
+        clipId: "original-clip",
+        splitTime: 5.0,
+        frameRate: 30,
+        originalClip: createTestClip({ id: "original-clip" }),
+        newClipId: "right-clip-id",
+      };
+
+      const command = SplitClipCommand.fromJSON(oldJson);
+
+      // Should map old format to new fields
+      expect(command.getLeftClipId()).toBe("original-clip"); // Old: left kept original
+      expect(command.getRightClipId()).toBe("right-clip-id");
+    });
+
+    it("deserializes new format", () => {
+      // New format: both leftClipId and rightClipId
+      const newJson = {
+        type: "SplitClip",
+        clipId: "original-clip",
+        splitTime: 5.0,
+        frameRate: 30,
+        originalClip: createTestClip({ id: "original-clip" }),
+        leftClipId: "left-clip-id",
+        rightClipId: "right-clip-id",
+      };
+
+      const command = SplitClipCommand.fromJSON(newJson);
+
+      expect(command.getLeftClipId()).toBe("left-clip-id");
+      expect(command.getRightClipId()).toBe("right-clip-id");
     });
   });
 });
