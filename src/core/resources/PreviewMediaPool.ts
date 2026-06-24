@@ -163,9 +163,10 @@ export class PreviewMediaPool {
   // This prevents evicting elements for clips that still exist but are temporarily inactive
   private timelineClipRegistry = new Map<string, string>(); // clipId -> cacheKey
   // TRANSITION SAFETY: Track recently removed clips to keep their elements available during transitions
-  // Format: cacheKey -> { clipId: original clipId, timestamp: when removed }
-  // FINDING-003: Store original clipId to prevent key mismatch when element is rebound
-  private recentlyRemovedClips = new Map<string, { clipId: string; timestamp: number }>();
+  // Format: cacheKey -> { clipIds: all known clipIds that map to this cache, timestamp: when removed }
+  // FINDING-003 + SPLIT FIX: Store ALL clipIds (original + splits) to prevent lookup mismatch
+  // When a clip is split, both new clips share the same media/trim cache key but have different IDs
+  private recentlyRemovedClips = new Map<string, { clipIds: string[]; timestamp: number }>();
   private readonly TRANSITION_GRACE_PERIOD_MS = 500; // Keep elements for 500ms after removal
 
   private audios = new Map<string, ManagedAudio>();
@@ -304,12 +305,25 @@ export class PreviewMediaPool {
         for (const removedClipId of structuralChange.removed) {
           const cacheKey = this.timelineClipRegistry.get(removedClipId);
           if (cacheKey) {
-            // FINDING-003: Store original clipId with timestamp for transition grace period
-            // This prevents key mismatch when element gets rebound to a new clip
-            this.recentlyRemovedClips.set(cacheKey, {
-              clipId: removedClipId,
-              timestamp: now,
-            });
+            // FINDING-003 + SPLIT FIX: Store all known clipIds that map to this cache key
+            // This handles split clips where multiple clip IDs share the same cache element
+            const existingEntry = this.recentlyRemovedClips.get(cacheKey);
+            if (existingEntry) {
+              // Add this clipId to the existing array if not already present
+              if (!existingEntry.clipIds.includes(removedClipId)) {
+                existingEntry.clipIds.push(removedClipId);
+                console.log(`[PreviewMediaPool] Split detected: Added clip ${removedClipId} to cache ${cacheKey.substring(0, 30)}... (now tracking ${existingEntry.clipIds.length} IDs)`);
+              }
+              // Update timestamp to extend grace period
+              existingEntry.timestamp = now;
+            } else {
+              // Create new entry with this clipId
+              this.recentlyRemovedClips.set(cacheKey, {
+                clipIds: [removedClipId],
+                timestamp: now,
+              });
+              console.log(`[PreviewMediaPool] Removed clip ${removedClipId} added to grace period (cache: ${cacheKey.substring(0, 30)}...)`);
+            }
           }
           this.timelineClipRegistry.delete(removedClipId);
         }
@@ -337,6 +351,25 @@ export class PreviewMediaPool {
 
           // CRITICAL: Add/update this clip in timeline registry (accumulate during playback)
           this.timelineClipRegistry.set(clip.id, cacheKey);
+
+          // SPLIT FIX: If this cacheKey is in recently removed, add this new clipId to the array
+          // This handles the case where a clip is split: both new clips share the same cache
+          // but have different IDs. We need to track ALL IDs for transition rendering.
+          const existingRemoval = this.recentlyRemovedClips.get(cacheKey);
+          if (existingRemoval && !existingRemoval.clipIds.includes(clip.id)) {
+            existingRemoval.clipIds.push(clip.id);
+            console.log(`[PreviewMediaPool] New split clip ${clip.id} shares cache with ${existingRemoval.clipIds[0]} (total: ${existingRemoval.clipIds.length} clips, cacheKey: ${cacheKey.substring(0, 50)}...)`);
+          }
+
+          // DEBUG: Log when adding clips with similar mediaId but different cache keys
+          if (existingRemoval && existingRemoval.clipIds.length > 0) {
+            const firstClipId = existingRemoval.clipIds[0];
+            if (firstClipId.substring(0, 20) === clip.id.substring(0, 20)) {
+              console.log(`[PreviewMediaPool] SPLIT MISMATCH: Clip ${clip.id} has different cache key than ${firstClipId}`);
+              console.log(`  New cacheKey: ${cacheKey}`);
+              console.log(`  trimIn: ${normalizedTrimIn.toFixed(3)}`);
+            }
+          }
         } else if (asset?.type === "audio" || (clip.kind === "audio" && (clip as any).audioPath)) {
           const key = `${clip.id}-${clip.mediaId}`;
           desiredAudioKeys.add(key);
@@ -562,19 +595,24 @@ export class PreviewMediaPool {
       }
     }
 
-    // ─── FINDING-003: Use original clipId for recently removed clips ────────────
+    // ─── FINDING-003 + SPLIT FIX: Use all known clipIds for recently removed clips ──
     // TRANSITION SAFETY: Also include recently removed clips (within grace period)
     // This ensures rasterizer can access outgoing clip frames during transitions
-    // CRITICAL: Use the ORIGINAL clipId (stored at removal time) not the current
-    // managed.clipId which may have been reassigned to a new clip
+    // SPLIT FIX: Return mappings for ALL clipIds that share this cache element
+    // When clips are split, both new clips map to same element but have different IDs
     const now = performance.now();
     for (const [cacheKey, removal] of this.recentlyRemovedClips) {
       if (now - removal.timestamp < this.TRANSITION_GRACE_PERIOD_MS) {
         const managed = this.videoCache.get(cacheKey);
         if (managed) {
-          // Use ORIGINAL clipId from removal record, not current managed.clipId
-          const legacyKey = `${removal.clipId}-${managed.mediaId}`;
-          result.set(legacyKey, managed.element);
+          // Create mappings for ALL known clipIds (original + splits)
+          for (const clipId of removal.clipIds) {
+            const legacyKey = `${clipId}-${managed.mediaId}`;
+            result.set(legacyKey, managed.element);
+          }
+          if (removal.clipIds.length > 1) {
+            console.log(`[PreviewMediaPool] getVideoElements: Returning element for ${removal.clipIds.length} clip IDs (split clips): ${removal.clipIds.join(", ")}`);
+          }
         }
       }
     }
@@ -715,6 +753,8 @@ export class PreviewMediaPool {
   // ─── Private: Video lifecycle ─────────────────────────────────────────────
 
   private createVideo(key: string, clipId: string, mediaId: string, sourcePath: string): ManagedVideo {
+    console.log(`[PreviewMediaPool] Creating NEW video element for clip ${clipId} (cache key: ${key.substring(0, 50)}...)`);
+
     const video = document.createElement("video");
     video.preload = "auto";
     video.muted = true; // Always muted — audio is handled separately or not at all

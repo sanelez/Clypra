@@ -514,6 +514,12 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
           // HAVE_CURRENT_DATA — element is loaded, draw it
           // Apply source rotation BEFORE drawing (critical for export)
           performanceMonitor.increment("rasterizer.video_element_hit");
+
+          // LOG SUCCESS: Video element found (especially important for split clips during transitions)
+          if (layer.clipId.includes("split") || layer.clipId.match(/clip-\d+-\w+-\d+/)) {
+            console.log(`[Rasterizer] ✅ Video element found for clip ${layer.clipId} (key: ${key})`);
+          }
+
           await drawMediaWithSourceRotation(ctx, video, width, height, layer.sourceRotation, layer.effects, layer.filter);
           performanceMonitor.endTimer(`rasterizer.media_${layer.mediaType}`);
           return;
@@ -528,7 +534,13 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
         const now = performance.now();
         if (now - _lastVideoWarnTime > VIDEO_WARN_INTERVAL_MS) {
           _lastVideoWarnTime = now;
-          console.warn(`[Rasterizer] No video element for clip ${layer.clipId}`);
+          console.warn(`[Rasterizer] No video element for clip ${layer.clipId} (key: ${key})`);
+
+          // LOG: Show available keys to help debug mismatch
+          if (target.videoElements.size > 0) {
+            const availableKeys = Array.from(target.videoElements.keys()).filter((k) => k.includes(layer.mediaId));
+            console.warn(`[Rasterizer] Available keys for mediaId ${layer.mediaId}:`, availableKeys);
+          }
         }
       }
     }
