@@ -183,7 +183,7 @@ export class ProjectSession {
       });
 
       // Create preview media pool (headless video/audio elements)
-      this._previewMediaPool = new PreviewMediaPool();
+      this._previewMediaPool = new PreviewMediaPool(this.projectId, this.sessionId);
 
       // Initialize stores (timeline, UI)
       await this._initializeStores();

@@ -32,6 +32,7 @@ import type { Clip, MediaAsset } from "@/types";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveClipSourceTime } from "../timeline/sourceTime";
 import { performanceMonitor } from "@/lib/monitoring/PerformanceMonitor";
+import { resourceTracker } from "@/lib/monitoring/ResourceTracker";
 
 export interface PreviewSyncState {
   /** Current playback time (seconds) */
@@ -217,12 +218,30 @@ export class PreviewMediaPool {
   // ─── FINDING-006: Early exit optimization ───────────────────────────────
   private _lastQuickHash: string | null = null;
 
-  constructor() {
+  // ─── RESOURCE TRACKING (LEAK-003 / MED-002) ─────────────────────────────
+  private _projectId: string | null = null;
+  private _sessionId: string | null = null;
+
+  constructor(projectId?: string, sessionId?: string) {
+    this._projectId = projectId ?? null;
+    this._sessionId = sessionId ?? null;
+
     this.container = document.createElement("div");
     // Position fixed and practically invisible, but NOT offscreen.
     // Browsers suspend decoding for completely offscreen or display:none elements.
     this.container.style.cssText = "position:fixed;left:0;top:0;width:256px;height:256px;opacity:0.001;pointer-events:none;z-index:-9999;overflow:hidden;";
     document.body.appendChild(this.container);
+
+    // ─── RESOURCE TRACKING: Track pool creation ────────────────────────────
+    if (this._projectId && this._sessionId) {
+      resourceTracker.track({
+        id: `pool-${this._sessionId}`,
+        kind: "PreviewMediaPool",
+        projectId: this._projectId,
+        sessionId: this._sessionId,
+      });
+    }
+    // ───────────────────────────────────────────────────────────────────────
 
     // ─── INSTRUMENTATION: Register pool for console access ────────────────
     if (typeof window !== "undefined") {
@@ -681,6 +700,23 @@ export class PreviewMediaPool {
     this.printDiagnostics();
     // ──────────────────────────────────────────────────────────────────────
 
+    // ─── RESOURCE TRACKING: Release all tracked resources ─────────────────
+    // Release video elements
+    for (const [key] of this.videoCache) {
+      resourceTracker.release(`video-${key}`);
+    }
+
+    // Release audio elements
+    for (const [key] of this.audios) {
+      resourceTracker.release(`audio-${key}`);
+    }
+
+    // Release pool itself
+    if (this._sessionId) {
+      resourceTracker.release(`pool-${this._sessionId}`);
+    }
+    // ──────────────────────────────────────────────────────────────────────
+
     for (const [key, managed] of this.videoCache) {
       this.disposeVideo(key, managed);
     }
@@ -771,6 +807,17 @@ export class PreviewMediaPool {
     // Browsers aggressively throttle decoding for tiny videos. Use a larger size (256x256)
     // to ensure the hardware decoder remains active.
     video.style.cssText = "width:256px;height:256px;position:absolute;left:0;top:0;";
+
+    // ─── RESOURCE TRACKING: Track video element creation ──────────────────
+    if (this._projectId && this._sessionId) {
+      resourceTracker.track({
+        id: `video-${key}`,
+        kind: "HTMLVideoElement",
+        projectId: this._projectId,
+        sessionId: this._sessionId,
+      });
+    }
+    // ──────────────────────────────────────────────────────────────────────
 
     const managed: ManagedVideo = {
       element: video,
@@ -900,6 +947,10 @@ export class PreviewMediaPool {
     if (managed.element.parentNode) {
       managed.element.parentNode.removeChild(managed.element);
     }
+
+    // ─── RESOURCE TRACKING: Release video element ─────────────────────────
+    resourceTracker.release(`video-${key}`);
+    // ──────────────────────────────────────────────────────────────────────
 
     this.videoCache.delete(key);
   }
@@ -1385,6 +1436,17 @@ export class PreviewMediaPool {
     audio.preload = "auto";
     audio.style.cssText = "position:absolute;width:1px;height:1px;";
 
+    // ─── RESOURCE TRACKING: Track audio element creation ──────────────────
+    if (this._projectId && this._sessionId) {
+      resourceTracker.track({
+        id: `audio-${key}`,
+        kind: "HTMLAudioElement",
+        projectId: this._projectId,
+        sessionId: this._sessionId,
+      });
+    }
+    // ──────────────────────────────────────────────────────────────────────
+
     const managed: ManagedAudio = {
       element: audio,
       clipId,
@@ -1424,6 +1486,10 @@ export class PreviewMediaPool {
     if (managed.element.parentNode) {
       managed.element.parentNode.removeChild(managed.element);
     }
+
+    // ─── RESOURCE TRACKING: Release audio element ─────────────────────────
+    resourceTracker.release(`audio-${key}`);
+    // ──────────────────────────────────────────────────────────────────────
 
     this.audios.delete(key);
   }

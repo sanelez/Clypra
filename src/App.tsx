@@ -61,6 +61,43 @@ const App = () => {
     };
   }, [setRecentProjects]);
 
+  // ─── DEV MODE: Automated Resource Leak Detection ───────────────────────────
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+
+    // Periodic leak check every 30 seconds in dev mode
+    const leakCheckInterval = setInterval(() => {
+      // Dynamically import to avoid bundling in production
+      import("@/lib/monitoring/ResourceTracker")
+        .then(({ resourceTracker }) => {
+          const report = resourceTracker.findLeaks();
+
+          if (report.totalLeaked > 0) {
+            console.warn(`⚠️ [DEV] RESOURCE LEAKS DETECTED: ${report.totalLeaked} resource(s) from old project still alive`, {
+              activeProject: report.activeProjectId,
+              leaks: report.leaks.map((r) => ({
+                id: r.id,
+                kind: r.kind,
+                projectId: r.projectId,
+                aliveForMs: Date.now() - r.createdAt,
+              })),
+            });
+
+            // Also log individual leaks for easier debugging
+            report.leaks.forEach((leak) => {
+              console.warn(`  🔴 Leaked ${leak.kind}: ${leak.id} (project: ${leak.projectId}, alive: ${Math.round((Date.now() - leak.createdAt) / 1000)}s)`, leak.stack ? `\n${leak.stack}` : "");
+            });
+          }
+        })
+        .catch((err) => {
+          console.error("[DEV] Leak detection error:", err);
+        });
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(leakCheckInterval);
+  }, []);
+  // ───────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (import.meta.env.DEV || !platform.isTauri()) return;
 
@@ -219,7 +256,6 @@ const App = () => {
     setPendingRecovery(null);
   };
 
-
   if (isLoading) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-bg">
@@ -252,13 +288,7 @@ const App = () => {
 
       {/* ── Crash Recovery Dialog ────────────────────────────────────────── */}
       {pendingRecovery && !project && (
-        <div
-          id="crash-recovery-dialog-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="crash-recovery-title"
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-        >
+        <div id="crash-recovery-dialog-overlay" role="dialog" aria-modal="true" aria-labelledby="crash-recovery-title" className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-bg border border-border rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
             {/* Icon */}
             <div className="flex items-center justify-center w-14 h-14 rounded-full bg-accent/10 border border-accent/30 mb-5 mx-auto">
@@ -272,9 +302,7 @@ const App = () => {
             </h2>
 
             <p className="text-sm text-text-muted text-center mb-1">
-              An unsaved session for{" "}
-              <span className="font-semibold text-text-primary">"{pendingRecovery.project.name}"</span>{" "}
-              was detected.
+              An unsaved session for <span className="font-semibold text-text-primary">"{pendingRecovery.project.name}"</span> was detected.
             </p>
             <p className="text-xs text-text-muted text-center mb-6">
               Last saved:{" "}
@@ -287,20 +315,10 @@ const App = () => {
             </p>
 
             <div className="flex gap-3">
-              <button
-                id="crash-recovery-discard-btn"
-                onClick={handleDiscardRecovery}
-                disabled={isRestoring}
-                className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-border text-text-muted hover:text-text-primary hover:border-border-strong transition-colors disabled:opacity-50"
-              >
+              <button id="crash-recovery-discard-btn" onClick={handleDiscardRecovery} disabled={isRestoring} className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-border text-text-muted hover:text-text-primary hover:border-border-strong transition-colors disabled:opacity-50">
                 Discard
               </button>
-              <button
-                id="crash-recovery-restore-btn"
-                onClick={handleRestoreSession}
-                disabled={isRestoring}
-                className="flex-1 px-4 py-2.5 text-sm font-semibold rounded-lg bg-accent text-white hover:bg-accent-soft transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-              >
+              <button id="crash-recovery-restore-btn" onClick={handleRestoreSession} disabled={isRestoring} className="flex-1 px-4 py-2.5 text-sm font-semibold rounded-lg bg-accent text-white hover:bg-accent-soft transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
                 {isRestoring ? (
                   <>
                     <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
