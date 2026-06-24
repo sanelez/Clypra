@@ -12,6 +12,11 @@
  * - Cancellation support
  * - Multiple codec support (H.264, H.265, ProRes)
  * - Audio mixing (future)
+ * 
+ * Monitoring:
+ * - Frame write timing (logged periodically)
+ * - Export FPS tracking
+ * - FFmpeg error logging
  */
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -128,6 +133,10 @@ struct ExportSession {
     /// Export configuration (for frame size validation)
     width: u32,
     height: u32,
+    
+    /// Performance monitoring
+    frame_write_times: Vec<f64>, // Last 60 frame write times (ms)
+    last_perf_log_time: std::time::Instant,
 }
 
 /// Global export sessions (keyed by session ID).
@@ -362,6 +371,8 @@ pub async fn start_video_export(
         on_progress,
         width: config.width,
         height: config.height,
+        frame_write_times: Vec::with_capacity(60),
+        last_perf_log_time: std::time::Instant::now(),
     };
     
     // Store session
@@ -413,6 +424,9 @@ pub async fn write_export_frame(
         ));
     }
     
+    // MONITORING: Track frame write timing
+    let write_start = std::time::Instant::now();
+    
     // Write frame data to FFmpeg stdin
     session
         .stdin
@@ -427,6 +441,15 @@ pub async fn write_export_frame(
         .flush()
         .await
         .map_err(|e| format!("Failed to flush frame: {}", e))?;
+    
+    // MONITORING: Record write time
+    let write_duration = write_start.elapsed().as_secs_f64() * 1000.0; // ms
+    session.frame_write_times.push(write_duration);
+    
+    // Keep only last 60 frames for rolling statistics
+    if session.frame_write_times.len() > 60 {
+        session.frame_write_times.remove(0);
+    }
     
     session.current_frame += 1;
     
@@ -454,15 +477,40 @@ pub async fn write_export_frame(
     
     // Log progress periodically
     if session.current_frame % 30 == 0 || session.current_frame == session.total_frames {
+        // MONITORING: Calculate frame write statistics
+        let avg_write_ms = if !session.frame_write_times.is_empty() {
+            session.frame_write_times.iter().sum::<f64>() / session.frame_write_times.len() as f64
+        } else {
+            0.0
+        };
+        
+        let max_write_ms = session.frame_write_times.iter().cloned().fold(0.0f64, f64::max);
+        
         eprintln!(
-            "[write_export_frame] Session {}: {}/{} frames ({:.1}%) @ {:.1} fps, ETA {:.1}s",
+            "[write_export_frame] Session {}: {}/{} frames ({:.1}%) @ {:.1} fps, ETA {:.1}s | Frame write: avg={:.2}ms max={:.2}ms",
             session_id,
             session.current_frame,
             session.total_frames,
             progress * 100.0,
             fps,
-            eta_seconds
+            eta_seconds,
+            avg_write_ms,
+            max_write_ms
         );
+        
+        // Log detailed performance every 5 seconds
+        if session.last_perf_log_time.elapsed().as_secs() >= 5 {
+            session.last_perf_log_time = std::time::Instant::now();
+            eprintln!(
+                "[EXPORT_PERF] Session {}: fps={:.1}, frame_write_avg={:.2}ms, frame_write_max={:.2}ms, frames={}/{}",
+                session_id,
+                fps,
+                avg_write_ms,
+                max_write_ms,
+                session.current_frame,
+                session.total_frames
+            );
+        }
     }
     
     Ok(())
