@@ -9,7 +9,6 @@
  */
 
 import { invoke, Channel, convertFileSrc } from "@tauri-apps/api/core";
-import { toNativePath } from "../platform/pathConversion";
 import { getFrameScheduler } from "../../core/scheduler/FrameScheduler";
 import { VideoElementPool } from "../../core/resources/VideoElementPool";
 import { resolveClipSourceTime } from "../../core/timeline/sourceTime";

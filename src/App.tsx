@@ -10,6 +10,7 @@ import { fromRustProject, fromRustTrack, fromRustClip, type RustProject } from "
 import { platform } from "@/core/platform";
 import { SettingsModal } from "./components/ui/SettingsModal";
 import { ErrorBoundary } from "@/components/ErrorBoundary"; // FIX (FINDING-022): Add root error boundary
+import { initializePerformanceAdapter, shutdownPerformanceAdapter } from "@/lib/platform/performanceAdapter";
 
 const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
 
@@ -21,6 +22,9 @@ const App = () => {
   useEffect(() => {
     const initializeApp = async () => {
       try {
+        // Initialize performance adapter for mobile optimizations
+        await initializePerformanceAdapter();
+
         const projects = await platform.getRecentProjects();
         setRecentProjects(projects);
       } catch (error) {
@@ -31,6 +35,11 @@ const App = () => {
     };
 
     initializeApp();
+
+    // Cleanup on unmount
+    return () => {
+      shutdownPerformanceAdapter();
+    };
   }, [setRecentProjects]);
 
   useEffect(() => {

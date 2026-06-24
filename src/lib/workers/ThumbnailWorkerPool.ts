@@ -22,7 +22,7 @@
  *   });
  */
 
-import type { ThumbnailDecodeRequest, ThumbnailDecodeResponse, ThumbnailErrorResponse, ThumbnailWorkerResponse } from "@/workers/thumbnailWorker";
+import type { ThumbnailDecodeRequest, ThumbnailWorkerResponse } from "@/workers/thumbnailWorker";
 import { performanceMonitor } from "../monitoring/PerformanceMonitor";
 
 interface PendingRequest {
@@ -45,17 +45,41 @@ export class ThumbnailWorkerPool {
   private readonly workerCount: number;
   private readonly requestTimeoutMs = 10000; // 10 seconds
 
-  private constructor() {
-    // Determine optimal worker count: CPU cores - 1 (leave one for main thread), max 4
-    const cpuCount = typeof navigator !== "undefined" && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4;
-    this.workerCount = Math.min(Math.max(cpuCount - 1, 1), 4);
+  private constructor(workerCount?: number) {
+    if (workerCount !== undefined) {
+      // Use provided worker count (for adaptive mobile optimization)
+      this.workerCount = workerCount;
+    } else {
+      // Determine optimal worker count: CPU cores - 1 (leave one for main thread), max 4
+      const cpuCount = typeof navigator !== "undefined" && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4;
+      this.workerCount = Math.min(Math.max(cpuCount - 1, 1), 4);
+    }
   }
 
-  static getInstance(): ThumbnailWorkerPool {
+  static getInstance(workerCount?: number): ThumbnailWorkerPool {
     if (!ThumbnailWorkerPool.instance) {
-      ThumbnailWorkerPool.instance = new ThumbnailWorkerPool();
+      ThumbnailWorkerPool.instance = new ThumbnailWorkerPool(workerCount);
     }
     return ThumbnailWorkerPool.instance;
+  }
+
+  /**
+   * Reset the singleton instance with a new worker count.
+   * Used when device state changes (battery/thermal) require adaptation.
+   */
+  static reset(workerCount: number): void {
+    if (ThumbnailWorkerPool.instance) {
+      ThumbnailWorkerPool.instance.shutdown();
+      ThumbnailWorkerPool.instance = null;
+    }
+    ThumbnailWorkerPool.instance = new ThumbnailWorkerPool(workerCount);
+  }
+
+  /**
+   * Get current worker count.
+   */
+  getWorkerCount(): number {
+    return this.workerCount;
   }
 
   /**
@@ -200,6 +224,14 @@ export class ThumbnailWorkerPool {
       // Transfer rawData buffer to worker (zero-copy)
       worker.postMessage(request, [rawData.buffer]);
     });
+  }
+
+  /**
+   * Shutdown and clean up all workers.
+   * Alias for dispose() - used by performance adapter.
+   */
+  shutdown(): void {
+    this.dispose();
   }
 
   /**
