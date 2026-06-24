@@ -123,11 +123,33 @@ export function isEpochStillValid(epochId: RenderEpochId, clipId?: string): bool
 
 // ─── RGBA → ImageBitmap ───────────────────────────────────────────────────────
 
+import { ThumbnailWorkerPool } from "../workers/ThumbnailWorkerPool";
+
 /**
  * Convert raw RGBA bytes to an ImageBitmap.
+ *
+ * PERFORMANCE OPTIMIZATION: Offloads ImageBitmap creation to web worker pool
+ * to prevent main thread blocking during thumbnail decode storms (scroll/zoom).
+ *
  * Uses SAB zero-copy path when available, otherwise copies into ImageData.
+ * Falls back to main thread processing if worker pool fails.
  */
-async function rgbaToImageBitmap(rgba: number[] | Uint8ClampedArray, width: number, height: number): Promise<ImageBitmap> {
+async function rgbaToImageBitmap(rgba: number[] | Uint8ClampedArray, width: number, height: number, tileKey?: string): Promise<ImageBitmap> {
+  // Try worker pool first (best performance)
+  if (tileKey && rgba instanceof Uint8ClampedArray) {
+    try {
+      const workerPool = ThumbnailWorkerPool.getInstance();
+      // Convert to Uint8Array for transfer (Uint8ClampedArray not transferable)
+      const transferable = new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength);
+      const bitmap = await workerPool.decode(transferable, width, height, tileKey);
+      return bitmap;
+    } catch (error) {
+      console.warn(`[Transport] Worker decode failed for ${tileKey}, falling back to main thread:`, error);
+      // Fall through to main thread processing
+    }
+  }
+
+  // Fallback: Main thread processing (for number[] input or worker failure)
   // Always copy into a fresh Uint8ClampedArray backed by a plain ArrayBuffer.
   // This is required because ImageData rejects SharedArrayBuffer-backed arrays,
   // and handles both number[] and Uint8ClampedArray input types.
@@ -170,7 +192,9 @@ export function requestRenderArtifacts(opts: RequestRenderArtifactsOptions): () 
     if (!isEpochStillValid(epochId, clipId)) return;
 
     try {
-      const bitmap = await rgbaToImageBitmap(raw.rgba_data, raw.width, raw.height);
+      // Generate tile key for worker identification
+      const tileKey = `${clipId}:${raw.spatial_tier}:${timestampMs}`;
+      const bitmap = await rgbaToImageBitmap(raw.rgba_data, raw.width, raw.height, tileKey);
       if (cancelled || !isEpochStillValid(epochId, clipId)) {
         bitmap.close();
         return;
