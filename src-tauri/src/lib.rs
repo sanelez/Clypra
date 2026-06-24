@@ -70,6 +70,7 @@ pub fn run() {
             // Video export commands
             start_video_export,
             write_export_frame,
+            write_export_frames_batch,
             finalize_video_export,
             cancel_video_export,
             check_ffmpeg_available,
