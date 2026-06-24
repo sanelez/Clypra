@@ -31,6 +31,7 @@
 import type { Clip, MediaAsset } from "@/types";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveClipSourceTime } from "../timeline/sourceTime";
+import { performanceMonitor } from "@/lib/monitoring/PerformanceMonitor";
 
 export interface PreviewSyncState {
   /** Current playback time (seconds) */
@@ -245,11 +246,17 @@ export class PreviewMediaPool {
       return;
     }
 
+    // MONITORING: Track sync calls
+    performanceMonitor.increment("preview_pool.sync_calls");
+    performanceMonitor.startTimer("preview_pool.sync_duration");
+
     // ─── RE-ENTRANCY GUARD ───────────────────────────────────────────────────
     if (this._syncInProgress) {
       // Already syncing - queue this request and return immediately
       // Only keep the MOST RECENT request (intermediate states don't matter)
       this._queuedSyncRequest = { clips, assets, tracks, syncState };
+      performanceMonitor.increment("preview_pool.sync_reentrant");
+      performanceMonitor.endTimer("preview_pool.sync_duration");
       return;
     }
 
@@ -263,6 +270,7 @@ export class PreviewMediaPool {
       const quickHash = `${syncState.time.toFixed(1)}-${syncState.state}-${clips.length}`;
       if (quickHash === this._lastQuickHash) {
         // Nothing changed - skip reconciliation (saves 0.5-2ms per frame)
+        performanceMonitor.increment("preview_pool.sync_skipped");
         return;
       }
       this._lastQuickHash = quickHash;
@@ -272,6 +280,10 @@ export class PreviewMediaPool {
       this.syncCallCount++;
       const currentClipIds = new Set(clips.map((c) => c.id));
       const structuralChange = this.detectStructuralChange(currentClipIds);
+
+      if (structuralChange) {
+        performanceMonitor.increment("preview_pool.structural_changes");
+      }
 
       this.lastSyncClipIds = currentClipIds;
       // ─────────────────────────────────────────────────────────────────────────
@@ -502,9 +514,17 @@ export class PreviewMediaPool {
       this.lastSyncState = { ...syncState };
 
       // ─── END OF ORIGINAL SYNC LOGIC ──────────────────────────────────────────
+
+      // MONITORING: Track pool sizes
+      performanceMonitor.gauge("preview_pool.video_cache_size", this.videoCache.size);
+      performanceMonitor.gauge("preview_pool.audio_cache_size", this.audios.size);
+      performanceMonitor.gauge("preview_pool.active_bindings", this.activeClipBindings.size);
     } finally {
       // Always clear the in-progress flag, even if sync() threw an error
       this._syncInProgress = false;
+
+      // MONITORING: Record sync duration
+      performanceMonitor.endTimer("preview_pool.sync_duration");
 
       // Process queued sync request if one arrived while we were busy
       if (this._queuedSyncRequest) {

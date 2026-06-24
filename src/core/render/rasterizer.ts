@@ -27,6 +27,7 @@ import lottie from "lottie-web";
 import { useStickersStore } from "../../features/stickers/store/stickersStore";
 import { segmentBodyMask } from "../../features/body-effects/segmentation/bodySegmentationWorkerClient";
 import { sampleCanvasAlpha, textRenderTrace, textRenderWarn } from "@/lib/debug/textRenderTrace";
+import { performanceMonitor } from "@/lib/monitoring/PerformanceMonitor";
 
 interface LottieAnimationCacheEntry {
   anim: any;
@@ -140,6 +141,7 @@ export interface RasterFrame {
  */
 export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget, canvas?: HTMLCanvasElement | OffscreenCanvas): Promise<RasterFrame> {
   const startTime = performance.now();
+  performanceMonitor.increment("rasterizer.scene_rasterize");
 
   const { width, height, pixelRatio = 1, colorSpace = "srgb", backgroundColor = "#000000" } = target;
 
@@ -274,6 +276,8 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
 
   // Rasterize all visual layers with uniform scaling
   for (const layer of scene.visualLayers) {
+    performanceMonitor.startTimer(`rasterizer.layer_${layer.layerType}`);
+
     const tInfo = transitionsMap.get(layer.layerId);
     if (tInfo) {
       // If outgoing layer, we skip drawing it (it will be blended when we hit the incoming layer)
@@ -294,13 +298,16 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
         // Render transition with params
         TransitionRenderer.render(ctx as any, frames.fromCanvas as any, frames.toCanvas as any, tInfo.transition.type, tInfo.transition.params || {}, tInfo.transition.progress);
         ctx.restore();
+        performanceMonitor.endTimer(`rasterizer.layer_${layer.layerType}`);
       } else {
         // Fallback to normal rendering if frames failed to prepare
         await rasterizeLayer(ctx, layer, scale, scale, target);
+        performanceMonitor.endTimer(`rasterizer.layer_${layer.layerType}`);
       }
     } else {
       // Normal layer rendering
       await rasterizeLayer(ctx, layer, scale, scale, target);
+      performanceMonitor.endTimer(`rasterizer.layer_${layer.layerType}`);
     }
   }
 
@@ -341,6 +348,11 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
   }
 
   const rasterTimeMs = performance.now() - startTime;
+
+  // Track rasterization performance
+  performanceMonitor.timing("rasterizer.scene_duration", rasterTimeMs);
+  performanceMonitor.gauge("rasterizer.layer_count", scene.visualLayers.length);
+  performanceMonitor.gauge("rasterizer.canvas_pool_size", (canvas as any)?.poolSize ?? 0);
 
   // Caller must invoke releaseCanvas() after extracting ImageBitmap/ImageData
   // to return the pooled OffscreenCanvas for reuse.
@@ -406,6 +418,8 @@ let _lastVideoWarnTime = 0;
 const VIDEO_WARN_INTERVAL_MS = 5000;
 
 async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, layer: EvaluatedMediaLayer, width: number, height: number, target: RasterTarget): Promise<void> {
+  performanceMonitor.startTimer(`rasterizer.media_${layer.mediaType}`);
+
   try {
     if (layer.clipKind === "sticker") {
       const stickerId = layer.stickerSourceId || layer.mediaId.replace("sticker-", "");
@@ -499,11 +513,15 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
         if (video.readyState >= 2) {
           // HAVE_CURRENT_DATA — element is loaded, draw it
           // Apply source rotation BEFORE drawing (critical for export)
+          performanceMonitor.increment("rasterizer.video_element_hit");
           await drawMediaWithSourceRotation(ctx, video, width, height, layer.sourceRotation, layer.effects, layer.filter);
+          performanceMonitor.endTimer(`rasterizer.media_${layer.mediaType}`);
           return;
         }
         // Element exists but still loading — draw silent placeholder (no error)
+        performanceMonitor.increment("rasterizer.video_element_loading");
         drawLoadingPlaceholder(ctx, width, height);
+        performanceMonitor.endTimer(`rasterizer.media_${layer.mediaType}`);
         return;
       } else {
         // Only log warning occasionally to avoid spam
@@ -523,8 +541,10 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
       const resource = resourceCache.get(layer.resourceHandle);
 
       if (resource && resource.data instanceof ImageBitmap) {
+        performanceMonitor.increment("rasterizer.resource_cache_hit");
         imageBitmap = resource.data;
       } else {
+        performanceMonitor.increment("rasterizer.resource_cache_miss");
         console.warn(`[Rasterizer] Resource handle ${layer.resourceHandle} not found or not ImageBitmap`);
       }
     } else if (layer.mediaType === "image") {
@@ -558,6 +578,8 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
     if (!layer.resourceHandle && imageBitmap) {
       imageBitmap.close();
     }
+
+    performanceMonitor.endTimer(`rasterizer.media_${layer.mediaType}`);
   } catch (error) {
     // Fallback: draw error placeholder
     ctx.fillStyle = "#1a1a1a";
@@ -580,6 +602,8 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
     ctx.fillText(layer.mediaType === "video" ? "Missing video element" : "Load failed", 0, 10);
     ctx.restore();
 
+    performanceMonitor.increment("rasterizer.media_decode_error");
+    performanceMonitor.endTimer(`rasterizer.media_${layer.mediaType}`);
     console.error(`[Rasterizer] Failed to render media layer:`, error);
   }
 }
@@ -693,6 +717,9 @@ function buildMediaFilter(filter: { id: string; name: string; intensity: number 
 function applyRasterEffect(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, effect: EvaluatedEffect, width: number, height: number, bodyMasks: Map<string, ImageData>): void {
   if (effect.intensity <= 0.001) return;
 
+  performanceMonitor.startTimer(`rasterizer.effect_${effect.renderer || effect.effectId}`);
+  performanceMonitor.increment("rasterizer.effects_applied");
+
   const renderer = normalizeRendererName(effect.renderer || effect.effectId);
   switch (renderer) {
     case "glitch":
@@ -734,6 +761,8 @@ function applyRasterEffect(ctx: CanvasRenderingContext2D | OffscreenCanvasRender
         console.warn(`[Rasterizer] Unknown effect renderer: ${effect.renderer}`);
       }
   }
+
+  performanceMonitor.endTimer(`rasterizer.effect_${effect.renderer || effect.effectId}`);
 }
 
 function normalizeRendererName(value: string): string {
@@ -1070,6 +1099,9 @@ function pseudoRandom(seed: number): number {
  * respects the same baseline alignment as the engine (fontSize * 0.82).
  */
 async function rasterizeTextLayer(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, layer: EvaluatedTextLayer, width: number, height: number, scaleX: number, scaleY: number): Promise<void> {
+  performanceMonitor.startTimer("rasterizer.text_layer");
+  performanceMonitor.increment("rasterizer.text_renders");
+
   if (layer.templateId) {
     const { useTemplateStore } = await import("@/features/text-templates/templateStore");
     let templates = useTemplateStore.getState().templates;
@@ -1451,6 +1483,8 @@ async function rasterizeTextLayer(ctx: CanvasRenderingContext2D | OffscreenCanva
   Promise.resolve().then(() => {
     CanvasDevice.release(offscreen);
   });
+
+  performanceMonitor.endTimer("rasterizer.text_layer");
 }
 
 // wrapText helper was removed since wrapping is handled natively inside the engine.

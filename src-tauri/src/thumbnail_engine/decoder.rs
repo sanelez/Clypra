@@ -769,8 +769,17 @@ pub async fn get_decoder(path: &str) -> Result<Arc<Mutex<VideoDecoder>>, String>
         // Update last accessed time (LRU tracking)
         *entry.last_accessed.lock().await = Instant::now();
         eprintln!("[get_decoder] Pool HIT for {} (LRU updated)", path);
+        
+        // MONITORING: Track cache hit
+        #[cfg(debug_assertions)]
+        eprintln!("[METRIC] decoder_pool.hit=1 path={}", path);
+        
         return Ok(entry.decoder.clone());
     }
+
+    // MONITORING: Track cache miss
+    #[cfg(debug_assertions)]
+    eprintln!("[METRIC] decoder_pool.miss=1 path={}", path);
 
     // FIX (FINDING-014): Evict least recently used decoder if pool is full
     if DECODER_POOL.len() >= MAX_DECODER_POOL_SIZE {
@@ -787,9 +796,15 @@ pub async fn get_decoder(path: &str) -> Result<Arc<Mutex<VideoDecoder>>, String>
         }
 
         if let Some(key) = oldest_key {
+            let age_secs = oldest_time.elapsed().as_secs_f64();
             DECODER_POOL.remove(&key);
+            
+            // MONITORING: Track eviction with age
+            #[cfg(debug_assertions)]
+            eprintln!("[METRIC] decoder_pool.eviction=1 age_secs={:.1} reason=lru_full", age_secs);
+            
             eprintln!("[get_decoder] Pool full ({} decoders), LRU evicted: {} (age: {:.1}s)", 
-                     MAX_DECODER_POOL_SIZE, key, oldest_time.elapsed().as_secs_f64());
+                     MAX_DECODER_POOL_SIZE, key, age_secs);
         }
     }
 
@@ -800,6 +815,12 @@ pub async fn get_decoder(path: &str) -> Result<Arc<Mutex<VideoDecoder>>, String>
     let decoder = VideoDecoder::open(path)
         .map_err(|e| format!("Failed to open {}: {}", path, e))?;
 
+    let creation_time_ms = start.elapsed().as_millis();
+    
+    // MONITORING: Track decoder creation time
+    #[cfg(debug_assertions)]
+    eprintln!("[METRIC] decoder_pool.creation_time_ms={} path={}", creation_time_ms, path);
+
     let arc = Arc::new(Mutex::new(decoder));
     let entry = DecoderEntry {
         decoder: arc.clone(),
@@ -808,8 +829,13 @@ pub async fn get_decoder(path: &str) -> Result<Arc<Mutex<VideoDecoder>>, String>
     
     DECODER_POOL.insert(path.to_string(), entry);
     
+    // MONITORING: Track pool size
+    let pool_size = DECODER_POOL.len();
+    #[cfg(debug_assertions)]
+    eprintln!("[METRIC] decoder_pool.size={}", pool_size);
+    
     eprintln!("[get_decoder] Created decoder in {:?} (pool size: {})", 
-             start.elapsed(), DECODER_POOL.len());
+             start.elapsed(), pool_size);
     Ok(arc)
 }
 
