@@ -9,6 +9,7 @@ import type { Project, AspectRatio } from "@/types";
 import { fromRustProject, fromRustTrack, fromRustClip, type RustProject } from "@/types/serialization";
 import { platform } from "@/core/platform";
 import { SettingsModal } from "./components/ui/SettingsModal";
+import { ErrorBoundary } from "@/components/ErrorBoundary"; // FIX (FINDING-022): Add root error boundary
 
 const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
 
@@ -156,11 +157,25 @@ const App = () => {
     );
   }
 
+  // FIX (FINDING-022): Wrap entire app in root-level ErrorBoundary for crash recovery
   return (
-    <>
+    <ErrorBoundary
+      fallback={
+        <div className="w-full h-full flex items-center justify-center bg-bg">
+          <div className="text-center max-w-md p-8">
+            <div className="text-red-500 text-6xl mb-4">⚠️</div>
+            <h1 className="text-2xl font-bold text-text-primary mb-4">Application Error</h1>
+            <p className="text-text-muted mb-6">Something went wrong. The application encountered an unexpected error.</p>
+            <button onClick={() => window.location.reload()} className="px-6 py-3 bg-accent text-white rounded-lg hover:bg-accent-soft transition-colors font-semibold">
+              Restart Application
+            </button>
+          </div>
+        </div>
+      }
+    >
       <TooltipProvider delayDuration={0}>{project ? <EditorScreen /> : <LaunchScreen onProjectCreate={handleCreateProject} onProjectOpen={handleOpenProject} />}</TooltipProvider>
       <SettingsModal isOpen={showSettingsModal} onClose={toggleSettingsModal} />
-    </>
+    </ErrorBoundary>
   );
 };
 
