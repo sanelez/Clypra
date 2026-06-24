@@ -250,7 +250,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   loadProject: async (project, payload) => {
-    console.log("📂 [PROJECT STORE] Loading project:", project.name);
+    console.log("📂 [PROJECT STORE] Loading project:", project.name, "clips:", payload?.clips?.length, "mediaAssets:", payload?.mediaAssets?.length);
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // PHASE 1: Dispose Previous Runtime & Reset State

@@ -452,6 +452,7 @@ export const ProgramPreview: React.FC = () => {
     let lastRenderedTime: number = -1;
     let lastRenderedEpoch: number = -1;
     let lastRenderedPlaybackState: "playing" | "paused" | "stopped" = "stopped";
+    let hasRenderedWithClips: boolean = false; // Track if we've ever rendered with actual clips
     const GPU_MEMORY_LIMIT_MB = 128;
     let forceRenderNeeded = false;
     const renderLoop = () => {
@@ -463,20 +464,31 @@ export const ProgramPreview: React.FC = () => {
       // clockState.time is throttled to 10fps for UI updates and lags behind
       const timeToRender = state.clock.time;
 
-      // FINDING-023: Round time to codec precision to prevent unnecessary seeks
-      // Video codecs use keyframes at intervals (e.g., 30fps = ~33ms precision)
-      // High-precision time values cause decoder resets every frame
-      // Round to 30fps precision (33.33ms) to match typical codec granularity
-      const codecPrecisionFps = 30;
-      const timeToRenderRounded = Math.round(timeToRender * codecPrecisionFps) / codecPrecisionFps;
-
       const playbackState = state.clock.state;
-      const playbackSpeed = state.clock.speed;
       const isPlaying = playbackState === "playing";
+
+      // FINDING-023: Round time to codec precision during playback to prevent decoder resets
+      // Video codecs use keyframes at intervals (e.g., 30fps = ~33ms precision)
+      // High-precision time values cause decoder resets every frame during playback
+      // BUT: When scrubbing (not playing), use full precision for responsive preview updates
+      let timeToRenderRounded: number;
+      if (isPlaying) {
+        // During playback: round to 30fps precision (33.33ms) to match typical codec granularity
+        const codecPrecisionFps = 30;
+        timeToRenderRounded = Math.round(timeToRender * codecPrecisionFps) / codecPrecisionFps;
+      } else {
+        // When scrubbing/seeking: use higher precision (100 = 10ms) for responsive updates
+        timeToRenderRounded = Math.round(timeToRender * 100) / 100;
+      }
+
+      const playbackSpeed = state.clock.speed;
       const timeChanged = timeToRenderRounded !== lastRenderedTime;
       const epochChanged = state.epoch !== lastRenderedEpoch;
-      // Always render the first frame (lastRenderedTime === -1)
-      const isFirstFrame = lastRenderedTime === -1;
+      // CRITICAL: First frame is when we haven't rendered with clips yet
+      // This handles both initial mount AND project loading where clips arrive later
+      const isFirstFrame = !hasRenderedWithClips && state.clips.length > 0;
+
+      console.log(`[PREVIEW DEBUG] RAF tick: time=${timeToRenderRounded.toFixed(2)}, lastTime=${lastRenderedTime}, timeChanged=${timeChanged}, epoch=${state.epoch}, lastEpoch=${lastRenderedEpoch}, epochChanged=${epochChanged}, isPlaying=${isPlaying}, isFirstFrame=${isFirstFrame}, hasRenderedWithClips=${hasRenderedWithClips}, clips=${state.clips.length}`);
 
       // ═══════════════════════════════════════════════════════════════════════════════
       // 🐛 CRITICAL FIX: Prevent Race Condition on First Frame Render
@@ -536,15 +548,14 @@ export const ProgramPreview: React.FC = () => {
 
       let waitingForVideoReady = false;
 
-      // CRITICAL: Also check if we're on the first render AFTER epoch changed from clips being added
-      // This handles project switch case where RAF loop resets but we need to wait for new video elements
-      const isNewClipsAdded = epochChanged && lastRenderedEpoch === -1 && state.clips.length > 0;
-
-      if ((isFirstFrame || isNewClipsAdded) && state.clips.length > 0) {
+      // Check video readiness on first frame with clips
+      if (isFirstFrame) {
+        console.log(`[PREVIEW DEBUG] Checking video element readiness: isFirstFrame=${isFirstFrame}`);
         const session = getActiveSessionOrNull();
         if (session) {
           const videoElements = session.getPreviewVideoElements();
           const videoClips = state.clips.filter((c) => c.kind === "video");
+          console.log(`[PREVIEW DEBUG] Found ${videoClips.length} video clips, ${videoElements.size} video elements`);
 
           if (videoClips.length > 0) {
             let hasAnyVideoElement = false;
@@ -575,6 +586,8 @@ export const ProgramPreview: React.FC = () => {
             // - hasAnyVideoElement=true, hasReadyVideo=true → Don't wait (at least one ready)
             waitingForVideoReady = hasAnyVideoElement && !hasReadyVideo;
 
+            console.log(`[PREVIEW DEBUG] Video readiness check: hasAnyVideoElement=${hasAnyVideoElement}, hasReadyVideo=${hasReadyVideo}, waitingForVideoReady=${waitingForVideoReady}`);
+
             if (waitingForVideoReady) {
               // console.log(`⏳ [PREVIEW RENDER LOOP] Waiting for video elements to load metadata (readyState check)...`);
             } else if (!hasAnyVideoElement) {
@@ -586,6 +599,8 @@ export const ProgramPreview: React.FC = () => {
 
       // Render decision: All normal conditions PLUS not waiting for video elements
       const needsRender = (isPlaying || timeChanged || epochChanged || isFirstFrame) && !waitingForVideoReady;
+
+      console.log(`[PREVIEW DEBUG] Render decision: needsRender=${needsRender}, waitingForVideoReady=${waitingForVideoReady}, hasClips=${state.clips.length > 0}`);
 
       // LOG: Detailed render decision tracking
       // if (epochChanged || isFirstFrame || timeChanged) {
@@ -646,9 +661,12 @@ export const ProgramPreview: React.FC = () => {
       // Only render if something changed or we're playing
       // This prevents infinite RAF loops when idle
       if (!needsRender) {
+        console.log(`[PREVIEW DEBUG] Skipping render - needsRender=false`);
         rafId = requestAnimationFrame(renderLoop);
         return;
       }
+
+      console.log(`[PREVIEW DEBUG] Proceeding to render at time=${timeToRenderRounded.toFixed(2)}`);
 
       rafId = requestAnimationFrame(renderLoop);
 
@@ -688,9 +706,9 @@ export const ProgramPreview: React.FC = () => {
       }
 
       isRendering = true;
-      lastRenderedTime = timeToRenderRounded;
-      lastRenderedEpoch = state.epoch;
-      lastRenderedPlaybackState = playbackState;
+      // CRITICAL FIX: Don't update lastRenderedTime/Epoch until the frame actually completes
+      // If we set them here and the job fails/cancels, we lose the trigger for the next frame
+      // These are now updated in the .then() success handler after the frame is actually rendered
       scheduler.updateTimeline(state.clips, state.tracks, state.mediaAssets, state.project, state.epoch, state.transitions);
       const qm = qualityManagerRef.current;
       const qualityTier = qm ? qm.selectTierForInteraction(isPlaying, false, false, state.previewQuality) : PreviewQualityTier.Idle;
@@ -724,12 +742,24 @@ export const ProgramPreview: React.FC = () => {
         .then((result) => {
           isRendering = false;
           if (!isActive) return;
+
+          // CRITICAL FIX: Update lastRenderedTime/Epoch ONLY after successful render
+          // This ensures we don't lose the render trigger if a job fails or is cancelled
+          lastRenderedTime = timeToRenderRounded;
+          lastRenderedEpoch = renderStateRef.current.epoch;
+          lastRenderedPlaybackState = playbackState;
+
+          // Mark that we've successfully rendered with clips
+          if (renderStateRef.current.clips.length > 0) {
+            hasRenderedWithClips = true;
+          }
+
           const latestState = renderStateRef.current;
           if (latestState.clock.isSeeking) {
             latestState.clock.completeSeek();
           }
 
-          // console.log(`✅ [PREVIEW RENDER] Frame rendered successfully at time=${timeToRenderRounded}, epoch=${latestState.epoch}`);
+          console.log(`✅ [PREVIEW DEBUG] Frame rendered successfully at time=${timeToRenderRounded.toFixed(2)}, epoch=${latestState.epoch}, lastRenderedTime now=${lastRenderedTime}, lastRenderedEpoch now=${lastRenderedEpoch}`);
 
           if (result.data instanceof ImageBitmap) {
             if (gpuCache) {
