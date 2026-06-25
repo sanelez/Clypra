@@ -206,6 +206,9 @@ export class PreviewMediaPool {
   private readonly MEMORY_SOFT_LIMIT_MB = 500; // Start aggressive eviction at 500MB
   private readonly MEMORY_HARD_LIMIT_MB = 800; // Force eviction at 800MB regardless of protection
 
+  // Lookahead prewarming for split clip transitions
+  private readonly LOOKAHEAD_WINDOW_SECONDS = 1.5;
+
   // ─── RE-ENTRANCY PROTECTION ─────────────────────────────────────────────
   private _syncInProgress = false;
   private _queuedSyncRequest: {
@@ -294,6 +297,12 @@ export class PreviewMediaPool {
       if (hasVideoElements && quickHash === this._lastQuickHash) {
         // Nothing changed - skip reconciliation (saves 0.5-2ms per frame)
         performanceMonitor.increment("preview_pool.sync_skipped");
+
+        // Still run prewarming during playback even when skipping reconciliation
+        if (syncState.state === "playing") {
+          this.prewarmUpcomingClips(clips, assets, syncState.time, syncState.frameRate);
+        }
+
         return;
       }
       this._lastQuickHash = quickHash;
@@ -334,17 +343,13 @@ export class PreviewMediaPool {
               // Add this clipId to the existing array if not already present
               if (!existingEntry.clipIds.includes(removedClipId)) {
                 existingEntry.clipIds.push(removedClipId);
-                console.log(`[PreviewMediaPool] Split detected: Added clip ${removedClipId} to cache ${cacheKey.substring(0, 30)}... (now tracking ${existingEntry.clipIds.length} IDs)`);
               }
-              // Update timestamp to extend grace period
               existingEntry.timestamp = now;
             } else {
-              // Create new entry with this clipId
               this.recentlyRemovedClips.set(cacheKey, {
                 clipIds: [removedClipId],
                 timestamp: now,
               });
-              console.log(`[PreviewMediaPool] Removed clip ${removedClipId} added to grace period (cache: ${cacheKey.substring(0, 30)}...)`);
             }
           }
           this.timelineClipRegistry.delete(removedClipId);
@@ -380,17 +385,6 @@ export class PreviewMediaPool {
           const existingRemoval = this.recentlyRemovedClips.get(cacheKey);
           if (existingRemoval && !existingRemoval.clipIds.includes(clip.id)) {
             existingRemoval.clipIds.push(clip.id);
-            console.log(`[PreviewMediaPool] New split clip ${clip.id} shares cache with ${existingRemoval.clipIds[0]} (total: ${existingRemoval.clipIds.length} clips, cacheKey: ${cacheKey.substring(0, 50)}...)`);
-          }
-
-          // DEBUG: Log when adding clips with similar mediaId but different cache keys
-          if (existingRemoval && existingRemoval.clipIds.length > 0) {
-            const firstClipId = existingRemoval.clipIds[0];
-            if (firstClipId.substring(0, 20) === clip.id.substring(0, 20)) {
-              console.log(`[PreviewMediaPool] SPLIT MISMATCH: Clip ${clip.id} has different cache key than ${firstClipId}`);
-              console.log(`  New cacheKey: ${cacheKey}`);
-              console.log(`  trimIn: ${normalizedTrimIn.toFixed(3)}`);
-            }
           }
         } else if (asset?.type === "audio" || (clip.kind === "audio" && (clip as any).audioPath)) {
           const key = `${clip.id}-${clip.mediaId}`;
@@ -576,6 +570,11 @@ export class PreviewMediaPool {
 
       this.lastSyncState = { ...syncState };
 
+      // Lookahead prewarming: Initialize upcoming clips before they become active
+      if (syncState.state === "playing") {
+        this.prewarmUpcomingClips(clips, assets, syncState.time, syncState.frameRate);
+      }
+
       // ─── END OF ORIGINAL SYNC LOGIC ──────────────────────────────────────────
 
       // MONITORING: Track pool sizes
@@ -602,6 +601,61 @@ export class PreviewMediaPool {
         this.sync(queued.clips, queued.assets, queued.tracks, queued.syncState);
       }
     }
+  }
+
+  /**
+   * Prewarm upcoming clips within lookahead window during playback.
+   * Creates and initializes video elements before clips become active to prevent blank frames.
+   */
+  private prewarmUpcomingClips(clips: Clip[], assets: MediaAsset[], currentTime: number, frameRate: number): void {
+    const lookaheadTime = currentTime + this.LOOKAHEAD_WINDOW_SECONDS;
+
+    for (const clip of clips) {
+      if (clip.startTime <= currentTime || clip.startTime > lookaheadTime) {
+        continue;
+      }
+
+      const asset = assets.find((a) => a.id === clip.mediaId);
+      const track = this.trackMap.get(clip.trackId);
+      if (track?.visible === false || !asset || asset.type !== "video") {
+        continue;
+      }
+
+      const trimIn = clip.trimIn || 0;
+      const normalizedTrimIn = Math.round(trimIn * 1000) / 1000;
+      const sourcePath = asset.path.startsWith("asset://") ? asset.path : convertFileSrc(asset.path);
+      const cacheKey = `${clip.mediaId}-${sourcePath}-trim${normalizedTrimIn.toFixed(3)}`;
+
+      if (this.videoCache.has(cacheKey)) {
+        continue;
+      }
+
+      console.log(`🔥 [Prewarm] Prewarming clip ${clip.id.substring(0, 20)}... at t=${clip.startTime.toFixed(2)}s (lookahead=${(clip.startTime - currentTime).toFixed(2)}s, trimIn=${normalizedTrimIn.toFixed(3)}s)`);
+      this.prewarmVideoElement(cacheKey, clip.id, clip.mediaId, sourcePath, normalizedTrimIn);
+    }
+  }
+
+  /**
+   * Create and prewarm a video element without blocking.
+   * Element will load metadata and seek to trimIn position in the background.
+   */
+  private prewarmVideoElement(cacheKey: string, clipId: string, mediaId: string, sourcePath: string, trimIn: number): void {
+    const managed = this.createVideo(cacheKey, clipId, mediaId, sourcePath);
+
+    const element = managed.element;
+    element.currentTime = trimIn;
+
+    element.addEventListener(
+      "loadedmetadata",
+      () => {
+        if (managed.disposing || this._isDisposed) return;
+        if (Math.abs(element.currentTime - trimIn) > 0.01) {
+          element.currentTime = trimIn;
+        }
+        console.log(`✅ [Prewarm] Element ready for clip ${clipId.substring(0, 20)}... (trimIn=${trimIn.toFixed(3)}s, readyState=${element.readyState})`);
+      },
+      { once: true },
+    );
   }
 
   /**
@@ -635,13 +689,9 @@ export class PreviewMediaPool {
       if (now - removal.timestamp < this.TRANSITION_GRACE_PERIOD_MS) {
         const managed = this.videoCache.get(cacheKey);
         if (managed) {
-          // Create mappings for ALL known clipIds (original + splits)
           for (const clipId of removal.clipIds) {
             const legacyKey = `${clipId}-${managed.mediaId}`;
             result.set(legacyKey, managed.element);
-          }
-          if (removal.clipIds.length > 1) {
-            console.log(`[PreviewMediaPool] getVideoElements: Returning element for ${removal.clipIds.length} clip IDs (split clips): ${removal.clipIds.join(", ")}`);
           }
         }
       }

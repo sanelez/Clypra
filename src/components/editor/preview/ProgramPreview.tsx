@@ -486,7 +486,7 @@ export const ProgramPreview: React.FC = () => {
       const epochChanged = state.epoch !== lastRenderedEpoch;
       const isFirstFrame = !hasRenderedWithClips && state.clips.length > 0;
       const playbackStateChanged = lastRenderedPlaybackState !== playbackState;
-      const needsSync = epochChanged || playbackStateChanged || isFirstFrame;
+      const needsSync = epochChanged || playbackStateChanged || isFirstFrame || isPlaying;
 
       // Get session once for both sync and render operations
       const session = getActiveSessionOrNull();
@@ -537,11 +537,7 @@ export const ProgramPreview: React.FC = () => {
             waitingForVideoReady = hasAnyVideoElement && !hasReadyVideo;
 
             if (waitingForVideoReady) {
-              console.log(`⏳ [PREVIEW RENDER LOOP] Waiting for video elements to load metadata (readyState check)...`);
-            } else if (!hasAnyVideoElement) {
-              console.warn(`📹 [PREVIEW RENDER] No video elements found after sync - this should not happen`);
-            } else {
-              console.log(`✅ [PREVIEW RENDER] Video ready, found ${videoClips.length} video clips with ${videoElements.size} elements`);
+              console.log(`⏳ Waiting for video metadata...`);
             }
           }
         }
@@ -633,8 +629,6 @@ export const ProgramPreview: React.FC = () => {
           if (latestState.clock.isSeeking) {
             latestState.clock.completeSeek();
           }
-
-          console.log(`✅ [PREVIEW DEBUG] Frame rendered successfully at time=${timeToRenderRounded.toFixed(2)}, epoch=${latestState.epoch}, lastRenderedTime now=${lastRenderedTime}, lastRenderedEpoch now=${lastRenderedEpoch}`);
 
           if (result.data instanceof ImageBitmap) {
             if (gpuCache) {
