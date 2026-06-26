@@ -11,7 +11,11 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useProjectStore } from "@/store/projectStore";
 import { useUIStore } from "@/store/uiStore";
 
-export const EditorScreen: React.FC = () => {
+interface EditorScreenProps {
+  onRequestClose?: () => void;
+}
+
+export const EditorScreen: React.FC<EditorScreenProps> = ({ onRequestClose }) => {
   const toastMessage = useProjectStore((s) => s.toastMessage);
   const toastVariant = useProjectStore((s) => s.toastVariant);
   const { toastMessage: shortcutToast } = useKeyboardShortcuts();
@@ -26,7 +30,7 @@ export const EditorScreen: React.FC = () => {
     <ErrorBoundary>
       <DndProvider backend={HTML5Backend}>
         <div className="w-full h-full overflow-hidden">
-          <EditorLayout />
+          <EditorLayout onRequestClose={onRequestClose} />
           <SuccessToast message={toastMessage || shortcutToast} variant={toastMessage ? toastVariant : "success"} />
         </div>
       </DndProvider>

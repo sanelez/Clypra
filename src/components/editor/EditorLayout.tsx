@@ -22,7 +22,11 @@ import { filterCacheManager } from "@/features/filters/cache/filterCache";
 import { AddClipCommand } from "@/core/history/commands/DeleteClipCommand";
 import { useHistoryStore } from "@/store/historyStore";
 
-export const EditorLayout: React.FC = () => {
+interface EditorLayoutProps {
+  onRequestClose?: () => void;
+}
+
+export const EditorLayout: React.FC<EditorLayoutProps> = ({ onRequestClose }) => {
   const { width } = useWindowSize();
 
   if (width < 768) {
@@ -487,7 +491,7 @@ export const EditorLayout: React.FC = () => {
 
   return (
     <div className="w-full h-full flex flex-col app-shell overflow-hidden p-1 pt-0">
-      <TopBar />
+      <TopBar onRequestClose={onRequestClose} />
 
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden gap-1">
         <div className="flex-1 min-h-0 flex overflow-hidden gap-1">
