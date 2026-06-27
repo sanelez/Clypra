@@ -189,6 +189,13 @@ export class FrameScheduler {
    * @returns Job ID
    */
   schedule(request: FrameRequest): string {
+    // Lock video elements immediately to prevent eviction while the job is in the queue
+    if (request.videoElements) {
+      for (const video of request.videoElements.values()) {
+        (video as any).__renderLockCount = ((video as any).__renderLockCount || 0) + 1;
+      }
+    }
+
     // ✅ FIX-004: Capture current project ID synchronously via globalThis
     // SessionRegistry already sets __activeProjectSession on globalThis
     let projectId = "unknown";
@@ -237,10 +244,19 @@ export class FrameScheduler {
   cancel(jobId: string): void {
     const job = this.jobs.get(jobId);
     if (job && !job.cancelled) {
+      const wasPending = job.status === "pending";
       job.cancelled = true;
       job.status = "cancelled";
       job.abortController.abort();
       this.stats.cancelledJobs++;
+
+      // If the job was pending in the queue, it will never execute and reach processJob's finally block.
+      // We must unlock its video elements here to prevent permanent resource locking.
+      if (wasPending && job.request.videoElements) {
+        for (const video of job.request.videoElements.values()) {
+          (video as any).__renderLockCount = Math.max(0, ((video as any).__renderLockCount || 0) - 1);
+        }
+      }
     }
   }
 
@@ -616,6 +632,13 @@ export class FrameScheduler {
       //   status: job.status,
       // });
     } finally {
+      // Unlock video elements
+      if (job.request.videoElements) {
+        for (const video of job.request.videoElements.values()) {
+          (video as any).__renderLockCount = Math.max(0, ((video as any).__renderLockCount || 0) - 1);
+        }
+      }
+
       // Release all resource handles acquired during preload
       this.releaseJobResources(job);
 
