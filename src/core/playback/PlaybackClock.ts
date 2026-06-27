@@ -236,6 +236,16 @@ export class PlaybackClock {
       return;
     }
 
+    // Sync precise live time from AudioContext before pausing
+    if (this._audioContext && this._audioContext.state === "running") {
+      const elapsed = (this._audioContext.currentTime - this._playStartAudioTime) * this._speed;
+      this._time = Math.max(0, Math.min(this._playStartClockTime + elapsed, this._duration));
+    }
+
+    // Snap playhead to nearest frame boundary of the project's frame rate
+    const frameRate = this._frameRate;
+    this._time = Math.round(this._time * frameRate) / frameRate;
+
     this._state = "paused";
     this._isSeeking = false;
     this._notifyListeners();
@@ -279,7 +289,12 @@ export class PlaybackClock {
     }
 
     const validTime = typeof time === "number" && !isNaN(time) && isFinite(time) ? time : 0;
-    this._time = Math.max(0, Math.min(validTime, this._duration));
+    const rawTime = Math.max(0, Math.min(validTime, this._duration));
+
+    // Snap seek time to nearest frame boundary of the project's frame rate
+    const frameRate = this._frameRate;
+    this._time = Math.round(rawTime * frameRate) / frameRate;
+
     this._isSeeking = true;
     this._notifyListeners();
 

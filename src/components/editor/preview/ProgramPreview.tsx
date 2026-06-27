@@ -472,19 +472,11 @@ export const ProgramPreview: React.FC = () => {
       const playbackState = state.clock.state;
       const isPlaying = playbackState === "playing";
 
-      // FINDING-023: Round time to codec precision during playback to prevent decoder resets
-      // Video codecs use keyframes at intervals (e.g., 30fps = ~33ms precision)
-      // High-precision time values cause decoder resets every frame during playback
-      // BUT: When scrubbing (not playing), use full precision for responsive preview updates
-      let timeToRenderRounded: number;
-      if (isPlaying) {
-        // During playback: round to 30fps precision (33.33ms) to match typical codec granularity
-        const codecPrecisionFps = 30;
-        timeToRenderRounded = Math.round(timeToRender * codecPrecisionFps) / codecPrecisionFps;
-      } else {
-        // When scrubbing/seeking: use higher precision (100 = 10ms) for responsive updates
-        timeToRenderRounded = Math.round(timeToRender * 100) / 100;
-      }
+      // FINDING-023 / Playhead Pause Jump Fix:
+      // Always round time to the project's actual frame rate precision to ensure
+      // frame-accurate synchronization and prevent jumps when pausing.
+      const frameRate = state.project?.frameRate ?? 30;
+      const timeToRenderRounded = Math.round(timeToRender * frameRate) / frameRate;
 
       const playbackSpeed = state.clock.speed;
       const timeChanged = timeToRenderRounded !== lastRenderedTime;
