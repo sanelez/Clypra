@@ -14,6 +14,9 @@ import { ErrorBoundary } from "@/components/ErrorBoundary"; // FIX (FINDING-022)
 import { initializePerformanceAdapter, shutdownPerformanceAdapter } from "@/lib/platform/performanceAdapter";
 import { hasSnapshot, getSnapshot, clearSnapshot, type RecoverySnapshot } from "@/core/runtime/CrashRecoveryService";
 import { lifecycleMonitor } from "@/lib/monitoring/LifecycleMonitor";
+import { useRecordingStore } from "@/store/recordingStore";
+import { FloatingWidget } from "@/components/ui/FloatingWidget";
+import { ScreenRecordingPreviewModal } from "@/components/ui/ScreenRecordingPreviewModal";
 
 const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
 
@@ -25,6 +28,7 @@ const App = () => {
   const [isRestoring, setIsRestoring] = useState(false);
   const [isClosingProject, setIsClosingProject] = useState(false);
   const [projectNameBeforeClose, setProjectNameBeforeClose] = useState<string>("");
+  const { isRecording, previewRecording, setPreviewRecording } = useRecordingStore();
 
   useEffect(() => {
     const initializeApp = async () => {
@@ -129,11 +133,59 @@ const App = () => {
     };
   }, []);
 
-  const handleCreateProject = (name: string, aspectRatio: AspectRatio, frameRate: 24 | 30 | 60) => {
+  const handleCreateProject = (name: string, aspectRatio: AspectRatio, frameRate: 24 | 30 | 60, initialClipPaths?: string[]) => {
     // Reset UI state from any previous session
     useUIStore.getState().exitSourceMode();
     createProject(name, aspectRatio, frameRate);
+
+    if (initialClipPaths && initialClipPaths.length > 0) {
+      setTimeout(async () => {
+        try {
+          const { generateId } = await import("@/lib/utils/id");
+          const { convertFileSrc } = await import("@tauri-apps/api/core");
+
+          for (const path of initialClipPaths) {
+            try {
+              const filename = path.split(/[/\\]/).pop() || "recording.webm";
+
+              // Convert native FS path to a webview-renderable asset:// URL so the
+              // video element can actually load the file in the Tauri WKWebView sandbox.
+              let displayPath = path;
+              try {
+                displayPath = convertFileSrc(path);
+              } catch {
+                // Not running inside Tauri — keep the raw path (dev/web fallback)
+              }
+
+              const metadata = await platform.getMediaMetadata(path);
+              const posterFrame = await platform.extractPosterFrame(path, metadata.duration, window.devicePixelRatio || 1.0).catch(() => undefined);
+
+              const asset = {
+                id: generateId("asset"),
+                name: filename,
+                // Store the webview-safe URL so <video src> can render it
+                path: displayPath,
+                type: "video" as const,
+                duration: metadata.duration,
+                width: metadata.width,
+                height: metadata.height,
+                posterFrame,
+                size: 0,
+              };
+
+              // Add to media panel only — do NOT add to timeline
+              useProjectStore.getState().addMediaAsset(asset);
+            } catch (innerErr) {
+              console.error("[App] Failed to import path:", path, innerErr);
+            }
+          }
+        } catch (err) {
+          console.error("[App] Failed to auto-import initial recordings:", err);
+        }
+      }, 500);
+    }
   };
+
 
   const handleOpenProject = async (proj: Project) => {
     try {
@@ -340,8 +392,17 @@ const App = () => {
         </div>
       }
     >
-      <TooltipProvider delayDuration={0}>{project ? <EditorScreen onRequestClose={handleCloseProject} /> : <LaunchScreen onProjectCreate={handleCreateProject} onProjectOpen={handleOpenProject} />}</TooltipProvider>
+      {isRecording ? (
+        <FloatingWidget onProjectCreate={handleCreateProject} />
+      ) : (
+        <TooltipProvider delayDuration={0}>{project ? <EditorScreen onRequestClose={handleCloseProject} /> : <LaunchScreen onProjectCreate={handleCreateProject} onProjectOpen={handleOpenProject} />}</TooltipProvider>
+      )}
       <SettingsModal isOpen={showSettingsModal} onClose={toggleSettingsModal} />
+      <ScreenRecordingPreviewModal
+        isOpen={!!previewRecording}
+        onClose={() => setPreviewRecording(null)}
+        onProjectCreate={handleCreateProject}
+      />
 
       {/* ── Closing Project Modal ────────────────────────────────────────── */}
       <ClosingProjectModal
