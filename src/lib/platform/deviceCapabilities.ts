@@ -253,24 +253,24 @@ export async function logDeviceCapabilities(): Promise<void> {
   const caps = await getDeviceCapabilities();
   const profile = await getPerformanceProfile();
 
-  console.group("[Device Capabilities]");
-  console.log("Platform:", caps.platform, `(${caps.platformName})`);
-  console.log("CPU Cores:", caps.cpuCores);
-  console.log("Estimated RAM:", `${caps.estimatedRamGB} GB`);
-  console.log("Battery:", caps.onBattery ? "On Battery" : "Plugged In");
-  if (caps.batteryLevel !== null) {
-    console.log("Battery Level:", `${(caps.batteryLevel * 100).toFixed(0)}%`);
-  }
-  console.log("Thermal Throttling:", caps.thermalThrottling ? "Yes" : "No");
-  console.groupEnd();
+  // console.group("[Device Capabilities]");
+  // console.log("Platform:", caps.platform, `(${caps.platformName})`);
+  // console.log("CPU Cores:", caps.cpuCores);
+  // console.log("Estimated RAM:", `${caps.estimatedRamGB} GB`);
+  // console.log("Battery:", caps.onBattery ? "On Battery" : "Plugged In");
+  // if (caps.batteryLevel !== null) {
+  //   console.log("Battery Level:", `${(caps.batteryLevel * 100).toFixed(0)}%`);
+  // }
+  // console.log("Thermal Throttling:", caps.thermalThrottling ? "Yes" : "No");
+  // console.groupEnd();
 
-  console.group("[Performance Profile]");
-  console.log("Workers:", profile.workerCount);
-  console.log("Thumbnail Size:", `${profile.thumbnailWidth}×${profile.thumbnailHeight}`);
-  console.log("Decoder Pool:", profile.decoderPoolSize);
-  console.log("Preview FPS:", profile.previewFps);
-  console.log("Filmstrip Density:", profile.filmstripDensity);
-  console.log("Background Processing:", profile.enableBackgroundProcessing);
-  console.log("Cache Size:", `${profile.cacheSizeMB} MB`);
-  console.groupEnd();
+  // console.group("[Performance Profile]");
+  // console.log("Workers:", profile.workerCount);
+  // console.log("Thumbnail Size:", `${profile.thumbnailWidth}×${profile.thumbnailHeight}`);
+  // console.log("Decoder Pool:", profile.decoderPoolSize);
+  // console.log("Preview FPS:", profile.previewFps);
+  // console.log("Filmstrip Density:", profile.filmstripDensity);
+  // console.log("Background Processing:", profile.enableBackgroundProcessing);
+  // console.log("Cache Size:", `${profile.cacheSizeMB} MB`);
+  // console.groupEnd();
 }

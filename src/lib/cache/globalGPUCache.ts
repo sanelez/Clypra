@@ -262,6 +262,47 @@ export class GlobalGPUCacheManager {
   }
 
   /**
+   * Evict ALL textures from the GPU cache and clear viewport registrations.
+   *
+   * Called on project switch/close (FINDING-009 / CONTAMINATION-004) to ensure
+   * textures from the previous project are not accessible to the incoming one.
+   * This is safe because the filmstrip and preview will re-upload needed textures
+   * on the next render cycle.
+   *
+   * @returns Number of textures evicted
+   */
+  clearAllTextures(): number {
+    if (!this.cache) return 0;
+
+    const textures: Map<string, WebGLTexture> = (this.cache as any).textures;
+    const textureMetadata: Map<string, unknown> = (this.cache as any).textureMetadata;
+    const gl: WebGLRenderingContext | WebGL2RenderingContext = (this.cache as any).gl;
+
+    if (!textures || !gl) return 0;
+
+    let evicted = 0;
+    for (const texture of textures.values()) {
+      try {
+        gl.deleteTexture(texture);
+        evicted++;
+      } catch {
+        // Ignore errors from already-lost WebGL context
+      }
+    }
+
+    textures.clear();
+    if (textureMetadata) textureMetadata.clear();
+
+    // Clear viewport registrations — they reference clip keys from the old project
+    this.viewports.clear();
+
+    if (evicted > 0) {
+      console.log(`[GlobalGPUCache] Cleared ${evicted} textures on project switch`);
+    }
+    return evicted;
+  }
+
+  /**
    * Dispose of GPU resources
    * Should be called when app is shutting down
    */

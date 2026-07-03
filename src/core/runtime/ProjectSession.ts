@@ -54,6 +54,8 @@ import { RenderEngine } from "@/lib/renderEngine/renderEngine";
 import { QualityPreset, RendererMode, type SrpConfig } from "@/lib/renderEngine/types";
 import { PreviewMediaPool, type PreviewSyncState } from "../resources/PreviewMediaPool";
 import type { Clip, MediaAsset } from "@/types";
+import { lifecycleMonitor } from "@/lib/monitoring/LifecycleMonitor";
+import { resourceTracker, installDiagnostics } from "@/lib/monitoring/ResourceTracker";
 
 /**
  * Project Session State
@@ -181,12 +183,25 @@ export class ProjectSession {
       });
 
       // Create preview media pool (headless video/audio elements)
-      this._previewMediaPool = new PreviewMediaPool();
+      this._previewMediaPool = new PreviewMediaPool(this.projectId, this.sessionId);
 
       // Initialize stores (timeline, UI)
       await this._initializeStores();
 
       this._state = "active";
+
+      // ── Telemetry: record session creation ──────────────────────────────
+      lifecycleMonitor.record("SESSION_CREATE", {
+        projectId: this.projectId,
+        sessionId: this.sessionId,
+      });
+      resourceTracker.track({
+        id: this.sessionId,
+        kind: "ProjectSession",
+        projectId: this.projectId,
+        sessionId: this.sessionId,
+      });
+
       this._notifyListeners({ type: "initialized", session: this });
     } catch (error) {
       this._state = "disposed";
@@ -259,10 +274,25 @@ export class ProjectSession {
       await this._resetStores();
 
       this._state = "disposed";
+
+      // ── Telemetry: record session disposal ─────────────────────────────
+      lifecycleMonitor.record("SESSION_DISPOSE", {
+        projectId: this.projectId,
+        sessionId: this.sessionId,
+      });
+      resourceTracker.release(this.sessionId);
+
       this._notifyListeners({ type: "disposed", session: this });
     } catch (error) {
       console.error(`[ProjectSession] Disposal error:`, error);
       this._state = "disposed"; // Mark as disposed even on error
+      // Still attempt telemetry on error path
+      lifecycleMonitor.record("SESSION_DISPOSE", {
+        projectId: this.projectId,
+        sessionId: this.sessionId,
+        detail: { error: String(error) },
+      });
+      resourceTracker.release(this.sessionId);
       this._notifyListeners({ type: "error", session: this, error: error as Error });
     }
   }
@@ -459,6 +489,8 @@ export class ProjectSession {
 class SessionRegistry {
   private _activeSession: ProjectSession | null = null;
   private _listeners = new Set<SessionRegistryListener>();
+  private _currentRequestId = 0;
+  private _targetProjectId: string | null = null;
 
   /**
    * Get active session (if any).
@@ -468,18 +500,55 @@ class SessionRegistry {
   }
 
   /**
+   * Set target project ID.
+   */
+  setTargetProjectId(projectId: string | null): void {
+    this._targetProjectId = projectId;
+  }
+
+  /**
+   * Get target project ID.
+   */
+  getTargetProjectId(): string | null {
+    return this._targetProjectId;
+  }
+
+  /**
    * Set active session.
    * Automatically disposes previous session if exists.
    */
   async setActiveSession(session: ProjectSession | null): Promise<void> {
+    const requestId = ++this._currentRequestId;
+
+    if (session && session.projectId !== this._targetProjectId) {
+      console.warn(`[SessionRegistry] Session switch discarded: session project ${session.projectId} does not match target project ${this._targetProjectId}. Disposing session.`);
+      await session.dispose();
+      return;
+    }
+
     if (this._activeSession && this._activeSession !== session) {
       const oldSession = this._activeSession;
       this._activeSession = null;
+      if (typeof globalThis !== "undefined") {
+        (globalThis as any).__activeProjectSession = null;
+      }
       this._notifyListeners();
       await oldSession.dispose();
     }
-    this._activeSession = session;
-    this._notifyListeners();
+
+    // Only set the session if this request has not been superceded by a newer switch
+    if (requestId === this._currentRequestId) {
+      this._activeSession = session;
+      if (typeof globalThis !== "undefined") {
+        (globalThis as any).__activeProjectSession = session;
+      }
+      this._notifyListeners();
+    } else {
+      console.warn(`[SessionRegistry] Session switch superceded (request ${requestId} vs current ${this._currentRequestId}). Disposing orphaned session.`);
+      if (session) {
+        await session.dispose();
+      }
+    }
   }
 
   /**
@@ -545,9 +614,31 @@ export function subscribeToSessionChanges(listener: () => void): () => void {
  * Automatically disposes previous session if exists.
  */
 export async function createProjectSession(projectId: string): Promise<ProjectSession> {
+  // Install diagnostics on first session creation (idempotent)
+  installDiagnostics();
+  // Also attach lifecycle log to the diagnostics surface
+  if (typeof window !== "undefined") {
+    const diag = (window as any).__clypra_diagnostics ?? {};
+    (window as any).__clypra_diagnostics = { ...diag, lifecycle: lifecycleMonitor };
+  }
+
+  lifecycleMonitor.record("PROJECT_LOAD_START", { projectId });
+
+  sessionRegistry.setTargetProjectId(projectId);
+
   const session = new ProjectSession(projectId);
-  await session.initialize();
+  try {
+    await session.initialize();
+  } catch (err) {
+    if (sessionRegistry.getTargetProjectId() === projectId) {
+      sessionRegistry.setTargetProjectId(null);
+    }
+    throw err;
+  }
   await sessionRegistry.setActiveSession(session);
+
+  lifecycleMonitor.record("PROJECT_LOAD_COMPLETE", { projectId, sessionId: session.sessionId });
+
   return session;
 }
 
@@ -555,5 +646,6 @@ export async function createProjectSession(projectId: string): Promise<ProjectSe
  * Dispose active project session.
  */
 export async function disposeActiveSession(): Promise<void> {
+  sessionRegistry.setTargetProjectId(null);
   await sessionRegistry.clearActiveSession();
 }

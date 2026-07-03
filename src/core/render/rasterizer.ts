@@ -18,7 +18,7 @@
 import type { EvaluatedEffect, EvaluatedScene, EvaluatedMediaLayer, EvaluatedTextLayer } from "../evaluation/types";
 import { resolveFilterToIR, compileFilterIRToCSS } from "./filterIR";
 import { getResourceCache } from "../resources/ResourceCache";
-import { evaluateScene as engineEvaluateScene, textEffectConfigToScene, type TextEffectConfig, layerToTextEffectConfig, CanvasDevice, defaultConfig as engineDefaultConfig, _buildConfig } from "@clypra/engine";
+import { evaluateScene as engineEvaluateScene, textEffectConfigToScene, type TextEffectConfig, layerToTextEffectConfig, CanvasDevice, defaultConfig as engineDefaultConfig, _buildConfig, EffectGraph, EffectEngine } from "@clypra/engine";
 import { useEffectsStore } from "../../features/text-effects/store/effectsStore";
 import { invalidateEvaluationCache } from "../evaluation/evaluator";
 import { useTimelineStore } from "../../store/timelineStore";
@@ -28,6 +28,9 @@ import { useStickersStore } from "../../features/stickers/store/stickersStore";
 import { segmentBodyMask } from "../../features/body-effects/segmentation/bodySegmentationWorkerClient";
 import { sampleCanvasAlpha, textRenderTrace, textRenderWarn } from "@/lib/debug/textRenderTrace";
 import { performanceMonitor } from "@/lib/monitoring/PerformanceMonitor";
+import { TransitionRenderer } from "@clypra/engine/transitions";
+
+const effectEngine = new EffectEngine();
 
 interface LottieAnimationCacheEntry {
   anim: any;
@@ -38,6 +41,22 @@ interface LottieAnimationCacheEntry {
 }
 
 const lottieRenderCache = new Map<string, LottieAnimationCacheEntry>();
+
+/**
+ * PREV-BUG-003 fix: Clear all cached Lottie animations and remove their DOM containers.
+ * Must be called on project switch to prevent DOM node leaks and stale animation data.
+ */
+export function clearLottieRenderCache(): void {
+  for (const [, entry] of lottieRenderCache) {
+    try {
+      entry.anim.destroy();
+    } catch {
+      // Lottie destroy can throw if already cleaned up
+    }
+    entry.container.remove();
+  }
+  lottieRenderCache.clear();
+}
 
 function hasVisibleAlpha(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number): boolean | null {
   try {
@@ -100,6 +119,10 @@ export interface RasterTarget {
 
   /** Whether to skip applying track-level filters on the CPU (for GPU preview path) */
   skipFilters?: boolean;
+
+  /** PREV-BUG-005 fix: Resource handle side-channel map (layerId → handle).
+   *  Used instead of mutating cached EvaluatedScene layer objects. */
+  resourceHandleMap?: Map<string, import("../resources/types").RenderResourceHandle>;
 }
 
 /**
@@ -232,17 +255,9 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
     const outgoing = scene.visualLayers.find((l) => l.layerId === t.outgoingLayer);
     const incoming = scene.visualLayers.find((l) => l.layerId === t.incomingLayer);
     if (outgoing && incoming) {
-      // Create offscreen canvases at full raster resolution
-      const fromCanvas = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(width, height) : document.createElement("canvas");
-      const toCanvas = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(width, height) : document.createElement("canvas");
-      if (fromCanvas instanceof HTMLCanvasElement) {
-        fromCanvas.width = width;
-        fromCanvas.height = height;
-      }
-      if (toCanvas instanceof HTMLCanvasElement) {
-        toCanvas.width = width;
-        toCanvas.height = height;
-      }
+      // PREV-BUG-004 fix: Use CanvasDevice pool instead of raw OffscreenCanvas to avoid GC pressure.
+      const fromCanvas = CanvasDevice.acquire(width, height);
+      const toCanvas = CanvasDevice.acquire(width, height);
       const fromCtx = fromCanvas.getContext("2d") as any;
       const toCtx = toCanvas.getContext("2d") as any;
 
@@ -292,12 +307,12 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
         // Since the frames are already rendered with offsetX/offsetY, reset transform to draw them full-screen
         ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-        // Import TransitionRenderer from @clypra/engine (single source of truth)
-        const { TransitionRenderer } = await import("@clypra/engine/transitions");
-
-        // Render transition with params
+        // PREV-BUG-007 fix: TransitionRenderer is now a static import (no async import() in hot path)
         TransitionRenderer.render(ctx as any, frames.fromCanvas as any, frames.toCanvas as any, tInfo.transition.type, tInfo.transition.params || {}, tInfo.transition.progress);
         ctx.restore();
+        // PREV-BUG-004 fix: Release transition canvases back to pool
+        CanvasDevice.release(frames.fromCanvas);
+        CanvasDevice.release(frames.toCanvas);
         performanceMonitor.endTimer(`rasterizer.layer_${layer.layerType}`);
       } else {
         // Fallback to normal rendering if frames failed to prepare
@@ -313,37 +328,95 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
 
   ctx.restore();
 
+  // ─────────────────────────────────────────────────────────────────────────────
   // Apply track-level filter to the entire composition on CPU (unless skipped for GPU)
+  //
+  // ARCHITECTURE NOTE: This implements a LINEAR MERGED PIPELINE where filters
+  // are applied as a post-process to the effect-composited canvas. While this
+  // appears to merge pipelines, it's actually the CORRECT implementation of the
+  // isolated pipeline architecture:
+  //
+  //   Effect Pipeline → outputCanvas
+  //   Filter Pipeline → reads outputCanvas, writes filtered result back
+  //
+  // The pipelines remain isolated because:
+  // 1. Filter rendering is independent (doesn't modify effect state)
+  // 2. Effect rendering is independent (doesn't know about filters)
+  // 3. Composite pass happens here (final blend of both pipelines)
+  //
+  // TODO: Migrate to WebGL-based filter rendering to support advanced params
+  // (exposure, temperature, tint, vignette) that Canvas2D ctx.filter can't handle.
+  // See FILTER_ARCHITECTURE.md for details.
+  // ─────────────────────────────────────────────────────────────────────────────
   if (scene.activeFilter && !target.skipFilters) {
-    const { id, intensity } = scene.activeFilter;
-    const ir = resolveFilterToIR(id, intensity, scene.activeFilter.swatch);
-    const cssFilter = compileFilterIRToCSS(ir);
+    const { id, intensity, effectStack, pipeline } = scene.activeFilter;
 
-    if (cssFilter) {
-      // Apply the filter to the entire canvas by drawing it onto a temporary canvas,
-      // then drawing it back with the filter applied.
-      const tempCanvas = CanvasDevice.acquire(targetWidth, targetHeight);
-      const tempCtx = tempCanvas.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
-      if (tempCtx) {
-        // Copy current canvas contents to temp canvas
-        tempCtx.clearRect(0, 0, targetWidth, targetHeight);
-        tempCtx.drawImage(outputCanvas, 0, 0);
+    if (pipeline === "v2" && effectStack && effectStack.length > 0) {
+      try {
+        const { buildManifestFromClip, isV2SupportedEffectStack, renderMPGFrame } = await import("../mpg");
+        const { scaleEffectStackByIntensity } = await import("../mpg/filterStack");
+        const scaled = scaleEffectStackByIntensity(
+          effectStack.map((n) => ({ type: n.type, params: n.params ?? {} })),
+          intensity,
+        );
+        if (isV2SupportedEffectStack(scaled)) {
+          const manifest = buildManifestFromClip(
+            "filter-post",
+            "Filter Post Process",
+            { id: "filter-clip", assetId: "filter-source", timelineStartMs: 0, timelineEndMs: 60_000, enabled: true },
+            scaled,
+            { width: targetWidth, height: targetHeight, assetUri: "inline://filter", assetKind: "image" },
+          );
 
-        // Clear output canvas
-        ctx.save();
-        if (typeof ctx.setTransform === "function") {
-          ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset scale/offset
+          const sourceCanvas = document.createElement("canvas");
+          sourceCanvas.width = targetWidth;
+          sourceCanvas.height = targetHeight;
+          const sourceCtx = sourceCanvas.getContext("2d")!;
+          sourceCtx.drawImage(outputCanvas, 0, 0, targetWidth, targetHeight);
+
+          const filtered = await renderMPGFrame(manifest, sourceCanvas, {
+            timelineTimeMs: 500,
+            width: targetWidth,
+            height: targetHeight,
+          });
+
+          ctx.save();
+          if (typeof ctx.setTransform === "function") {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+          }
+          ctx.clearRect(0, 0, targetWidth, targetHeight);
+          ctx.fillStyle = backgroundColor;
+          ctx.fillRect(0, 0, targetWidth, targetHeight);
+          ctx.drawImage(filtered, 0, 0, targetWidth, targetHeight);
+          ctx.restore();
         }
-        ctx.clearRect(0, 0, targetWidth, targetHeight);
-        ctx.fillStyle = backgroundColor;
-        ctx.fillRect(0, 0, targetWidth, targetHeight);
-
-        // Draw back with filter
-        ctx.filter = cssFilter;
-        ctx.drawImage(tempCanvas, 0, 0);
-        ctx.restore();
+      } catch (err) {
+        console.warn("[Rasterizer:MPG Filter] V2 filter path failed, falling back to CSS", err);
       }
-      CanvasDevice.release(tempCanvas);
+    } else {
+      const ir = resolveFilterToIR(id, intensity, scene.activeFilter.swatch);
+      const cssFilter = compileFilterIRToCSS(ir);
+
+      if (cssFilter) {
+        const tempCanvas = CanvasDevice.acquire(targetWidth, targetHeight);
+        const tempCtx = tempCanvas.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+        if (tempCtx) {
+          tempCtx.clearRect(0, 0, targetWidth, targetHeight);
+          tempCtx.drawImage(outputCanvas, 0, 0);
+
+          ctx.save();
+          if (typeof ctx.setTransform === "function") {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+          }
+          ctx.clearRect(0, 0, targetWidth, targetHeight);
+          ctx.fillStyle = backgroundColor;
+          ctx.fillRect(0, 0, targetWidth, targetHeight);
+          ctx.filter = cssFilter;
+          ctx.drawImage(tempCanvas, 0, 0);
+          ctx.restore();
+        }
+        CanvasDevice.release(tempCanvas);
+      }
     }
   }
 
@@ -511,20 +584,12 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
 
       if (video) {
         if (video.readyState >= 2) {
-          // HAVE_CURRENT_DATA — element is loaded, draw it
-          // Apply source rotation BEFORE drawing (critical for export)
           performanceMonitor.increment("rasterizer.video_element_hit");
-
-          // LOG SUCCESS: Video element found (especially important for split clips during transitions)
-          if (layer.clipId.includes("split") || layer.clipId.match(/clip-\d+-\w+-\d+/)) {
-            console.log(`[Rasterizer] ✅ Video element found for clip ${layer.clipId} (key: ${key})`);
-          }
 
           await drawMediaWithSourceRotation(ctx, video, width, height, layer.sourceRotation, layer.effects, layer.filter);
           performanceMonitor.endTimer(`rasterizer.media_${layer.mediaType}`);
           return;
         }
-        // Element exists but still loading — draw silent placeholder (no error)
         performanceMonitor.increment("rasterizer.video_element_loading");
         drawLoadingPlaceholder(ctx, width, height);
         performanceMonitor.endTimer(`rasterizer.media_${layer.mediaType}`);
@@ -548,16 +613,19 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
     let imageBitmap: ImageBitmap | null = null;
 
     // 2. Try to use pre-resolved resource
-    if (layer.resourceHandle) {
+    // PREV-BUG-005 fix: Check the side-channel map first (avoids reliance on mutated scene cache),
+    // then fall back to layer.resourceHandle for backward compatibility (export path).
+    const resolvedHandle = target.resourceHandleMap?.get(layer.layerId) ?? layer.resourceHandle;
+    if (resolvedHandle) {
       const resourceCache = getResourceCache();
-      const resource = resourceCache.get(layer.resourceHandle);
+      const resource = resourceCache.get(resolvedHandle);
 
       if (resource && resource.data instanceof ImageBitmap) {
         performanceMonitor.increment("rasterizer.resource_cache_hit");
         imageBitmap = resource.data;
       } else {
         performanceMonitor.increment("rasterizer.resource_cache_miss");
-        console.warn(`[Rasterizer] Resource handle ${layer.resourceHandle} not found or not ImageBitmap`);
+        console.warn(`[Rasterizer] Resource handle ${resolvedHandle} not found or not ImageBitmap`);
       }
     } else if (layer.mediaType === "image") {
       console.warn(`[Rasterizer] No resourceHandle for image clip ${layer.clipId}, falling back to fetch`);
@@ -587,7 +655,7 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
     await drawMediaWithSourceRotation(ctx, imageBitmap, width, height, layer.sourceRotation, layer.effects, layer.filter);
 
     // Only close if we created it (not from resource manager)
-    if (!layer.resourceHandle && imageBitmap) {
+    if (!resolvedHandle && imageBitmap) {
       imageBitmap.close();
     }
 
@@ -661,8 +729,83 @@ async function drawMediaWithSourceRotation(ctx: CanvasRenderingContext2D | Offsc
   ctx.restore();
 }
 
+async function imageBitmapToCanvas(bitmap: ImageBitmap, width: number, height: number): Promise<HTMLCanvasElement> {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  return canvas;
+}
+
 async function renderMediaFrame(source: HTMLVideoElement | ImageBitmap | HTMLCanvasElement, width: number, height: number, effects: EvaluatedEffect[] | undefined, filter?: { id: string; name: string; intensity: number }): Promise<HTMLCanvasElement | OffscreenCanvas> {
-  const canvas = CanvasDevice.acquire(Math.max(1, Math.ceil(width)), Math.max(1, Math.ceil(height)));
+  const w = Math.max(1, Math.ceil(width));
+  const h = Math.max(1, Math.ceil(height));
+
+  const bodyEffects = (effects || []).filter((effect) => isBodyRenderer(effect.renderer || effect.effectId));
+  const videoEffects = (effects || []).filter((effect) => !isBodyRenderer(effect.renderer || effect.effectId));
+
+  if (videoEffects.length > 0 && bodyEffects.length === 0) {
+    try {
+      const { buildManifestFromClip, isV2SupportedEffectStack, expandMpgStackEffects, renderMPGFrame } = await import("../mpg");
+      const rawStack = videoEffects.map((fx) => ({
+        id: fx.effectId,
+        type: fx.renderer || fx.effectId,
+        params: { ...fx.parameters, intensity: fx.intensity } as Record<string, unknown>,
+      }));
+      const stack = expandMpgStackEffects(rawStack);
+
+      if (isV2SupportedEffectStack(stack)) {
+        const manifest = buildManifestFromClip(
+          "rasterizer-frame",
+          "Rasterizer Frame",
+          { id: "clip-inline", assetId: "source-inline", timelineStartMs: 0, timelineEndMs: 60_000, enabled: true },
+          stack.map((fx) => {
+            const params = fx.params as Record<string, unknown>;
+            const typeLower = fx.type.toLowerCase();
+            const intensity = Number(params.intensity ?? 0);
+            return {
+              ...fx,
+              params: {
+                ...params,
+                brightness: params.brightness ?? (typeLower.includes("brightness") ? intensity : undefined),
+                contrast: params.contrast ?? (typeLower.includes("contrast") ? intensity : undefined),
+                blur: params.blur ?? params.blurAmount ?? (typeLower.includes("blur") ? intensity * 20 : undefined),
+              },
+            };
+          }),
+          { width: w, height: h, assetUri: "inline://source", assetKind: "image" },
+        );
+
+        const sourceEl =
+          source instanceof HTMLVideoElement || source instanceof HTMLCanvasElement
+            ? source
+            : await imageBitmapToCanvas(source, w, h);
+
+        const mpgCanvas = await renderMPGFrame(manifest, sourceEl, {
+          timelineTimeMs: videoEffects[0]?.localTime ? videoEffects[0].localTime * 1000 : 500,
+          width: w,
+          height: h,
+        });
+
+        if (filter) {
+          const filtered = CanvasDevice.acquire(w, h);
+          const fctx = filtered.getContext("2d")!;
+          const ir = resolveFilterToIR(filter.id, filter.intensity);
+          const cssFilter = compileFilterIRToCSS(ir);
+          if (cssFilter) fctx.filter = cssFilter;
+          fctx.drawImage(mpgCanvas, 0, 0, w, h);
+          return filtered;
+        }
+
+        return mpgCanvas;
+      }
+    } catch (err) {
+      console.warn("[Rasterizer:MPG] V2 path failed, falling back to legacy", err);
+    }
+  }
+
+  const canvas = CanvasDevice.acquire(w, h);
   const frameCtx = canvas.getContext("2d", { alpha: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
   if (!frameCtx) return canvas;
 
@@ -673,7 +816,13 @@ async function renderMediaFrame(source: HTMLVideoElement | ImageBitmap | HTMLCan
 
   const cssFilter = buildMediaFilter(filter, effects);
   if (cssFilter) frameCtx.filter = cssFilter;
-  frameCtx.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+  try {
+    frameCtx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  } catch (error) {
+    console.error(`[Rasterizer] Error drawing video to canvas:`, error);
+  }
+
   frameCtx.filter = "none";
 
   const bodyMasks = await prepareBodyMasks(canvas, effects, canvas.width, canvas.height);
@@ -733,45 +882,78 @@ function applyRasterEffect(ctx: CanvasRenderingContext2D | OffscreenCanvasRender
   performanceMonitor.increment("rasterizer.effects_applied");
 
   const renderer = normalizeRendererName(effect.renderer || effect.effectId);
-  switch (renderer) {
-    case "glitch":
-      renderGlitch(ctx, effect, width, height);
-      break;
-    case "rgb_split":
-    case "chromatic_aberration":
-    case "chromatic":
-      renderRGBSplit(ctx, effect, width, height);
-      break;
-    case "pixelate":
-      renderPixelate(ctx, effect, width, height);
-      break;
-    case "scanlines":
-      renderScanlines(ctx, effect, width, height);
-      break;
-    case "film_grain":
-    case "grain":
-      renderFilmGrain(ctx, effect, width, height);
-      break;
-    case "vignette":
-      renderVignette(ctx, effect, width, height);
-      break;
-    case "glow":
-      renderFrameGlow(ctx, effect, width, height);
-      break;
-    case "body_segmentation_glow":
-    case "body_glow":
-      renderBodySegmentationGlow(ctx, effect, width, height, bodyMasks.get(effect.effectId));
-      break;
-    case "body_outline":
-      renderBodyOutline(ctx, effect, width, height, bodyMasks.get(effect.effectId));
-      break;
-    case "body_particles":
-      renderBodyParticles(ctx, effect, width, height, bodyMasks.get(effect.effectId));
-      break;
-    default:
-      if (!renderer.includes("blur")) {
-        console.warn(`[Rasterizer] Unknown effect renderer: ${effect.renderer}`);
+
+  if (isBodyRenderer(renderer)) {
+    // Body effects require source mask overlays and are handled locally in the rasterizer
+    switch (renderer) {
+      case "body_segmentation_glow":
+      case "body_glow":
+        renderBodySegmentationGlow(ctx, effect, width, height, bodyMasks.get(effect.effectId));
+        break;
+      case "body_outline":
+        renderBodyOutline(ctx, effect, width, height, bodyMasks.get(effect.effectId));
+        break;
+      case "body_particles":
+        renderBodyParticles(ctx, effect, width, height, bodyMasks.get(effect.effectId));
+        break;
+    }
+  } else {
+    // Traditional effects are executed through the unified Effect Engine and Graph
+    try {
+      const graphDef = {
+        schemaVersion: "2.0.0",
+        graphId: effect.effectId,
+        name: effect.renderer || effect.effectId,
+        nodes: [
+          { id: "input-node", type: "source", params: {} },
+          { id: "effect-node", type: renderer === "grain" ? "film_grain" : renderer, params: effect.parameters },
+        ],
+        connections: [{ fromNode: "input-node", fromOutput: "output", toNode: "effect-node", toInput: "input" }],
+      };
+
+      const graph = new EffectGraph(graphDef);
+      effectEngine.loadGraph(graph);
+
+      // Copy the source frame to input
+      const sourceCopy = CanvasDevice.acquire(width, height);
+      const sourceCopyCtx = sourceCopy.getContext("2d")!;
+      sourceCopyCtx.clearRect(0, 0, width, height);
+      sourceCopyCtx.drawImage(ctx.canvas as any, 0, 0, width, height);
+
+      // Render through unified engine
+      effectEngine.render(ctx as any, effect.localTime || 0, sourceCopy);
+
+      CanvasDevice.release(sourceCopy);
+    } catch (err) {
+      console.warn("[Rasterizer:EffectGraph] Failed to execute through EffectEngine, falling back to legacy", err);
+      // Fallback
+      switch (renderer) {
+        case "glitch":
+          renderGlitch(ctx, effect, width, height);
+          break;
+        case "rgb_split":
+        case "chromatic_aberration":
+        case "chromatic":
+          renderRGBSplit(ctx, effect, width, height);
+          break;
+        case "pixelate":
+          renderPixelate(ctx, effect, width, height);
+          break;
+        case "scanlines":
+          renderScanlines(ctx, effect, width, height);
+          break;
+        case "film_grain":
+        case "grain":
+          renderFilmGrain(ctx, effect, width, height);
+          break;
+        case "vignette":
+          renderVignette(ctx, effect, width, height);
+          break;
+        case "glow":
+          renderFrameGlow(ctx, effect, width, height);
+          break;
       }
+    }
   }
 
   performanceMonitor.endTimer(`rasterizer.effect_${effect.renderer || effect.effectId}`);

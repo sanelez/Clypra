@@ -24,7 +24,7 @@ import { getClipEndTime } from "@/lib/timeline/timelineClip";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
-import { getEvaluationCache, computeClipVersion } from "./cache";
+import { getEvaluationCache, computeClipVersion, computeAssetsVersion } from "./cache";
 import { evaluateProperty } from "./animation";
 import { resolveClipSourceTime } from "../timeline/sourceTime";
 import { calculateTextAnimationState } from "@/lib/text/textAnimation";
@@ -363,6 +363,10 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
         name: activeFilterClip.name || "",
         intensity: normalizeFilterIntensity((activeFilterClip as any).intensity),
         swatch: (activeFilterClip as any).swatch || "",
+        pipeline: (activeFilterClip as any).pipeline as "v2" | undefined,
+        effectStack: (activeFilterClip as any).effectStack as
+          | Array<{ type: string; params?: Record<string, unknown> }>
+          | undefined,
       }
     : undefined;
 
@@ -448,9 +452,10 @@ function evaluateTransitionState(
 export function evaluateTimelineSceneCached(time: number, clips: Clip[], tracks: Track[], assets: MediaAsset[], project: Project | null, epoch: number = 0, transitions: TransitionTimelineItem[] = []): EvaluatedScene {
   const cache = getEvaluationCache();
   const clipVersion = computeClipVersion(clips, transitions);
+  const assetsVersion = computeAssetsVersion(assets);
   const canvasWidth = project?.canvasWidth ?? 1920;
   const canvasHeight = project?.canvasHeight ?? 1080;
-  const cacheKey = { time, epoch, clipVersion, canvasWidth, canvasHeight };
+  const cacheKey = { time, epoch, clipVersion, assetsVersion, canvasWidth, canvasHeight };
 
   const cached = cache.get(cacheKey);
   if (cached) {

@@ -8,6 +8,7 @@
  * Cache Strategy: LRU (Least Recently Used)
  */
 
+import type { MediaAsset } from "@/types";
 import type { EvaluatedScene } from "./types";
 
 /**
@@ -22,6 +23,9 @@ interface CacheKey {
 
   /** Clip version (hash of clip IDs and properties) */
   clipVersion: string;
+
+  /** Media assets version (hash of media asset properties) */
+  assetsVersion?: string;
 
   /** Canvas width in pixels */
   canvasWidth?: number;
@@ -206,7 +210,8 @@ export class EvaluationCache {
     const roundedTime = Math.round(key.time * 1000) / 1000;
     const w = key.canvasWidth ?? 1920;
     const h = key.canvasHeight ?? 1080;
-    return `${roundedTime}:${key.epoch}:${w}x${h}:${key.clipVersion}`;
+    const assetsVer = key.assetsVersion ?? "";
+    return `${roundedTime}:${key.epoch}:${w}x${h}:${key.clipVersion}:${assetsVer}`;
   }
 }
 
@@ -293,6 +298,30 @@ export function computeClipVersion(clips: Array<Record<string, any>>, transition
   const signature = `${clipSignature}::transitions::${transitionSignature}`;
 
   // Use a simple hash function
+  return hashString(signature);
+}
+
+/**
+ * Compute media assets version hash.
+ * Changes when media asset properties (e.g. path, rotation) are modified.
+ */
+export function computeAssetsVersion(assets: MediaAsset[]): string {
+  const signature = assets
+    .slice()
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((a) =>
+      [
+        a.id,
+        a.path,
+        a.type,
+        a.duration ?? 0,
+        a.width ?? 0,
+        a.height ?? 0,
+        a.rotation ?? 0,
+      ].join(":"),
+    )
+    .join("|");
+
   return hashString(signature);
 }
 

@@ -9,9 +9,6 @@ export class CapacitorPlatformAdapter implements PlatformInterface {
   isCapacitor() {
     return true;
   }
-  isWeb() {
-    return false;
-  }
 
   convertFileSrc(path: string): string {
     if (typeof window !== "undefined" && (window as any).Capacitor) {
@@ -260,5 +257,18 @@ export class CapacitorPlatformAdapter implements PlatformInterface {
   async extractAudioArtwork(path: string): Promise<string | undefined> {
     // Native audio artwork reading is not standard in browsers. Return undefined.
     return undefined;
+  }
+
+  async saveRecording(fileName: string, data: Uint8Array): Promise<string> {
+    const { Filesystem, Directory } = await import("@capacitor/filesystem");
+    const base64Data = btoa(
+      Array.from(data).map((byte) => String.fromCharCode(byte)).join("")
+    );
+    const writeResult = await Filesystem.writeFile({
+      path: `projects/${fileName}`,
+      directory: Directory.Data,
+      data: base64Data,
+    });
+    return writeResult.uri;
   }
 }

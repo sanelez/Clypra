@@ -73,7 +73,7 @@ describe("EditingActions split interactions", () => {
     expect(result.rightClipId).toBeDefined();
     expect(rightClip).toBeDefined();
     expect(rightClip?.startTime).toBeCloseTo(snappedTime, 6);
-    expect(useUIStore.getState().selectedClipIds).toEqual([result.rightClipId]);
+    expect(useUIStore.getState().selectedClipIds).toEqual([result.leftClipId, result.rightClipId]);
   });
 
   it("rejects split when the requested time snaps to a clip boundary", () => {

@@ -167,11 +167,20 @@ export class PlaybackClock {
 
   /**
    * Set playback speed.
+   * PB-BUG-006 fix: Syncs _time from AudioContext before pausing to prevent
+   * ~8ms drift caused by stale _time from the last RAF tick.
    */
   setSpeed(speed: number): void {
     const wasPlaying = this._state === "playing";
 
     if (wasPlaying) {
+      // PB-BUG-006: Sync _time from AudioContext BEFORE pausing.
+      // pause() stops the RAF loop, so _time would be stale (last tick value).
+      // Reading the live AudioContext time here eliminates the drift.
+      if (this._audioContext && this._audioContext.state === "running") {
+        const audioElapsed = this._audioContext.currentTime - this._playStartAudioTime;
+        this._time = Math.min(this._playStartClockTime + audioElapsed * this._speed, this._duration);
+      }
       this.pause();
     }
 
@@ -227,6 +236,16 @@ export class PlaybackClock {
       return;
     }
 
+    // Sync precise live time from AudioContext before pausing
+    if (this._audioContext && this._audioContext.state === "running") {
+      const elapsed = (this._audioContext.currentTime - this._playStartAudioTime) * this._speed;
+      this._time = Math.max(0, Math.min(this._playStartClockTime + elapsed, this._duration));
+    }
+
+    // Snap playhead to nearest frame boundary of the project's frame rate
+    const frameRate = this._frameRate;
+    this._time = Math.round(this._time * frameRate) / frameRate;
+
     this._state = "paused";
     this._isSeeking = false;
     this._notifyListeners();
@@ -240,12 +259,22 @@ export class PlaybackClock {
 
   /**
    * Stop playback (pause + reset to 0).
+   * PB-BUG-002 fix: Batches all state changes into a single notification
+   * instead of firing 3 separate notifications (pause, seek, stopped).
    */
   stop(): void {
-    this.pause();
-    this.seek(0);
+    // Stop RAF loop directly (don't call pause() which would notify)
+    if (this._rafId !== null) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
+
+    // Batch all state changes atomically
     this._state = "stopped";
+    this._time = 0;
     this._isSeeking = false;
+
+    // Single notification for all changes
     this._notifyListeners();
   }
 
@@ -260,7 +289,12 @@ export class PlaybackClock {
     }
 
     const validTime = typeof time === "number" && !isNaN(time) && isFinite(time) ? time : 0;
-    this._time = Math.max(0, Math.min(validTime, this._duration));
+    const rawTime = Math.max(0, Math.min(validTime, this._duration));
+
+    // Snap seek time to nearest frame boundary of the project's frame rate
+    const frameRate = this._frameRate;
+    this._time = Math.round(rawTime * frameRate) / frameRate;
+
     this._isSeeking = true;
     this._notifyListeners();
 

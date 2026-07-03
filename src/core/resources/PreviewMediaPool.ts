@@ -28,10 +28,12 @@
  * - LRU eviction based on time/memory, not activity window
  */
 
-import type { Clip, MediaAsset } from "@/types";
+import type { Clip, MediaAsset, TransitionTimelineItem } from "@/types";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveClipSourceTime } from "../timeline/sourceTime";
 import { performanceMonitor } from "@/lib/monitoring/PerformanceMonitor";
+import { resourceTracker } from "@/lib/monitoring/ResourceTracker";
+import { useTimelineStore } from "../../store/timelineStore";
 
 export interface PreviewSyncState {
   /** Current playback time (seconds) */
@@ -86,6 +88,11 @@ interface ManagedAudio {
   mediaId: string;
   sourcePath: string;
   ready: boolean;
+  playPromiseInFlight?: boolean;
+  playCancelRequested?: boolean;
+  autoplayBlocked?: boolean;
+  playAttempts?: number;
+  lastPlayAttemptMs?: number;
 }
 
 /**
@@ -127,14 +134,23 @@ function findPrimaryVideoClip(videoClips: Clip[], tracks: Array<{ id: string; ty
  * - 30fps: 1.5 frames = 50ms tolerance
  * - 60fps: 1.5 frames = 25ms tolerance
  */
-function getClipSourceTime(clip: Clip, clockTime: number, frameRate: number): number | null {
+function getClipSourceTime(clip: Clip, clockTime: number, frameRate: number, transitions: TransitionTimelineItem[] = []): number | null {
   const clipLocalTime = clockTime - clip.startTime;
 
   // FINDING-005: Frame-rate-aware boundary tolerance (1.5 frames)
   const BOUNDARY_TOLERANCE = 1.5 / frameRate; // seconds
 
-  if (clipLocalTime < -BOUNDARY_TOLERANCE || clipLocalTime > clip.duration + BOUNDARY_TOLERANCE) {
-    return null; // Clip not active
+  const isInTransition = transitions.some((t) => {
+    const start = t.placement.startTime;
+    const duration = t.placement.duration;
+    const isActive = clockTime >= start && clockTime < start + duration;
+    return isActive && (t.fromItemId === clip.id || t.toItemId === clip.id);
+  });
+
+  if (!isInTransition) {
+    if (clipLocalTime < -BOUNDARY_TOLERANCE || clipLocalTime > clip.duration + BOUNDARY_TOLERANCE) {
+      return null; // Clip not active
+    }
   }
 
   // ✅ Use canonical source time calculation with clamping
@@ -205,6 +221,9 @@ export class PreviewMediaPool {
   private readonly MEMORY_SOFT_LIMIT_MB = 500; // Start aggressive eviction at 500MB
   private readonly MEMORY_HARD_LIMIT_MB = 800; // Force eviction at 800MB regardless of protection
 
+  // Lookahead prewarming for split clip transitions
+  private readonly LOOKAHEAD_WINDOW_SECONDS = 1.5;
+
   // ─── RE-ENTRANCY PROTECTION ─────────────────────────────────────────────
   private _syncInProgress = false;
   private _queuedSyncRequest: {
@@ -217,12 +236,30 @@ export class PreviewMediaPool {
   // ─── FINDING-006: Early exit optimization ───────────────────────────────
   private _lastQuickHash: string | null = null;
 
-  constructor() {
+  // ─── RESOURCE TRACKING (LEAK-003 / MED-002) ─────────────────────────────
+  private _projectId: string | null = null;
+  private _sessionId: string | null = null;
+
+  constructor(projectId?: string, sessionId?: string) {
+    this._projectId = projectId ?? null;
+    this._sessionId = sessionId ?? null;
+
     this.container = document.createElement("div");
     // Position fixed and practically invisible, but NOT offscreen.
     // Browsers suspend decoding for completely offscreen or display:none elements.
     this.container.style.cssText = "position:fixed;left:0;top:0;width:256px;height:256px;opacity:0.001;pointer-events:none;z-index:-9999;overflow:hidden;";
     document.body.appendChild(this.container);
+
+    // ─── RESOURCE TRACKING: Track pool creation ────────────────────────────
+    if (this._projectId && this._sessionId) {
+      resourceTracker.track({
+        id: `pool-${this._sessionId}`,
+        kind: "PreviewMediaPool",
+        projectId: this._projectId,
+        sessionId: this._sessionId,
+      });
+    }
+    // ───────────────────────────────────────────────────────────────────────
 
     // ─── INSTRUMENTATION: Register pool for console access ────────────────
     if (typeof window !== "undefined") {
@@ -268,10 +305,20 @@ export class PreviewMediaPool {
       // ─── FINDING-006: Early exit optimization (fast path) ───────────────────
       // Skip expensive reconciliation if nothing meaningful changed
       // Round time to 0.1s precision to avoid rehashing every frame during playback
-      const quickHash = `${syncState.time.toFixed(1)}-${syncState.state}-${clips.length}`;
-      if (quickHash === this._lastQuickHash) {
+      const clipIdsHash = clips.map((c) => `${c.id}:${c.startTime.toFixed(2)}:${c.trimIn.toFixed(2)}`).join(",");
+      const quickHash = `${syncState.time.toFixed(1)}-${syncState.state}-${clips.length}-${clipIdsHash}`;
+      // CRITICAL: Only use fast path if we have video elements already created.
+      // This prevents skipping the first sync after project load when elements need creation.
+      const hasVideoElements = this.videoCache.size > 0;
+      if (hasVideoElements && quickHash === this._lastQuickHash) {
         // Nothing changed - skip reconciliation (saves 0.5-2ms per frame)
         performanceMonitor.increment("preview_pool.sync_skipped");
+
+        // Still run prewarming during playback even when skipping reconciliation
+        if (syncState.state === "playing") {
+          this.prewarmUpcomingClips(clips, assets, syncState.time, syncState.frameRate);
+        }
+
         return;
       }
       this._lastQuickHash = quickHash;
@@ -312,22 +359,20 @@ export class PreviewMediaPool {
               // Add this clipId to the existing array if not already present
               if (!existingEntry.clipIds.includes(removedClipId)) {
                 existingEntry.clipIds.push(removedClipId);
-                console.log(`[PreviewMediaPool] Split detected: Added clip ${removedClipId} to cache ${cacheKey.substring(0, 30)}... (now tracking ${existingEntry.clipIds.length} IDs)`);
               }
-              // Update timestamp to extend grace period
               existingEntry.timestamp = now;
             } else {
-              // Create new entry with this clipId
               this.recentlyRemovedClips.set(cacheKey, {
                 clipIds: [removedClipId],
                 timestamp: now,
               });
-              console.log(`[PreviewMediaPool] Removed clip ${removedClipId} added to grace period (cache: ${cacheKey.substring(0, 30)}...)`);
             }
           }
           this.timelineClipRegistry.delete(removedClipId);
         }
       }
+
+      const activeTransitions = useTimelineStore.getState().transitions;
 
       for (const clip of clips) {
         const asset = assets.find((a) => a.id === clip.mediaId);
@@ -337,14 +382,9 @@ export class PreviewMediaPool {
         if (asset?.type === "video") {
           const sourcePath = asset.path.startsWith("asset://") ? asset.path : convertFileSrc(asset.path);
 
-          // Cache key strategy: For split clips that share media, we need separate elements
-          // to prevent rebinding conflicts during overlap. Use trimIn to differentiate.
-          // FINDING-013: Normalize trimIn to prevent floating-point rounding differences
-          const trimIn = clip.trimIn || 0;
-          const normalizedTrimIn = Math.round(trimIn * 1000) / 1000;
-          const cacheKey = `${clip.mediaId}-${sourcePath}-trim${normalizedTrimIn.toFixed(3)}`;
+          const cacheKey = clip.id;
 
-          const sourceTime = getClipSourceTime(clip, syncState.time, syncState.frameRate);
+          const sourceTime = getClipSourceTime(clip, syncState.time, syncState.frameRate, activeTransitions);
           const isActive = sourceTime !== null; // Is clip in active playback window?
 
           desiredVideoBindings.set(clip.id, { cacheKey, clip, asset, isActive });
@@ -358,20 +398,9 @@ export class PreviewMediaPool {
           const existingRemoval = this.recentlyRemovedClips.get(cacheKey);
           if (existingRemoval && !existingRemoval.clipIds.includes(clip.id)) {
             existingRemoval.clipIds.push(clip.id);
-            console.log(`[PreviewMediaPool] New split clip ${clip.id} shares cache with ${existingRemoval.clipIds[0]} (total: ${existingRemoval.clipIds.length} clips, cacheKey: ${cacheKey.substring(0, 50)}...)`);
-          }
-
-          // DEBUG: Log when adding clips with similar mediaId but different cache keys
-          if (existingRemoval && existingRemoval.clipIds.length > 0) {
-            const firstClipId = existingRemoval.clipIds[0];
-            if (firstClipId.substring(0, 20) === clip.id.substring(0, 20)) {
-              console.log(`[PreviewMediaPool] SPLIT MISMATCH: Clip ${clip.id} has different cache key than ${firstClipId}`);
-              console.log(`  New cacheKey: ${cacheKey}`);
-              console.log(`  trimIn: ${normalizedTrimIn.toFixed(3)}`);
-            }
           }
         } else if (asset?.type === "audio" || (clip.kind === "audio" && (clip as any).audioPath)) {
-          const key = `${clip.id}-${clip.mediaId}`;
+          const key = clip.id;
           desiredAudioKeys.add(key);
         }
       }
@@ -414,7 +443,7 @@ export class PreviewMediaPool {
             if (!a || a.type !== "video") return false;
             const t = this.trackMap.get(c.trackId);
             if (t?.visible === false) return false;
-            return getClipSourceTime(c, syncState.time, syncState.frameRate) !== null;
+            return getClipSourceTime(c, syncState.time, syncState.frameRate, activeTransitions) !== null;
           });
           const primaryVideoClip = findPrimaryVideoClip(activeVisibleVideoClips, tracks);
           const isPrimaryAudibleVideo = primaryVideoClip?.id === clip.id;
@@ -433,7 +462,7 @@ export class PreviewMediaPool {
           managed.element.muted = syncState.muted || isTrackMuted || clipVolume === 0;
           managed.element.volume = managed.element.muted ? 0 : Math.max(0, Math.min(1, combinedVolume));
 
-          if (!managed.element.paused) {
+          if (!managed.element.paused && !managed.element.seeking) {
             managed.element.pause();
           }
           if (managed.rvfcHandle !== null && this.hasRVFC) {
@@ -478,11 +507,26 @@ export class PreviewMediaPool {
       const now = performance.now();
 
       for (const [cacheKey, managed] of this.videoCache) {
+        const isActive = activeCacheKeys.has(cacheKey);
         const isInGracePeriod = now < managed.registrationGraceUntil;
         const isInTimeline = timelineCacheKeys.has(cacheKey);
         const recentRemoval = this.recentlyRemovedClips.get(cacheKey);
         const isRecentlyRemoved = recentRemoval !== undefined;
         const isInTransitionGrace = isRecentlyRemoved && recentRemoval && now - recentRemoval.timestamp < this.TRANSITION_GRACE_PERIOD_MS;
+
+        // CRITICAL FIX: Elements in grace period must respect playback state
+        // If user pauses, grace-period elements must also pause (prevents audio bleed)
+        if (isInTransitionGrace && syncState.state !== "playing") {
+          if (!managed.element.paused && !managed.element.seeking) {
+            managed.element.pause();
+          }
+        }
+
+        // CRITICAL FIX: Elements in grace period during PLAYING must also be paused if not active
+        // This prevents audio bleed when seeking backwards during playback
+        if (isInTransitionGrace && syncState.state === "playing" && !isActive && !managed.element.paused && !managed.element.seeking) {
+          managed.element.pause();
+        }
 
         // Only mark as orphaned if NOT in timeline AND NOT in transition grace AND past registration grace
         if (!isInTimeline && !isInGracePeriod && !isInTransitionGrace) {
@@ -515,7 +559,7 @@ export class PreviewMediaPool {
       }
 
       // LRU eviction: Remove unused cached elements (not just inactive ones)
-      this.evictUnusedElements();
+      this.evictUnusedElements(clips, assets, syncState);
 
       // Create or update audio elements (unchanged logic)
       for (const clip of clips) {
@@ -527,8 +571,8 @@ export class PreviewMediaPool {
         if (track?.visible === false) continue;
 
         const rawPath = asset ? asset.path : directAudioPath!;
-        const key = `${clip.id}-${clip.mediaId}`;
         const sourcePath = rawPath.startsWith("asset://") ? rawPath : convertFileSrc(rawPath);
+        const key = clip.id;
 
         let managed = this.audios.get(key);
         if (!managed) {
@@ -545,6 +589,11 @@ export class PreviewMediaPool {
       }
 
       this.lastSyncState = { ...syncState };
+
+      // Lookahead prewarming: Initialize upcoming clips before they become active
+      if (syncState.state === "playing") {
+        this.prewarmUpcomingClips(clips, assets, syncState.time, syncState.frameRate);
+      }
 
       // ─── END OF ORIGINAL SYNC LOGIC ──────────────────────────────────────────
 
@@ -572,6 +621,59 @@ export class PreviewMediaPool {
         this.sync(queued.clips, queued.assets, queued.tracks, queued.syncState);
       }
     }
+  }
+
+  /**
+   * Prewarm upcoming clips within lookahead window during playback.
+   * Creates and initializes video elements before clips become active to prevent blank frames.
+   */
+  private prewarmUpcomingClips(clips: Clip[], assets: MediaAsset[], currentTime: number, frameRate: number): void {
+    const lookaheadTime = currentTime + this.LOOKAHEAD_WINDOW_SECONDS;
+
+    for (const clip of clips) {
+      if (clip.startTime <= currentTime || clip.startTime > lookaheadTime) {
+        continue;
+      }
+
+      const asset = assets.find((a) => a.id === clip.mediaId);
+      const track = this.trackMap.get(clip.trackId);
+      if (track?.visible === false || !asset || asset.type !== "video") {
+        continue;
+      }
+
+      const trimIn = clip.trimIn || 0;
+      const normalizedTrimIn = Math.round(trimIn * 1000) / 1000;
+      const sourcePath = asset.path.startsWith("asset://") ? asset.path : convertFileSrc(asset.path);
+      const cacheKey = clip.id;
+
+      if (this.videoCache.has(cacheKey)) {
+        continue;
+      }
+
+      this.prewarmVideoElement(cacheKey, clip.id, clip.mediaId, sourcePath, normalizedTrimIn);
+    }
+  }
+
+  /**
+   * Create and prewarm a video element without blocking.
+   * Element will load metadata and seek to trimIn position in the background.
+   */
+  private prewarmVideoElement(cacheKey: string, clipId: string, mediaId: string, sourcePath: string, trimIn: number): void {
+    const managed = this.createVideo(cacheKey, clipId, mediaId, sourcePath);
+
+    const element = managed.element;
+    element.currentTime = trimIn;
+
+    element.addEventListener(
+      "loadedmetadata",
+      () => {
+        if (managed.disposing || this._isDisposed) return;
+        if (Math.abs(element.currentTime - trimIn) > 0.01) {
+          element.currentTime = trimIn;
+        }
+      },
+      { once: true },
+    );
   }
 
   /**
@@ -605,13 +707,9 @@ export class PreviewMediaPool {
       if (now - removal.timestamp < this.TRANSITION_GRACE_PERIOD_MS) {
         const managed = this.videoCache.get(cacheKey);
         if (managed) {
-          // Create mappings for ALL known clipIds (original + splits)
           for (const clipId of removal.clipIds) {
             const legacyKey = `${clipId}-${managed.mediaId}`;
             result.set(legacyKey, managed.element);
-          }
-          if (removal.clipIds.length > 1) {
-            console.log(`[PreviewMediaPool] getVideoElements: Returning element for ${removal.clipIds.length} clip IDs (split clips): ${removal.clipIds.join(", ")}`);
           }
         }
       }
@@ -661,6 +759,14 @@ export class PreviewMediaPool {
     if (this._isDisposed) return;
     this._isDisposed = true;
 
+    // Remove from global pools registry to prevent leaks
+    if (typeof window !== "undefined" && (window as any).__previewMediaPools) {
+      const index = (window as any).__previewMediaPools.indexOf(this);
+      if (index > -1) {
+        (window as any).__previewMediaPools.splice(index, 1);
+      }
+    }
+
     // ─── CLEAR SYNC STATE ────────────────────────────────────────────────────
     // If sync was in progress, this disposal will be caught by the finally block
     // But clear the queued request to prevent post-disposal sync attempts
@@ -668,6 +774,23 @@ export class PreviewMediaPool {
 
     // ─── INSTRUMENTATION: Print final diagnostics ─────────────────────────
     this.printDiagnostics();
+    // ──────────────────────────────────────────────────────────────────────
+
+    // ─── RESOURCE TRACKING: Release all tracked resources ─────────────────
+    // Release video elements
+    for (const [key] of this.videoCache) {
+      resourceTracker.release(`video-${key}`);
+    }
+
+    // Release audio elements
+    for (const [key] of this.audios) {
+      resourceTracker.release(`audio-${key}`);
+    }
+
+    // Release pool itself
+    if (this._sessionId) {
+      resourceTracker.release(`pool-${this._sessionId}`);
+    }
     // ──────────────────────────────────────────────────────────────────────
 
     for (const [key, managed] of this.videoCache) {
@@ -753,8 +876,6 @@ export class PreviewMediaPool {
   // ─── Private: Video lifecycle ─────────────────────────────────────────────
 
   private createVideo(key: string, clipId: string, mediaId: string, sourcePath: string): ManagedVideo {
-    console.log(`[PreviewMediaPool] Creating NEW video element for clip ${clipId} (cache key: ${key.substring(0, 50)}...)`);
-
     const video = document.createElement("video");
     video.preload = "auto";
     video.muted = true; // Always muted — audio is handled separately or not at all
@@ -762,6 +883,17 @@ export class PreviewMediaPool {
     // Browsers aggressively throttle decoding for tiny videos. Use a larger size (256x256)
     // to ensure the hardware decoder remains active.
     video.style.cssText = "width:256px;height:256px;position:absolute;left:0;top:0;";
+
+    // ─── RESOURCE TRACKING: Track video element creation ──────────────────
+    if (this._projectId && this._sessionId) {
+      resourceTracker.track({
+        id: `video-${key}`,
+        kind: "HTMLVideoElement",
+        projectId: this._projectId,
+        sessionId: this._sessionId,
+      });
+    }
+    // ──────────────────────────────────────────────────────────────────────
 
     const managed: ManagedVideo = {
       element: video,
@@ -796,13 +928,6 @@ export class PreviewMediaPool {
       "loadedmetadata",
       () => {
         managed.ready = true;
-        import("../../store/timelineStore")
-          .then(({ useTimelineStore }) => {
-            useTimelineStore.getState().incrementEpoch();
-          })
-          .catch((err) => {
-            console.error("[PreviewMediaPool] Failed to import useTimelineStore on loadedmetadata", err);
-          });
       },
       { once: true },
     );
@@ -823,12 +948,12 @@ export class PreviewMediaPool {
 
     video.addEventListener(
       "error",
-      () => {
+      (e) => {
         // Ignore expected teardown/HMR errors when src is intentionally cleared.
         if (managed.disposing || !video.currentSrc) {
           return;
         }
-        console.error(`[PreviewMediaPool] Video load error: ${key}`, video.error);
+        console.error(`❌ [PreviewMediaPool] Video load error: ${key}`, video.error, e);
       },
       { once: true },
     );
@@ -846,7 +971,6 @@ export class PreviewMediaPool {
             });
         }
       },
-      { once: true }, // Auto-remove listener after first seek to prevent leak
     );
 
     video.src = sourcePath;
@@ -891,6 +1015,10 @@ export class PreviewMediaPool {
     if (managed.element.parentNode) {
       managed.element.parentNode.removeChild(managed.element);
     }
+
+    // ─── RESOURCE TRACKING: Release video element ─────────────────────────
+    resourceTracker.release(`video-${key}`);
+    // ──────────────────────────────────────────────────────────────────────
 
     this.videoCache.delete(key);
   }
@@ -1175,12 +1303,35 @@ export class PreviewMediaPool {
    * - Hard limit (800MB): Reduce to 10s, ignore timeline protection
    * Prevents browser crashes on 50+ clip projects during scrubbing.
    */
-  private evictUnusedElements(): void {
+  private evictUnusedElements(clips: Clip[], assets: MediaAsset[], syncState: PreviewSyncState): void {
     const now = performance.now();
     const toEvict: string[] = [];
 
     // Build set of cache keys that are protected (referenced by timeline clips)
     const protectedCacheKeys = new Set(this.timelineClipRegistry.values());
+
+    // Build set of cache keys that are upcoming in the lookahead window (should be protected from early eviction)
+    const upcomingCacheKeys = new Set<string>();
+    if (syncState.state === "playing") {
+      const lookaheadTime = syncState.time + this.LOOKAHEAD_WINDOW_SECONDS;
+      for (const clip of clips) {
+        if (clip.startTime <= syncState.time || clip.startTime > lookaheadTime) {
+          continue;
+        }
+        const asset = assets.find((a) => a.id === clip.mediaId);
+        const track = this.trackMap.get(clip.trackId);
+        if (track?.visible === false || !asset || asset.type !== "video") {
+          continue;
+        }
+        const cacheKey = clip.id;
+        upcomingCacheKeys.add(cacheKey);
+      }
+    }
+
+    // Helper to check if element is actively locked for rendering
+    const isLockedForRender = (managed: ManagedVideo) => {
+      return (managed.element as any).__renderLockCount > 0;
+    };
 
     // FINDING-008: Estimate current memory usage and adjust eviction aggressiveness
     const estimatedMemoryMB = this.videoCache.size * this.ESTIMATED_MB_PER_VIDEO;
@@ -1194,8 +1345,11 @@ export class PreviewMediaPool {
         ? 30000 // 30s at soft limit (500MB+) - moderate eviction
         : this.CACHE_EVICTION_AGE_MS; // 60s normal - standard LRU
 
-    // PASS 1: Find candidates - unused for effectiveEvictionAge AND not in timeline
+    // PASS 1: Find candidates - unused for effectiveEvictionAge AND not in timeline AND not locked
     for (const [key, managed] of this.videoCache) {
+      if (isLockedForRender(managed)) {
+        continue;
+      }
       // At hard limit, ignore protection (emergency eviction to prevent crash)
       if (protectedCacheKeys.has(key) && !isOverHardLimit) {
         continue;
@@ -1207,14 +1361,14 @@ export class PreviewMediaPool {
       }
     }
 
-    // PASS 2: If still over limit after age-based eviction, evict oldest unprotected first
-    if (this.videoCache.size > this.MAX_CACHED_VIDEOS) {
-      // Only consider unprotected elements for eviction
+    // PASS 2: If still over limit after age-based eviction, evict oldest unprotected first (not locked)
+    if (this.videoCache.size - toEvict.length > this.MAX_CACHED_VIDEOS) {
+      // Only consider unprotected, unlocked elements for eviction
       const unprotectedElements = Array.from(this.videoCache.entries())
-        .filter(([key]) => !protectedCacheKeys.has(key))
+        .filter(([key, managed]) => !protectedCacheKeys.has(key) && !isLockedForRender(managed))
         .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
 
-      const excess = this.videoCache.size - this.MAX_CACHED_VIDEOS;
+      const excess = this.videoCache.size - toEvict.length - this.MAX_CACHED_VIDEOS;
       for (let i = 0; i < Math.min(excess, unprotectedElements.length); i++) {
         const key = unprotectedElements[i][0];
         if (!toEvict.includes(key)) {
@@ -1223,11 +1377,11 @@ export class PreviewMediaPool {
       }
     }
 
-    // PASS 3 (FINDING-018 FIX): If STILL over limit, evict oldest protected BUT INACTIVE elements
+    // PASS 3 (FINDING-018 FIX): If STILL over limit, evict oldest protected BUT INACTIVE AND NOT UPCOMING elements (not locked)
     // This enforces the hard MAX limit even when all elements are in timeline
     if (this.videoCache.size - toEvict.length > this.MAX_CACHED_VIDEOS) {
       const protectedInactiveElements = Array.from(this.videoCache.entries())
-        .filter(([key, managed]) => protectedCacheKeys.has(key) && !managed.isActive)
+        .filter(([key, managed]) => protectedCacheKeys.has(key) && !managed.isActive && !upcomingCacheKeys.has(key) && !isLockedForRender(managed))
         .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
 
       const remaining = this.videoCache.size - toEvict.length - this.MAX_CACHED_VIDEOS;
@@ -1239,11 +1393,27 @@ export class PreviewMediaPool {
       }
     }
 
-    // PASS 4 (FINDING-018 FIX): Last resort - if STILL over limit, evict oldest protected ACTIVE elements
+    // PASS 3.5: If STILL over limit, evict oldest protected inactive UPCOMING elements (not locked)
+    // We prefer evicting upcoming elements over active elements
+    if (this.videoCache.size - toEvict.length > this.MAX_CACHED_VIDEOS) {
+      const protectedUpcomingElements = Array.from(this.videoCache.entries())
+        .filter(([key, managed]) => protectedCacheKeys.has(key) && !managed.isActive && upcomingCacheKeys.has(key) && !isLockedForRender(managed))
+        .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
+
+      const remaining = this.videoCache.size - toEvict.length - this.MAX_CACHED_VIDEOS;
+      for (let i = 0; i < Math.min(remaining, protectedUpcomingElements.length); i++) {
+        const key = protectedUpcomingElements[i][0];
+        if (!toEvict.includes(key)) {
+          toEvict.push(key);
+        }
+      }
+    }
+
+    // PASS 4 (FINDING-018 FIX): Last resort - if STILL over limit, evict oldest protected ACTIVE elements (not locked)
     // This should rarely happen but prevents unbounded growth
     if (this.videoCache.size - toEvict.length > this.MAX_CACHED_VIDEOS) {
       const protectedActiveElements = Array.from(this.videoCache.entries())
-        .filter(([key, managed]) => protectedCacheKeys.has(key) && managed.isActive)
+        .filter(([key, managed]) => protectedCacheKeys.has(key) && managed.isActive && !isLockedForRender(managed))
         .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
 
       const remaining = this.videoCache.size - toEvict.length - this.MAX_CACHED_VIDEOS;
@@ -1275,6 +1445,7 @@ export class PreviewMediaPool {
     const generation = managed.rvfcGeneration;
 
     // Capture only minimal data needed for callback
+    const clipId = clip.id;
     const mediaId = managed.mediaId;
     const sourcePath = managed.sourcePath;
     const clipStartTime = clip.startTime;
@@ -1288,8 +1459,7 @@ export class PreviewMediaPool {
       if (this._isDisposed) return;
 
       // Check if element still exists in cache (by cache key)
-      const cacheKey = `${mediaId}-${sourcePath}`;
-      if (!this.videoCache.has(cacheKey)) return;
+      if (!this.videoCache.has(clipId)) return;
 
       // Recalculate expected source time based on latest clock state
       const latestSyncState = this.lastSyncState ?? syncState;
@@ -1376,6 +1546,17 @@ export class PreviewMediaPool {
     audio.preload = "auto";
     audio.style.cssText = "position:absolute;width:1px;height:1px;";
 
+    // ─── RESOURCE TRACKING: Track audio element creation ──────────────────
+    if (this._projectId && this._sessionId) {
+      resourceTracker.track({
+        id: `audio-${key}`,
+        kind: "HTMLAudioElement",
+        projectId: this._projectId,
+        sessionId: this._sessionId,
+      });
+    }
+    // ──────────────────────────────────────────────────────────────────────
+
     const managed: ManagedAudio = {
       element: audio,
       clipId,
@@ -1416,12 +1597,76 @@ export class PreviewMediaPool {
       managed.element.parentNode.removeChild(managed.element);
     }
 
+    // ─── RESOURCE TRACKING: Release audio element ─────────────────────────
+    resourceTracker.release(`audio-${key}`);
+    // ──────────────────────────────────────────────────────────────────────
+
     this.audios.delete(key);
+  }
+
+  private pauseAudio(managed: ManagedAudio): void {
+    if (managed.playPromiseInFlight) {
+      managed.playCancelRequested = true;
+    }
+    if (!managed.element.paused) {
+      managed.element.pause();
+    }
+  }
+
+  private requestAudioPlayback(managed: ManagedAudio, syncState: PreviewSyncState): void {
+    const audio = managed.element;
+
+    if (!audio.paused) return;
+    if (audio.readyState < 3) return;
+    if (this.sessionAutoplayBlocked) return;
+    if (managed.autoplayBlocked) {
+      const hasUserActivation = typeof navigator !== "undefined" && navigator.userActivation && navigator.userActivation.isActive;
+      if (hasUserActivation) {
+        managed.autoplayBlocked = false;
+      } else {
+        return;
+      }
+    }
+    if (managed.playPromiseInFlight) return;
+    const now = performance.now();
+    if (now - (managed.lastPlayAttemptMs || 0) < 100) return;
+
+    managed.playAttempts = (managed.playAttempts || 0) + 1;
+    managed.lastPlayAttemptMs = now;
+    managed.playPromiseInFlight = true;
+    managed.playCancelRequested = false;
+
+    const promise = audio.play();
+    if (promise !== undefined) {
+      promise
+        .then(() => {
+          managed.playPromiseInFlight = false;
+          if (this._isDisposed) return;
+          if (managed.playCancelRequested) {
+            managed.playCancelRequested = false;
+            audio.pause();
+          }
+        })
+        .catch((err: Error) => {
+          managed.playPromiseInFlight = false;
+          if (this._isDisposed) return;
+          if (err.name !== "AbortError") {
+            if (err.name === "NotAllowedError") {
+              managed.autoplayBlocked = true;
+              this.sessionAutoplayBlocked = true;
+              console.error(`[PreviewMediaPool] Audio play() BLOCKED (NotAllowedError) - latched until user gesture`);
+            } else {
+              console.warn(`[PreviewMediaPool] Audio play() failed for ${managed.clipId}-${managed.mediaId}:`, err);
+            }
+          }
+        });
+    }
   }
 
   private updateAudioElement(managed: ManagedAudio, clip: Clip, syncState: PreviewSyncState, isTrackMuted: boolean): void {
     const audio = managed.element;
-    const sourceTime = getClipSourceTime(clip, syncState.time, syncState.frameRate);
+    const activeTransitions = useTimelineStore.getState().transitions;
+    const sourceTime = getClipSourceTime(clip, syncState.time, syncState.frameRate, activeTransitions);
 
     // Combine global preview volume with per-clip volume
     const clipVolume = clip.volume ?? 1.0; // Default to 1.0 if not set
@@ -1440,9 +1685,7 @@ export class PreviewMediaPool {
     }
 
     if (sourceTime === null) {
-      if (!audio.paused) {
-        audio.pause();
-      }
+      this.pauseAudio(managed);
       return;
     }
 
@@ -1460,20 +1703,9 @@ export class PreviewMediaPool {
     }
 
     if (syncState.state === "playing") {
-      if (audio.paused && audio.readyState >= 3) {
-        const promise = audio.play();
-        if (promise !== undefined) {
-          promise.catch((err: Error) => {
-            if (err.name !== "AbortError") {
-              console.warn(`[PreviewMediaPool] Audio play() failed for ${managed.clipId}-${managed.mediaId}:`, err);
-            }
-          });
-        }
-      }
+      this.requestAudioPlayback(managed, syncState);
     } else {
-      if (!audio.paused) {
-        audio.pause();
-      }
+      this.pauseAudio(managed);
     }
   }
 

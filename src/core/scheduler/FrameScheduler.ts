@@ -22,6 +22,7 @@ import { getResourceCache } from "../resources/ResourceCache";
 import { getFontLoader } from "../fonts/FontLoader";
 import { textRenderTrace } from "@/lib/debug/textRenderTrace";
 import { performanceMonitor } from "@/lib/debug/performanceMonitor";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 /**
  * Frame job status.
@@ -35,6 +36,9 @@ export type FrameJobStatus = "pending" | "loading" | "evaluating" | "rasterizing
 export interface FrameJob {
   /** Unique job ID */
   id: string;
+
+  /** Project ID - for validating job belongs to current project (FIX-004) */
+  projectId: string;
 
   /** Frame request */
   request: FrameRequest;
@@ -75,6 +79,9 @@ export interface FrameJob {
 
   /** Cached scene from preload phase (avoids re-evaluation in later phases) */
   cachedScene?: ReturnType<typeof evaluateTimelineSceneCached>;
+  /** PREV-BUG-005 fix: Resource handle side-channel map (layerId → handle).
+   *  Passed to rasterizer instead of mutating cached scene objects. */
+  resourceHandleMap: Map<string, RenderResourceHandle>;
 }
 
 /**
@@ -133,6 +140,10 @@ export class FrameScheduler {
   private project: Project | null = null;
   private epoch: number = 0;
 
+  // Persistent resource handle cache (survives frame evaluations)
+  // Maps sourcePath → RenderResourceHandle to avoid O(n) getHandleForUrl() searches
+  private persistentResourceHandles = new Map<string, RenderResourceHandle>();
+
   // Telemetry
   private stats = {
     totalJobs: 0,
@@ -159,6 +170,12 @@ export class FrameScheduler {
    * Must be called before scheduling frames.
    */
   updateTimeline(clips: Clip[], tracks: Track[], assets: MediaAsset[], project: Project | null, epoch: number, transitions: TransitionTimelineItem[] = []): void {
+    // Clean up orphaned resource handles when epoch changes (clips deleted/modified)
+    const epochDelta = epoch - this.epoch;
+    if (epochDelta > 0 && this.persistentResourceHandles.size > 0) {
+      this.cleanupOrphanedResourceHandles(clips, assets);
+    }
+
     this.clips = clips;
     this.tracks = tracks;
     this.assets = assets;
@@ -174,8 +191,29 @@ export class FrameScheduler {
    * @returns Job ID
    */
   schedule(request: FrameRequest): string {
+    // Lock video elements immediately to prevent eviction while the job is in the queue
+    if (request.videoElements) {
+      for (const video of request.videoElements.values()) {
+        (video as any).__renderLockCount = ((video as any).__renderLockCount || 0) + 1;
+      }
+    }
+
+    // ✅ FIX-004: Capture current project ID synchronously via globalThis
+    // SessionRegistry already sets __activeProjectSession on globalThis
+    let projectId = "unknown";
+    try {
+      const session = (globalThis as any).__activeProjectSession;
+      if (session?.projectId) {
+        projectId = session.projectId;
+      }
+    } catch {
+      // If we can't get session, use "unknown"
+      // Validation in wait() will handle this gracefully
+    }
+
     const job: FrameJob = {
       id: `job-${this.nextJobId++}`,
+      projectId, // ✅ FIX-004: Store project ID with job for validation
       request,
       status: "pending",
       progress: 0,
@@ -184,6 +222,7 @@ export class FrameScheduler {
       createdAt: Date.now(),
       metrics: {},
       acquiredResourceHandles: [],
+      resourceHandleMap: new Map(),
     };
 
     this.jobs.set(job.id, job);
@@ -207,10 +246,19 @@ export class FrameScheduler {
   cancel(jobId: string): void {
     const job = this.jobs.get(jobId);
     if (job && !job.cancelled) {
+      const wasPending = job.status === "pending";
       job.cancelled = true;
       job.status = "cancelled";
       job.abortController.abort();
       this.stats.cancelledJobs++;
+
+      // If the job was pending in the queue, it will never execute and reach processJob's finally block.
+      // We must unlock its video elements here to prevent permanent resource locking.
+      if (wasPending && job.request.videoElements) {
+        for (const video of job.request.videoElements.values()) {
+          (video as any).__renderLockCount = Math.max(0, ((video as any).__renderLockCount || 0) - 1);
+        }
+      }
     }
   }
 
@@ -253,7 +301,20 @@ export class FrameScheduler {
         }
 
         if (job.status === "complete" && job.result) {
-          resolve(job.result);
+          // ✅ FIX-004: Validate job belongs to current project before resolving
+          // This prevents stale frames from previous project being displayed
+          const session = (globalThis as any).__activeProjectSession;
+          const currentProjectId = session?.projectId ?? "unknown";
+
+          if (currentProjectId !== job.projectId) {
+            // Project switched - discard stale result
+            if (this.config.debug) {
+              console.log(`[Scheduler] Discarding stale job ${jobId} from project ${job.projectId} (current: ${currentProjectId})`);
+            }
+            reject(new Error("Job result discarded - project switched"));
+            return;
+          }
+          resolve(job.result!);
         } else if (job.status === "cancelled") {
           if (timerId !== null) clearTimeout(timerId);
           reject(new Error("Job cancelled"));
@@ -470,6 +531,8 @@ export class FrameScheduler {
         colorSpace: job.request.colorSpace,
         videoElements: job.request.videoElements,
         skipFilters: job.request.skipFilters,
+        // PREV-BUG-005 fix: Pass resource handles as side-channel instead of mutating cached scene
+        resourceHandleMap: job.resourceHandleMap,
       });
 
       job.metrics.rasterTimeMs = Date.now() - rasterStartTime;
@@ -572,6 +635,13 @@ export class FrameScheduler {
       //   status: job.status,
       // });
     } finally {
+      // Unlock video elements
+      if (job.request.videoElements) {
+        for (const video of job.request.videoElements.values()) {
+          (video as any).__renderLockCount = Math.max(0, ((video as any).__renderLockCount || 0) - 1);
+        }
+      }
+
       // Release all resource handles acquired during preload
       this.releaseJobResources(job);
 
@@ -602,6 +672,39 @@ export class FrameScheduler {
       resourceCache.release(handle);
     }
     job.acquiredResourceHandles = [];
+  }
+
+  /**
+   * Remove resource handles for sourcePaths no longer in timeline.
+   * Called when epoch changes (clips added/removed/modified).
+   * O(n+m) complexity using asset map to avoid nested loops.
+   */
+  private cleanupOrphanedResourceHandles(clips: Clip[], assets: MediaAsset[]): void {
+    // Build asset map once - O(m)
+    const assetMap = new Map(assets.map((a) => [a.id, a]));
+
+    // Build set of active sourcePaths - O(n)
+    const activeSourcePaths = new Set<string>();
+    for (const clip of clips) {
+      const asset = assetMap.get(clip.mediaId);
+      if (asset) {
+        const sourcePath = asset.path.startsWith("asset://") ? asset.path : convertFileSrc(asset.path);
+        activeSourcePaths.add(sourcePath);
+      }
+    }
+
+    // Remove orphaned handles - O(p) where p = persistent cache size
+    let removedCount = 0;
+    for (const [sourcePath] of Array.from(this.persistentResourceHandles.entries())) {
+      if (!activeSourcePaths.has(sourcePath)) {
+        this.persistentResourceHandles.delete(sourcePath);
+        removedCount++;
+      }
+    }
+
+    if (this.config.debug && removedCount > 0) {
+      console.log(`[FrameScheduler] Cleaned ${removedCount} orphaned resource handle(s)`);
+    }
   }
 
   /**
@@ -708,8 +811,27 @@ export class FrameScheduler {
         // For images, use "image-bitmap". For videos without elements, use "video-element"
         const type = layer.mediaType === "video" ? "video-element" : "image-bitmap";
 
+        // NEW: Check persistent cache FIRST (O(1) map lookup)
+        let cachedHandle = this.persistentResourceHandles.get(layer.sourcePath);
+
+        if (cachedHandle) {
+          // Try to increment ref without O(n) search (FAST PATH)
+          if (resourceCache.incrementRef(cachedHandle)) {
+            // Handle still valid - use it without calling acquire()
+            job.acquiredResourceHandles.push(cachedHandle);
+            layerResourceHandles.set(layer.layerId, cachedHandle);
+            continue; // Skip acquire - avoids O(n) getHandleForUrl() iteration
+          } else {
+            // Handle was evicted from resource cache - remove from persistent map
+            this.persistentResourceHandles.delete(layer.sourcePath);
+          }
+        }
+
+        // Not in persistent cache or was evicted - acquire new (O(n) search, but only once per sourcePath)
         const loadPromise = Promise.race([
           resourceCache.acquire(layer.sourcePath, type).then((handle) => {
+            // Store in persistent cache for next frame
+            this.persistentResourceHandles.set(layer.sourcePath, handle);
             // Track acquired handle for release after rasterization
             job.acquiredResourceHandles.push(handle);
             // ✅ FIX: Store the handle so we can attach it to the layer
@@ -733,17 +855,11 @@ export class FrameScheduler {
     // Wait for all resources to load
     await Promise.all(loadPromises);
 
-    // ✅ FIX: Attach resource handles to the layers
-    for (const layer of scene.visualLayers) {
-      if (layer.layerType === "media") {
-        const handle = layerResourceHandles.get(layer.layerId);
-        if (handle) {
-          // Mutate the layer to add the resource handle
-          (layer as any).resourceHandle = handle;
-        } else if (layer.mediaType === "image") {
-          console.warn(`[FrameScheduler] No handle found for image layer ${layer.clipId} at ${layer.sourcePath}`);
-        }
-      }
+    // ✅ PREV-BUG-005 fix: Store resource handles on the job's side-channel map
+    // instead of mutating the cached scene object. This prevents dangling handles
+    // on scenes that remain in the EvaluationCache after job cancellation.
+    for (const [layerId, handle] of layerResourceHandles.entries()) {
+      job.resourceHandleMap.set(layerId, handle);
     }
   }
 

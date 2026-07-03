@@ -10,7 +10,11 @@ import { platform } from "@/core/platform";
 // Lazy load ExportDialog
 const ExportDialog = lazy(() => import("../ui/ExportDialog").then((m) => ({ default: m.ExportDialog })));
 
-export const TopBar: React.FC = () => {
+interface TopBarProps {
+  onRequestClose?: () => void;
+}
+
+export const TopBar: React.FC<TopBarProps> = ({ onRequestClose }) => {
   const { project, closeProject } = useProjectStore();
   const { toggleSettingsModal } = useUIStore();
   const { state: historyState } = useHistoryStore();
@@ -18,13 +22,22 @@ export const TopBar: React.FC = () => {
 
   const { isFullscreen } = useTauriFullscreen();
 
+  const handleClose = () => {
+    if (onRequestClose) {
+      onRequestClose();
+    } else {
+      // Fallback to direct close if no handler provided
+      closeProject();
+    }
+  };
+
   return (
     <>
       {/* Native title bar area - content positioned in the title bar */}
       <div className="h-[30px] flex items-center justify-between gap-3" data-tauri-drag-region style={{ WebkitAppRegion: "drag" } as React.CSSProperties}>
         {/* Left side - starts after traffic lights */}
         <div className={`flex items-center gap-2 ${platform.type === "tauri" && !isFullscreen ? "pl-[70px]" : ""}`} data-tauri-drag-region>
-          <Button variant="ghost" size="icon-sm" onClick={closeProject} title="Back to Home" style={{ WebkitAppRegion: "no-drag", cursor: "pointer" } as React.CSSProperties}>
+          <Button variant="ghost" size="icon-sm" onClick={handleClose} title="Back to Home" style={{ WebkitAppRegion: "no-drag", cursor: "pointer" } as React.CSSProperties}>
             <Home className="w-4 h-4" />
           </Button>
         </div>

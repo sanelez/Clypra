@@ -114,8 +114,8 @@ export class SplitClipCommand implements Command {
   }
 
   invert(): Command {
-    // FINDING-012 FIX: Pass both clip IDs to merge command
-    return new MergeSplitClipsCommand(this.leftClipId!, this.rightClipId!, this.originalClip, this.frameRate);
+    // FINDING-012 FIX: Pass both clip IDs and the original splitTime to merge command
+    return new MergeSplitClipsCommand(this.leftClipId!, this.rightClipId!, this.originalClip, this.frameRate, this.splitTime);
   }
 
   toJSON(): Record<string, any> {
@@ -169,6 +169,8 @@ class MergeSplitClipsCommand implements Command {
     private readonly rightClipId: string,
     private readonly originalClip: Clip,
     private readonly frameRate: number = 30,
+    // TL-BUG-002 fix: Store the exact split time for correct invert()
+    private readonly splitTime?: number,
   ) {
     this.id = generateCommandId();
     this.label = "Merge Split Clips";
@@ -185,9 +187,13 @@ class MergeSplitClipsCommand implements Command {
   }
 
   invert(): Command {
-    const rightClip = this.originalClip;
-    const splitTime = this.originalClip.startTime + this.originalClip.duration / 2; // Approximate
-    return new SplitClipCommand(this.leftClipId, splitTime, this.frameRate, this.originalClip);
+    // TL-BUG-002 fix: Use the stored splitTime (exact) instead of duration / 2 (approximate)
+    const exactSplitTime = this.splitTime ?? (this.originalClip.startTime + this.originalClip.duration / 2);
+    const cmd = new SplitClipCommand(this.originalClip.id, exactSplitTime, this.frameRate, this.originalClip);
+    // Preserve the same clip IDs so redo produces identical clips
+    (cmd as any).leftClipId = this.leftClipId;
+    (cmd as any).rightClipId = this.rightClipId;
+    return cmd;
   }
 
   toJSON(): Record<string, any> {
@@ -197,10 +203,12 @@ class MergeSplitClipsCommand implements Command {
       rightClipId: this.rightClipId,
       originalClip: this.originalClip,
       frameRate: this.frameRate,
+      // TL-BUG-002 fix: Serialize splitTime for correct deserialized invert()
+      splitTime: this.splitTime,
     };
   }
 
   static fromJSON(data: Record<string, any>): MergeSplitClipsCommand {
-    return new MergeSplitClipsCommand(data.leftClipId, data.rightClipId, data.originalClip, data.frameRate || 30);
+    return new MergeSplitClipsCommand(data.leftClipId, data.rightClipId, data.originalClip, data.frameRate || 30, data.splitTime);
   }
 }

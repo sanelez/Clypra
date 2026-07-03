@@ -37,6 +37,7 @@ import { create } from "zustand";
 import { CommandJournal } from "@/core/history";
 import type { Command, CommandJournalState } from "@/core/history";
 import { useTimelineStore } from "./timelineStore";
+import { useUIStore } from "./uiStore";
 
 interface HistoryStore {
   // Command journal instance
@@ -110,6 +111,14 @@ export const useHistoryStore = create<HistoryStore>((set, get) => {
 
       // Update timeline store (auto-save triggered by middleware)
       useTimelineStore.setState(newState);
+
+      // TL-BUG-001 fix: Clear stale selection after undo.
+      // Timeline state may no longer contain the previously selected clips/gaps/transitions.
+      try {
+        useUIStore.getState().clearSelection();
+      } catch {
+        // Defensive — UIStore may not be initialized during tests
+      }
     },
 
     redo: () => {
@@ -125,6 +134,13 @@ export const useHistoryStore = create<HistoryStore>((set, get) => {
 
       // Update timeline store (auto-save triggered by middleware)
       useTimelineStore.setState(newState);
+
+      // TL-BUG-001 fix: Clear stale selection after redo.
+      try {
+        useUIStore.getState().clearSelection();
+      } catch {
+        // Defensive — UIStore may not be initialized during tests
+      }
     },
 
     beginTransaction: (label) => {

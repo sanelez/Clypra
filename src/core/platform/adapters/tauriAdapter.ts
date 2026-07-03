@@ -12,9 +12,6 @@ export class TauriPlatformAdapter implements PlatformInterface {
   isCapacitor() {
     return false;
   }
-  isWeb() {
-    return false;
-  }
 
   constructor() {}
 
@@ -129,5 +126,17 @@ export class TauriPlatformAdapter implements PlatformInterface {
   async extractAudioArtwork(path: string): Promise<string | undefined> {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke("extract_audio_artwork", { path });
+  }
+
+  async saveRecording(fileName: string, data: Uint8Array): Promise<string> {
+    const { writeFile, mkdir, exists } = await import("@tauri-apps/plugin-fs");
+    const { appLocalDataDir, join } = await import("@tauri-apps/api/path");
+    const localDir = await appLocalDataDir();
+    if (!(await exists(localDir))) {
+      await mkdir(localDir, { recursive: true });
+    }
+    const filePath = await join(localDir, fileName);
+    await writeFile(filePath, data);
+    return filePath;
   }
 }

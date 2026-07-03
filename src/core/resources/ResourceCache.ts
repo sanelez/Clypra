@@ -97,6 +97,24 @@ export class ResourceCache {
   }
 
   /**
+   * Increment reference count for an existing resource.
+   * Used when handle is already known (from persistent cache).
+   * O(1) operation - avoids O(n) search in getHandleForUrl().
+   *
+   * @param handle - Resource handle
+   * @returns true if handle is valid, false if evicted
+   */
+  incrementRef(handle: RenderResourceHandle): boolean {
+    const resource = this.resources.get(handle);
+    if (resource) {
+      resource.refCount++;
+      resource.lastAccessTime = Date.now();
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Release a resource (decrement ref count).
    *
    * @param handle - Resource handle

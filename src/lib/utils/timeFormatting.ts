@@ -28,10 +28,13 @@ export function formatTime(seconds: number): string {
  * Used for precise timeline displays
  */
 export function formatTimecode(seconds: number, frameRate: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  const frames = Math.floor((seconds % 1) * frameRate);
+  const totalFrames = Math.round(seconds * frameRate);
+  const totalSeconds = Math.floor(totalFrames / frameRate);
+  const frames = totalFrames % frameRate;
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
 
   if (hours > 0) {
     return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;

@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { useTransportControls, useTransportSnapshot } from "./usePlaybackClock";
 import { getActiveSessionOrNull } from "@/core/runtime/ProjectSession";
+import { getPlaybackClock } from "@/hooks/usePlaybackClock";
 import { useTimelineStore } from "@/store/timelineStore";
 import { useUIStore } from "@/store/uiStore";
 import { useProjectStore } from "@/store/projectStore";
@@ -65,25 +66,29 @@ export const useKeyboardShortcuts = () => {
       }
 
       // ─── Seeking (context-aware) ─────────────────────────────────────────
+      // PB-BUG-001 fix: Read clock.time imperatively instead of using throttled
+      // transportTime (which lags by up to 100ms at 10fps throttle rate).
 
       if (e.key === "ArrowLeft") {
         e.preventDefault();
+        const liveTime = getPlaybackClock().time;
         if (previewMode === "source") {
-          seek?.(Math.max(0, transportTime - 1));
+          seek?.(Math.max(0, liveTime - 1));
         } else {
           const frameTime = 1 / frameRate;
-          seek?.(Math.max(0, transportTime - frameTime));
+          seek?.(Math.max(0, liveTime - frameTime));
         }
         return;
       }
 
       if (e.key === "ArrowRight") {
         e.preventDefault();
+        const liveTime = getPlaybackClock().time;
         if (previewMode === "source") {
-          seek?.(transportTime + 1);
+          seek?.(liveTime + 1);
         } else {
           const frameTime = 1 / frameRate;
-          seek?.(transportTime + frameTime);
+          seek?.(liveTime + frameTime);
         }
         return;
       }
@@ -224,7 +229,7 @@ export const useKeyboardShortcuts = () => {
         e.preventDefault();
         // Ctrl/Cmd+K: Split selected clips (or all if none selected)
         if (e.shiftKey) {
-          // Ctrl+Shift+K: Split ALL clips at playhead
+          // PB-HIDDEN-005 fix: Ctrl+Shift+K splits ALL clips at playhead
           const results = EditingActions.splitAtPlayhead();
           if (results.length === 0) {
             setToastMessage("No clips under playhead to split");
@@ -233,13 +238,27 @@ export const useKeyboardShortcuts = () => {
             setToastMessage(`Split ${successCount} clip${successCount > 1 ? "s" : ""}`);
           }
         } else {
-          // Ctrl+K: Split selected clips only (or all if none selected)
-          const results = EditingActions.splitAtPlayhead();
-          if (results.length === 0) {
-            setToastMessage("No clips under playhead to split");
+          // PB-HIDDEN-005 fix: Ctrl+K splits only SELECTED clips at playhead
+          // If no clips are selected, falls back to splitting all clips
+          const store = useTimelineStore.getState();
+          const selected = store.clips.filter((c) => selectedClipIds.includes(c.id));
+          if (selected.length > 0) {
+            const results = EditingActions.splitSelectedAtPlayhead(selectedClipIds);
+            if (results.length === 0) {
+              setToastMessage("No selected clips under playhead to split");
+            } else {
+              const successCount = results.filter((r) => r.success).length;
+              setToastMessage(`Split ${successCount} selected clip${successCount > 1 ? "s" : ""}`);
+            }
           } else {
-            const successCount = results.filter((r) => r.success).length;
-            setToastMessage(`Split ${successCount} clip${successCount > 1 ? "s" : ""}`);
+            // No selection — fall back to split all
+            const results = EditingActions.splitAtPlayhead();
+            if (results.length === 0) {
+              setToastMessage("No clips under playhead to split");
+            } else {
+              const successCount = results.filter((r) => r.success).length;
+              setToastMessage(`Split ${successCount} clip${successCount > 1 ? "s" : ""}`);
+            }
           }
         }
         setTimeout(() => setToastMessage(null), 2000);

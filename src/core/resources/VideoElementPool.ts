@@ -133,16 +133,16 @@ export class VideoElementPool {
         video.muted = true; // Muted for export (no audio in frame extraction)
 
         // Style and add to DOM to ensure the browser composites the frames
-        // Position off-screen and make completely invisible
+        // Position fixed and practically invisible, but NOT offscreen or hidden.
+        // Browsers suspend or throttle decoding for offscreen/hidden/1x1 elements.
         video.style.position = "fixed";
-        video.style.top = "-9999px";
-        video.style.left = "-9999px";
-        video.style.width = "1px";
-        video.style.height = "1px";
-        video.style.opacity = "0";
+        video.style.top = "0px";
+        video.style.left = "0px";
+        video.style.width = "256px";
+        video.style.height = "256px";
+        video.style.opacity = "0.001";
         video.style.pointerEvents = "none";
         video.style.zIndex = "-9999";
-        video.style.visibility = "hidden";
 
         // Ensure playsinline is set for Safari/mobile webviews
         video.setAttribute("playsinline", "");

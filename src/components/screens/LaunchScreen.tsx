@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Film, Image as ImageIcon, Plus, Trash2, Pencil, MoreHorizontal, Clock, ChevronRight, Sparkles, Settings, Activity } from "lucide-react";
+import React, { useEffect, useState, useRef } from "react";
+import { Film, Image as ImageIcon, Plus, Trash2, Pencil, MoreHorizontal, Clock, ChevronRight, Sparkles, Settings, Activity, Video, StopCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useProjectStore } from "@/store/projectStore";
@@ -8,18 +8,21 @@ import type { AspectRatio, MediaAsset, Project } from "@/types";
 import { MAX_PROJECT_NAME_LENGTH } from "@/types";
 import { useUIStore } from "@/store/uiStore";
 import { platform } from "@/core/platform";
+import { DualRecordService } from "@/services/dualRecordService";
+import { useRecordingStore } from "@/store/recordingStore";
 
 interface LaunchScreenProps {
-  onProjectCreate: (name: string, aspectRatio: AspectRatio, frameRate: 24 | 30 | 60) => void;
+  onProjectCreate: (name: string, aspectRatio: AspectRatio, frameRate: 24 | 30 | 60, initialClipPaths?: string[]) => void;
   onProjectOpen: (project: Project) => void;
 }
 
-const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
+// const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
 
 const toPreviewSrc = (value?: string) => {
   if (!value) return undefined;
   return value;
 };
+
 
 const graphemeSegmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
 const countGraphemes = (str: string): number => Array.from(graphemeSegmenter.segment(str)).length;
@@ -34,6 +37,8 @@ const getProjectThumbnail = (project: Project) => {
   return undefined;
 };
 
+const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
 export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onProjectOpen }) => {
   const { recentProjects, setRecentProjects, deleteProject, renameProject } = useProjectStore();
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
@@ -42,6 +47,223 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
   const [renameValue, setRenameValue] = useState("");
   const [isRenaming, setIsRenaming] = useState(false);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
+
+  const [isRecordOpen, setIsRecordOpen] = useState(false);
+  const [recordOptions, setRecordOptions] = useState({
+    audio: true,
+    webcam: true,
+    screen: true,
+    screenType: "any" as "any" | "entire" | "window",
+  });
+  // Recording active state lives in the global store so App.tsx can render the
+  // floating widget overlay even after navigating away from LaunchScreen.
+  const { isRecording, setIsRecording, seconds, setSeconds, setHasWebcam, reset: resetRecording } = useRecordingStore();
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const previewScreenVideoRef = useRef<HTMLVideoElement>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [audioDevices, setAudioDevices] = useState<{ deviceId: string; label: string }[]>([]);
+  const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState<string>("");
+  const [micLevel, setMicLevel] = useState<number>(0);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (!DualRecordService.getInstance().isRecording()) {
+        DualRecordService.getInstance().cleanup();
+      }
+    };
+  }, []);
+
+  // Enumerate audio input devices when recording modal is opened
+  useEffect(() => {
+    if (!isRecordOpen) return;
+
+    const updateDevices = async () => {
+      try {
+        const devices = await DualRecordService.getInstance().enumerateAudioDevices();
+        setAudioDevices(devices);
+        if (devices.length > 0) {
+          setSelectedAudioDeviceId((prev) => {
+            if (prev && devices.some((d) => d.deviceId === prev)) return prev;
+            return devices[0].deviceId;
+          });
+        } else {
+          setSelectedAudioDeviceId("");
+        }
+      } catch (err) {
+        console.error("[LaunchScreen] Enumerate audio devices failed:", err);
+      }
+    };
+
+    updateDevices();
+    navigator.mediaDevices.addEventListener("devicechange", updateDevices);
+    return () => {
+      navigator.mediaDevices.removeEventListener("devicechange", updateDevices);
+    };
+  }, [isRecordOpen]);
+
+  // Coordinated camera, audio, and mic preview initialization
+  useEffect(() => {
+    if (!isRecordOpen || isRecording) return;
+
+    if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
+    if (previewScreenVideoRef.current) previewScreenVideoRef.current.srcObject = null;
+    
+    // Stop any existing sessions/previews to prevent multi-access conflicts
+    DualRecordService.getInstance().stopPreview();
+    DualRecordService.getInstance().stopScreenPreview();
+    DualRecordService.getInstance().stopMicTest();
+    setPreviewError(null);
+    setMicLevel(0);
+
+    let animationFrameId: number;
+    let active = true;
+
+    const setupPreviews = async () => {
+      try {
+        // 1. Initialize camera/microphone preview stream
+        const stream = await DualRecordService.getInstance().startPreview(
+          { webcam: recordOptions.webcam, audio: recordOptions.audio },
+          selectedAudioDeviceId || undefined
+        );
+
+        if (!active) return;
+
+        if (previewVideoRef.current) {
+          previewVideoRef.current.srcObject = stream;
+        }
+
+        // 2. Coordinated mic testing using the same preview stream (sequential to prevent concurrent getUserMedia hardware lock)
+        if (recordOptions.audio) {
+          await DualRecordService.getInstance().startMicTest(selectedAudioDeviceId);
+          if (!active) return;
+
+          const pollLevel = () => {
+            const level = DualRecordService.getInstance().getMicLevel();
+            setMicLevel(level);
+            animationFrameId = requestAnimationFrame(pollLevel);
+          };
+          pollLevel();
+        }
+      } catch (err) {
+        console.error("[LaunchScreen] Camera/microphone setup failed:", err);
+        setPreviewError("Could not access camera or microphone. Check System Preferences → Privacy.");
+      }
+    };
+
+    setupPreviews();
+
+    return () => {
+      active = false;
+      cancelAnimationFrame(animationFrameId);
+      if (!DualRecordService.getInstance().isRecording()) {
+        if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
+        if (previewScreenVideoRef.current) previewScreenVideoRef.current.srcObject = null;
+        DualRecordService.getInstance().stopPreview();
+        DualRecordService.getInstance().stopScreenPreview();
+        DualRecordService.getInstance().stopMicTest();
+      }
+    };
+  }, [
+    isRecordOpen,
+    recordOptions.webcam,
+    recordOptions.audio,
+    selectedAudioDeviceId,
+    isRecording,
+  ]);
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, "0");
+    const s = (secs % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
+  const openRecordModal = () => {
+    resetRecording();
+    setIsRecordOpen(true);
+  };
+
+  const closeRecordModal = () => {
+    if (isRecording) return;
+    if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
+    DualRecordService.getInstance().stopPreview();
+    DualRecordService.getInstance().stopMicTest();
+    setIsRecordOpen(false);
+    setPreviewError(null);
+  };
+
+  const startCapture = async () => {
+    try {
+      setSeconds(0);
+      setHasWebcam(recordOptions.webcam);
+
+      // 1. Start recording streams first (must be called within the user gesture callback stack)
+      await DualRecordService.getInstance().startRecording({
+        ...recordOptions,
+        screenType: recordOptions.screenType === "any" ? undefined : recordOptions.screenType,
+        audioDeviceId: selectedAudioDeviceId || undefined,
+      });
+
+      // Detach preview stream from modal video element — App-level widget will re-attach it
+      if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
+      setIsRecording(true);
+      setIsRecordOpen(false);
+      timerRef.current = setInterval(() => setSeconds((p) => p + 1), 1000);
+
+      // 2. Resize window to float layout after capture has been successfully initiated
+      if (isTauri) {
+        try {
+          const { getCurrentWindow } = await import("@tauri-apps/api/window");
+          const { LogicalSize } = await import("@tauri-apps/api/dpi");
+          const win = getCurrentWindow();
+          await win.setMinSize(null);
+          await win.setSize(new LogicalSize(320, 420));
+          await win.setMinSize(new LogicalSize(320, 420));
+          await win.setAlwaysOnTop(true);
+        } catch (winErr) {
+          console.error("[LaunchScreen] Failed to set window size:", winErr);
+        }
+      }
+    } catch (err: any) {
+      console.error("[LaunchScreen] Start recording failed:", err);
+      setPreviewError(`Failed to start recording: ${err?.message || err || "Check permissions."}`);
+    }
+  };
+
+  const stopCapture = async () => {
+    try {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      const { filePaths } = await DualRecordService.getInstance().stopRecording();
+      resetRecording();
+      setIsRecordOpen(false);
+      if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
+
+      if (isTauri) {
+        try {
+          const { getCurrentWindow } = await import("@tauri-apps/api/window");
+          const { LogicalSize } = await import("@tauri-apps/api/dpi");
+          const win = getCurrentWindow();
+          await win.setMinSize(new LogicalSize(1100, 720));
+          await win.setSize(new LogicalSize(1100, 720));
+          await win.setAlwaysOnTop(false);
+        } catch (winErr) {
+          console.error("[LaunchScreen] Failed to restore window size:", winErr);
+        }
+      }
+
+      const { defaultFrameRate } = useSettingsStore.getState();
+      onProjectCreate("Screen Recording Project", "16:9", defaultFrameRate, filePaths);
+    } catch (err: any) {
+      console.error("[LaunchScreen] Stop recording failed:", err);
+      setPreviewError(`Failed to save recording: ${err?.message || err || "Unknown error"}`);
+    }
+  };
+
+
+
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
   const [diagnosticsEnabled, setDiagnosticsEnabled] = useState({
     performance: false,
@@ -164,6 +386,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
     return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   };
 
+
   return (
     <div className="w-full h-full bg-bg flex flex-col overflow-hidden">
       {/* Native title bar area */}
@@ -230,11 +453,22 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
                 Create something amazing
               </div>
               <h2 className="text-2xl md:text-3xl font-bold text-text-primary mb-2 tracking-tight">Start a new project</h2>
-              <p className="text-sm text-text-muted mb-6 max-w-md">Begin with a 16:9 landscape canvas optimized for YouTube and widescreen content, or open a recent project below.</p>
-              <Button variant="default" size="lg" onClick={handleStartNewProject} className="py-2 px-4 text-base font-semibold rounded-xl transition-all cursor-pointer">
-                <Plus className="mr-1" />
-                New Project
-              </Button>
+              <p className="text-sm text-text-muted mb-6 max-w-md">Begin with a 16:9 landscape canvas, or capture your screen and face simultaneously.</p>
+              <div className="flex flex-col sm:flex-row items-center gap-3">
+                <Button variant="default" size="lg" onClick={handleStartNewProject} className="py-2 px-4 text-base font-semibold rounded-xl transition-all cursor-pointer">
+                  <Plus className="mr-1" />
+                  New Project
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  onClick={openRecordModal}
+                  className="py-2 px-4 text-base font-semibold rounded-xl transition-all cursor-pointer border border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/70 hover:text-red-300"
+                >
+                  <Video className="mr-1.5 w-4 h-4" />
+                  Record Screen & Camera
+                </Button>
+              </div>
             </div>
           </div>
         </section>
@@ -286,7 +520,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
                       {/* Accent glow on hover */}
                       <div className="absolute inset-0 bg-accent/3 opacity-0 group-hover:opacity-100 transition-opacity" />
                       {/* Aspect ratio badge */}
-                      <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-bg/75 backdrop-blur-sm text-text-muted border border-white/6">{project.aspectRatio}</span>
+                      <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-bg/75 backdrop-blur-sm text-text-muted border border-white/6">{project.aspectRatio}</span>
                     </div>
 
                     {/* Info */}
@@ -299,14 +533,14 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
                     </div>
 
                     {/* More options button */}
-                    <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <div onClick={(e) => handleToggleMenu(e, project.id)} className="p-1.5 rounded-lg bg-bg/80 backdrop-blur-sm border border-white/4 hover:bg-surface-raised hover:border-white/8 cursor-pointer transition-colors" title="More options">
                         <MoreHorizontal className="w-3.5 h-3.5 text-text-muted" />
                       </div>
 
                       {/* Dropdown menu */}
                       {menuOpen === project.id && (
-                        <div ref={menuRef} className="absolute top-full left-0 mt-1 z-50 min-w-[140px] rounded-lg border border-border bg-surface py-1 shadow-xl overflow-hidden">
+                        <div ref={menuRef} className="absolute top-full right-0 mt-1 z-50 min-w-[140px] rounded-lg border border-border bg-surface py-1 shadow-xl overflow-hidden">
                           <button onClick={(e) => handleRenameClick(e, project)} className="w-full px-3 py-2 text-left flex items-center gap-2 text-sm text-text-primary hover:bg-surface-raised transition-colors cursor-pointer">
                             <Pencil className="w-3.5 h-3.5" />
                             Rename
@@ -454,6 +688,203 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
           </div>
         </div>
       </Modal>
+
+      {/* ── Recording Modal ───────────────────────────────── */}
+      {isRecordOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md">
+          <div
+            className="w-[560px] rounded-2xl p-7 shadow-2xl flex flex-col gap-5 text-slate-100 border border-white/10"
+            style={{
+              background: "linear-gradient(160deg, rgba(18,18,28,0.97) 0%, rgba(12,12,20,0.99) 100%)",
+            }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold flex items-center gap-2.5 text-white">
+                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-red-500/15 border border-red-500/30">
+                  <Video className="w-4 h-4 text-red-400" />
+                </span>
+                Record Screen & Camera
+              </h3>
+              <button
+                onClick={closeRecordModal}
+                disabled={isRecording}
+                className="text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Live Preview */}
+            <div className="relative aspect-video rounded-xl bg-[#0a0a12] border border-white/8 overflow-hidden">
+              {/* Screen preview (fills the background) */}
+              {recordOptions.screen && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#07070c] border border-white/5">
+                  <div className="flex flex-col items-center justify-center text-slate-500 gap-2">
+                    <span className="text-4xl">🖥️</span>
+                    <span className="text-xs font-semibold text-slate-400">Screen Capture Enabled</span>
+                    <span className="text-[10px] text-slate-500">System picker will prompt when recording starts</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Webcam preview (floating bubble at the bottom corner if screen is also active, otherwise fills layout) */}
+              {recordOptions.webcam && (
+                <div
+                  className={
+                    recordOptions.screen
+                      ? "absolute bottom-3 right-3 w-32 aspect-video rounded-lg overflow-hidden border border-white/20 shadow-2xl bg-black"
+                      : "w-full h-full"
+                  }
+                >
+                  <video
+                    ref={previewVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover scale-x-[-1]"
+                  />
+                </div>
+              )}
+
+              {/* Placeholder text if neither is active */}
+              {!recordOptions.screen && !recordOptions.webcam && (
+                <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-2">
+                  <span className="text-3xl">🎙️</span>
+                  <span className="text-xs font-medium">Recording Audio Only</span>
+                </div>
+              )}
+
+              {/* Error banner */}
+              {previewError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-8 bg-black/80">
+                  <span className="text-2xl">⚠️</span>
+                  <p className="text-sm text-red-400 leading-relaxed max-w-xs">{previewError}</p>
+                </div>
+              )}
+              {/* REC badge */}
+              {isRecording && (
+                <div className="absolute top-3 left-3 bg-red-600 text-white text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                  REC {formatTime(seconds)}
+                </div>
+              )}
+            </div>
+
+            {/* Options */}
+            <div className="grid grid-cols-3 gap-3">
+              {([
+                { key: "screen" as const, label: "Capture Screen", icon: "🖥️" },
+                { key: "webcam" as const, label: "Camera", icon: "📷" },
+                { key: "audio" as const, label: "Microphone", icon: "🎙️" },
+              ] as const).map(({ key, label, icon }) => (
+                <label
+                  key={key}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-xl border cursor-pointer select-none transition-all ${
+                    recordOptions[key]
+                      ? "bg-accent/10 border-accent/40 text-white"
+                      : "bg-white/4 border-white/8 text-slate-400 opacity-60"
+                  } ${isRecording ? "pointer-events-none" : "hover:bg-white/8"}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={recordOptions[key]}
+                    onChange={(e) => setRecordOptions({ ...recordOptions, [key]: e.target.checked })}
+                    disabled={isRecording}
+                  />
+                  <span className="text-xl">{icon}</span>
+                  <span className="text-xs font-semibold">{label}</span>
+                </label>
+              ))}
+            </div>
+
+            {/* Screen Capture Source selector */}
+            {recordOptions.screen && !isRecording && (
+              <div className="flex flex-col gap-3 p-4 rounded-xl bg-white/4 border border-white/8 text-slate-300">
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Screen Capture Source
+                </div>
+                <select
+                  value={recordOptions.screenType}
+                  onChange={(e) => setRecordOptions({ ...recordOptions, screenType: e.target.value as any })}
+                  className="w-full bg-[#0d0d15] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent/40 cursor-pointer"
+                >
+                  <option value="any">Standard System Picker (Let me choose)</option>
+                  <option value="entire">Widescreen Entire Display</option>
+                  <option value="window">Single Application Window</option>
+                </select>
+              </div>
+            )}
+
+            {/* Mic Testing & Selection */}
+            {recordOptions.audio && !isRecording && (
+              <div className="flex flex-col gap-3 p-4 rounded-xl bg-white/4 border border-white/8 text-slate-300">
+                <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  <span>Microphone Source</span>
+                  {audioDevices.length > 0 && <span className="text-emerald-400 font-bold flex items-center gap-1.5 animate-pulse">● Live Testing</span>}
+                </div>
+                
+                {audioDevices.length > 0 ? (
+                  <div className="flex flex-col gap-2.5">
+                    <select
+                      value={selectedAudioDeviceId}
+                      onChange={(e) => setSelectedAudioDeviceId(e.target.value)}
+                      className="w-full bg-[#0d0d15] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent/40 cursor-pointer"
+                    >
+                      {audioDevices.map((d) => (
+                        <option key={d.deviceId} value={d.deviceId}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
+                    
+                    {/* Live Meter */}
+                    <div className="flex items-center gap-3">
+                      <span className="text-[11px] text-slate-400 font-medium">Input level:</span>
+                      <div className="flex-1 h-2 rounded-full bg-[#07070a] overflow-hidden flex items-center p-0.5 border border-white/5">
+                        <div
+                          className="h-full rounded-full transition-all duration-75"
+                          style={{
+                            width: `${micLevel * 100}%`,
+                            background: "linear-gradient(90deg, #10b981 0%, #10b981 70%, #f59e0b 85%, #ef4444 100%)",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400">No microphone devices found.</p>
+                )}
+              </div>
+            )}
+
+            {/* CTA */}
+            <div className="pt-1">
+              {!isRecording ? (
+                <button
+                  onClick={startCapture}
+                  className="w-full py-3.5 rounded-xl bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold text-sm flex items-center justify-center gap-2.5 transition-colors shadow-lg shadow-red-900/30"
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-white" />
+                  Start Capture
+                </button>
+              ) : (
+                <button
+                  onClick={stopCapture}
+                  className="w-full py-3.5 rounded-xl bg-slate-100 hover:bg-white text-slate-900 font-bold text-sm flex items-center justify-center gap-2.5 transition-colors"
+                >
+                  <StopCircle className="w-5 h-5 text-red-600" />
+                  Stop & Open in Editor
+                </button>
+              )}
+              <p className="text-center text-xs text-slate-500 mt-3">
+                The recording will automatically open as a new project in the editor.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

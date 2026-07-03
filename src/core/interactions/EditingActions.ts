@@ -146,11 +146,12 @@ export class EditingActions {
       }
 
       // FINDING-012 FIX: Select BOTH splits (user expectation: both are "new")
-      // This prevents confusion where only one clip is selected
+      // TL-BUG-003 fix: selectClip replaces the array, so use toggleClipSelection
+      // for the second clip to append it instead of overwriting.
       const uiStore = useUIStore.getState();
       uiStore.clearSelection();
       uiStore.selectClip(leftClipId);
-      uiStore.selectClip(rightClipId);
+      uiStore.toggleClipSelection(rightClipId);
 
       return {
         success: true,
@@ -215,6 +216,37 @@ export class EditingActions {
         source: "playhead",
       }),
     );
+  }
+
+  /**
+   * PB-HIDDEN-005: Split only the specified clips at the playhead position.
+   * Used by Ctrl+K to split only selected clips (vs Ctrl+Shift+K for all).
+   *
+   * @param clipIds - IDs of clips to split
+   * @returns Split results for clips that were under the playhead
+   */
+  static splitSelectedAtPlayhead(clipIds: string[]): SplitResult[] {
+    const currentTime = getPlaybackClock().time;
+    const clips = useTimelineStore.getState().clips;
+    const results: SplitResult[] = [];
+
+    for (const clipId of clipIds) {
+      const clip = clips.find((c) => c.id === clipId);
+      if (!clip) continue;
+
+      // Check if playhead is within clip bounds
+      const clipEndTime = clip.startTime + clip.duration;
+      if (currentTime > clip.startTime && currentTime < clipEndTime) {
+        const result = this.executeSplit({
+          clipId,
+          time: currentTime,
+          source: "playhead",
+        });
+        results.push(result);
+      }
+    }
+
+    return results;
   }
 
   /**

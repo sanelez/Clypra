@@ -30,7 +30,7 @@ let stateMonitorCleanup: (() => void) | null = null;
  * Call this once on app startup.
  */
 export async function initializePerformanceAdapter(): Promise<void> {
-  console.log("[PerformanceAdapter] Initializing...");
+  // console.log("[PerformanceAdapter] Initializing...");
 
   // Log device capabilities for debugging
   await logDeviceCapabilities();
@@ -41,18 +41,18 @@ export async function initializePerformanceAdapter(): Promise<void> {
 
   // Monitor device state changes
   stateMonitorCleanup = await monitorDeviceState(async (caps: DeviceCapabilities) => {
-    console.log("[PerformanceAdapter] Device state changed:", {
-      onBattery: caps.onBattery,
-      batteryLevel: caps.batteryLevel !== null ? `${(caps.batteryLevel * 100).toFixed(0)}%` : "unknown",
-      thermalThrottling: caps.thermalThrottling,
-    });
+    // console.log("[PerformanceAdapter] Device state changed:", {
+    //   onBattery: caps.onBattery,
+    //   batteryLevel: caps.batteryLevel !== null ? `${(caps.batteryLevel * 100).toFixed(0)}%` : "unknown",
+    //   thermalThrottling: caps.thermalThrottling,
+    // });
 
     // Recompute profile and adapt
     const newProfile = await getPerformanceProfile();
     await adaptPerformanceProfile(newProfile);
   });
 
-  console.log("[PerformanceAdapter] Initialization complete");
+  // console.log("[PerformanceAdapter] Initialization complete");
 }
 
 /**
@@ -65,7 +65,7 @@ export function shutdownPerformanceAdapter(): void {
     stateMonitorCleanup = null;
   }
   currentSettings = null;
-  console.log("[PerformanceAdapter] Shutdown complete");
+  // console.log("[PerformanceAdapter] Shutdown complete");
 }
 
 /**
@@ -90,7 +90,7 @@ async function applyPerformanceProfile(profile: Awaited<ReturnType<typeof getPer
   // Store current settings
   currentSettings = settings;
 
-  console.log("[PerformanceAdapter] Applied profile:", settings);
+  // console.log("[PerformanceAdapter] Applied profile:", settings);
 }
 
 /**
@@ -117,7 +117,7 @@ async function adaptPerformanceProfile(profile: Awaited<ReturnType<typeof getPer
 
   // Check if worker count changed
   if (newSettings.workerCount !== currentSettings.workerCount) {
-    console.log(`[PerformanceAdapter] Adapting worker count: ${currentSettings.workerCount} → ${newSettings.workerCount}`);
+    // console.log(`[PerformanceAdapter] Adapting worker count: ${currentSettings.workerCount} → ${newSettings.workerCount}`);
     ThumbnailWorkerPool.reset(newSettings.workerCount);
   }
 
@@ -125,14 +125,14 @@ async function adaptPerformanceProfile(profile: Awaited<ReturnType<typeof getPer
   const thumbnailSizeChanged = newSettings.thumbnailSize.width !== currentSettings.thumbnailSize.width || newSettings.thumbnailSize.height !== currentSettings.thumbnailSize.height;
 
   if (thumbnailSizeChanged) {
-    console.log(`[PerformanceAdapter] Thumbnail size adapted: ${currentSettings.thumbnailSize.width}×${currentSettings.thumbnailSize.height} → ${newSettings.thumbnailSize.width}×${newSettings.thumbnailSize.height}`);
+    // console.log(`[PerformanceAdapter] Thumbnail size adapted: ${currentSettings.thumbnailSize.width}×${currentSettings.thumbnailSize.height} → ${newSettings.thumbnailSize.width}×${newSettings.thumbnailSize.height}`);
     // Thumbnail size is applied by reading from getCurrentPerformanceSettings()
     // No immediate action needed - next thumbnail requests will use new size
   }
 
   // Check if background processing changed
   if (newSettings.backgroundProcessing !== currentSettings.backgroundProcessing) {
-    console.log(`[PerformanceAdapter] Background processing: ${currentSettings.backgroundProcessing} → ${newSettings.backgroundProcessing}`);
+    // console.log(`[PerformanceAdapter] Background processing: ${currentSettings.backgroundProcessing} → ${newSettings.backgroundProcessing}`);
     // Background processing control would be implemented in ProjectSession or similar
     // For now, just log the change
   }

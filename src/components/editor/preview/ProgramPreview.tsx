@@ -146,6 +146,11 @@ export const ProgramPreview: React.FC = () => {
   const originalCanvasDimsRef = useRef<{ width: number; height: number } | null>(null);
   const prevDurationRef = useRef<number>(0);
   const prevFrameRateRef = useRef<number>(0);
+  // PB-BUG-005: Refs for isMuted/volume to avoid render loop teardown on change
+  const isMutedRef = useRef(isMuted);
+  const volumeRef = useRef(volume);
+  isMutedRef.current = isMuted;
+  volumeRef.current = volume;
 
   const renderStateRef = useRef({
     clips,
@@ -452,6 +457,7 @@ export const ProgramPreview: React.FC = () => {
     let lastRenderedTime: number = -1;
     let lastRenderedEpoch: number = -1;
     let lastRenderedPlaybackState: "playing" | "paused" | "stopped" = "stopped";
+    let hasRenderedWithClips: boolean = false; // Track if we've ever rendered with actual clips
     const GPU_MEMORY_LIMIT_MB = 128;
     let forceRenderNeeded = false;
     const renderLoop = () => {
@@ -463,27 +469,88 @@ export const ProgramPreview: React.FC = () => {
       // clockState.time is throttled to 10fps for UI updates and lags behind
       const timeToRender = state.clock.time;
 
-      // FINDING-023: Round time to codec precision to prevent unnecessary seeks
-      // Video codecs use keyframes at intervals (e.g., 30fps = ~33ms precision)
-      // High-precision time values cause decoder resets every frame
-      // Round to 30fps precision (33.33ms) to match typical codec granularity
-      const codecPrecisionFps = 30;
-      const timeToRenderRounded = Math.round(timeToRender * codecPrecisionFps) / codecPrecisionFps;
-
       const playbackState = state.clock.state;
-      const playbackSpeed = state.clock.speed;
       const isPlaying = playbackState === "playing";
+
+      // FINDING-023 / Playhead Pause Jump Fix:
+      // Always round time to the project's actual frame rate precision to ensure
+      // frame-accurate synchronization and prevent jumps when pausing.
+      const frameRate = state.project?.frameRate ?? 30;
+      const timeToRenderRounded = Math.round(timeToRender * frameRate) / frameRate;
+
+      const playbackSpeed = state.clock.speed;
       const timeChanged = timeToRenderRounded !== lastRenderedTime;
       const epochChanged = state.epoch !== lastRenderedEpoch;
-      // Always render the first frame (lastRenderedTime === -1)
-      const isFirstFrame = lastRenderedTime === -1;
-      const needsRender = isPlaying || timeChanged || epochChanged || isFirstFrame || forceRenderNeeded;
+      const isFirstFrame = !hasRenderedWithClips && state.clips.length > 0;
+      const playbackStateChanged = lastRenderedPlaybackState !== playbackState;
+      const needsSync = epochChanged || playbackStateChanged || isFirstFrame || isPlaying;
 
-      if (forceRenderNeeded) {
-        forceRenderNeeded = false;
+      // Get session once for both sync and render operations
+      const session = getActiveSessionOrNull();
+
+      // Sync media elements first (before readiness check)
+      if (needsSync) {
+        if (session && session.state === "active") {
+          try {
+            session.syncPreviewMedia(getPreviewMediaSyncClips(state.clips, timeToRenderRounded), state.mediaAssets, state.tracks, {
+              time: timeToRenderRounded,
+              state: playbackState,
+              speed: playbackSpeed,
+              muted: isMutedRef.current,
+              volume: volumeRef.current,
+              frameRate: state.project?.frameRate ?? 30,
+            });
+          } catch (error) {
+            console.error(`[PreviewPanel ERROR] Exception calling syncPreviewMedia:`, error);
+          }
+        }
       }
 
-      // Get the active track-level filter at the rendering time
+      let waitingForVideoReady = false;
+
+      // Check video readiness on first frame (after sync has created elements)
+      if (isFirstFrame) {
+        if (session) {
+          const videoElements = session.getPreviewVideoElements();
+          const videoClips = state.clips.filter((c) => c.kind === "video");
+
+          if (videoClips.length > 0) {
+            let hasAnyVideoElement = false;
+            let hasReadyVideo = false;
+
+            for (const clip of videoClips) {
+              const key = `${clip.id}-${clip.mediaId}`;
+              const element = videoElements.get(key);
+
+              if (element) {
+                hasAnyVideoElement = true;
+                if (element.readyState >= 1) {
+                  hasReadyVideo = true;
+                  break;
+                }
+              }
+            }
+
+            waitingForVideoReady = hasAnyVideoElement && !hasReadyVideo;
+          }
+        }
+      }
+
+      // PREV-BUG-001 fix: Include forceRenderNeeded in render decision.
+      // The clock subscriber sets this flag on seek, ensuring seeks within the
+      // same 10ms quantization bucket still trigger a re-render.
+      const needsRender = (isPlaying || timeChanged || epochChanged || isFirstFrame || forceRenderNeeded) && !waitingForVideoReady;
+
+      // Consume the flag after checking (regardless of whether we render)
+      if (forceRenderNeeded) forceRenderNeeded = false;
+
+      if (!needsRender) {
+        rafId = requestAnimationFrame(renderLoop);
+        return;
+      }
+
+      rafId = requestAnimationFrame(renderLoop);
+
       const getActiveFilterIR = (time: number) => {
         const filterTracks = state.tracks.filter((t: any) => t.type === "filter" && (t.visible ?? true));
         const filterTrackIds = new Set(filterTracks.map((t: any) => t.id));
@@ -502,55 +569,6 @@ export const ProgramPreview: React.FC = () => {
         return undefined;
       };
 
-      // ─── FINDING-009: Separate needsSync from needsRender ─────────────────────────
-      // sync() is about ELEMENT LIFECYCLE (create/dispose/bind clips to elements)
-      // It should only run when:
-      // - Playback state changes (play/pause/stop)
-      // - Epoch changes (clips added/removed/modified)
-      // - Time crosses clip boundary (clip becomes active/inactive)
-      //
-      // render() is about FRAME SCHEDULING (rasterize current frame)
-      // It should run when:
-      // - Playing (every frame)
-      // - Time changed (seek)
-      // - Epoch changed (visual update needed)
-      // - First frame
-      //
-      // During steady playback, needsRender=true every frame but needsSync=false
-      // This reduces sync() calls from 60fps to ~1-10fps (only on actual state changes)
-      const playbackStateChanged = lastRenderedPlaybackState !== playbackState;
-      const needsSync = epochChanged || playbackStateChanged || isFirstFrame;
-
-      // Only render if something changed or we're playing
-      // This prevents infinite RAF loops when idle
-      if (!needsRender) {
-        rafId = requestAnimationFrame(renderLoop);
-        return;
-      }
-
-      rafId = requestAnimationFrame(renderLoop);
-
-      // Get session once for both sync and render operations
-      const session = getActiveSessionOrNull();
-
-      // Sync media elements ONLY when lifecycle changes (not every frame)
-      if (needsSync) {
-        if (session && session.state === "active") {
-          try {
-            session.syncPreviewMedia(getPreviewMediaSyncClips(state.clips, timeToRenderRounded), state.mediaAssets, state.tracks, {
-              time: timeToRenderRounded,
-              state: playbackState,
-              speed: playbackSpeed,
-              muted: isMuted,
-              volume,
-              frameRate: state.project?.frameRate ?? 30,
-            });
-          } catch (error) {
-            console.error(`[PreviewPanel ERROR] Exception calling syncPreviewMedia:`, error);
-          }
-        }
-      }
-
       // Check isRendering AFTER sync to prevent render race conditions
       if (isRendering) {
         droppedFramesRef.current++;
@@ -558,9 +576,9 @@ export const ProgramPreview: React.FC = () => {
       }
 
       isRendering = true;
-      lastRenderedTime = timeToRenderRounded;
-      lastRenderedEpoch = state.epoch;
-      lastRenderedPlaybackState = playbackState;
+      // CRITICAL FIX: Don't update lastRenderedTime/Epoch until the frame actually completes
+      // If we set them here and the job fails/cancels, we lose the trigger for the next frame
+      // These are now updated in the .then() success handler after the frame is actually rendered
       scheduler.updateTimeline(state.clips, state.tracks, state.mediaAssets, state.project, state.epoch, state.transitions);
       const qm = qualityManagerRef.current;
       const qualityTier = qm ? qm.selectTierForInteraction(isPlaying, false, false, state.previewQuality) : PreviewQualityTier.Idle;
@@ -594,10 +612,23 @@ export const ProgramPreview: React.FC = () => {
         .then((result) => {
           isRendering = false;
           if (!isActive) return;
+
+          // CRITICAL FIX: Update lastRenderedTime/Epoch ONLY after successful render
+          // This ensures we don't lose the render trigger if a job fails or is cancelled
+          lastRenderedTime = timeToRenderRounded;
+          lastRenderedEpoch = renderStateRef.current.epoch;
+          lastRenderedPlaybackState = playbackState;
+
+          // Mark that we've successfully rendered with clips
+          if (renderStateRef.current.clips.length > 0) {
+            hasRenderedWithClips = true;
+          }
+
           const latestState = renderStateRef.current;
           if (latestState.clock.isSeeking) {
             latestState.clock.completeSeek();
           }
+
           if (result.data instanceof ImageBitmap) {
             if (gpuCache) {
               const cacheKey = `preview:${latestState.project?.id}:${latestState.epoch}:${timeToRenderRounded.toFixed(3)}:${profile.maxWidth}x${profile.maxHeight}:${latestState.dpr}`;
@@ -661,15 +692,21 @@ export const ProgramPreview: React.FC = () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
       if (lastJobId) scheduler.cancel(lastJobId);
     };
-  }, [useCanvasPreview, project, canvasWidth, canvasHeight, displayWidth, displayHeight, canvasEl, isMuted, volume]);
+  }, [useCanvasPreview, project, canvasWidth, canvasHeight, displayWidth, displayHeight, canvasEl]);
+  // PB-BUG-005: isMuted and volume intentionally NOT in deps — read from refs
 
   // ── Clear selection when playback starts ──────────────────────────────
   // Transform overlays should not be visible during playback
+  // PB-BUG-007 fix: Use imperative clock.state read instead of throttled
+  // clockState to avoid the delayed clearSelection race condition.
   useEffect(() => {
-    if (clockState.state === "playing") {
-      clearSelection();
-    }
-  }, [clockState.state, clearSelection]);
+    const unsubscribe = clock.subscribe((state) => {
+      if (state.state === "playing") {
+        clearSelection();
+      }
+    });
+    return unsubscribe;
+  }, [clock, clearSelection]);
 
   // ── Pause when app loses foreground ────────────────────────────────────
   // Desktop webviews throttle RAF/media heavily when hidden or unfocused.

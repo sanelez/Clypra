@@ -238,6 +238,7 @@ export const useTimelineStore = create<TimelineStore>(
         set((state) => {
           const newDepth = Math.max(0, state._batchDepth - 1);
           if (newDepth === 0 && state._pendingEpochIncrement) {
+            console.log(`📊 [TIMELINE] ✅ Epoch incremented: ${state.epoch} → ${state.epoch + 1}`);
             return { _batchDepth: 0, _pendingEpochIncrement: false, epoch: state.epoch + 1 };
           }
           return { _batchDepth: newDepth };
@@ -246,6 +247,7 @@ export const useTimelineStore = create<TimelineStore>(
     },
 
     incrementEpoch: () => {
+      // console.log("📊 [TIMELINE] incrementEpoch called");
       set((state) => {
         if (state._batchDepth > 0) {
           return { _pendingEpochIncrement: true };
@@ -282,6 +284,9 @@ export const useTimelineStore = create<TimelineStore>(
         clipCount: normalizedClips.length,
       });
 
+      // BUG-002 fix: Reset mainVideoTrackId and re-derive from loaded tracks
+      const newMainVideoTrackId = finalTracks.find((t) => t.type === "video")?.id ?? null;
+
       // Atomic state update - all or nothing
       set({
         tracks: finalTracks,
@@ -292,6 +297,12 @@ export const useTimelineStore = create<TimelineStore>(
         zoomLevel: TIMELINE_ZOOM_DEFAULT,
         pixelsPerSecond: TIMELINE_ZOOM_DEFAULT * TIMELINE_PPS_PER_ZOOM,
         epoch: 0, // Reset epoch on project load
+        mainVideoTrackId: newMainVideoTrackId,
+        snapGuides: [],
+        rippleEditEnabled: false,
+        snapEnabled: true,
+        _batchDepth: 0,
+        _pendingEpochIncrement: false,
       });
 
       performanceMonitor.endMeasure("timeline-hydrate");
@@ -353,10 +364,12 @@ export const useTimelineStore = create<TimelineStore>(
     },
 
     removeTrack: (trackId) => {
+      // TL-BUG-006 fix: Also cascade-remove gaps for the deleted track
       set((state) => ({
         tracks: state.tracks.filter((t) => t.id !== trackId),
         clips: state.clips.filter((c) => c.trackId !== trackId),
         transitions: state.transitions.filter((transition) => transition.placement.trackId !== trackId),
+        gaps: state.gaps.filter((g) => g.trackId !== trackId),
       }));
     },
 
@@ -366,19 +379,38 @@ export const useTimelineStore = create<TimelineStore>(
       }));
     },
 
+    // HIDDEN-006 fix: toggleTrackMute and toggleTrackVisibility now increment epoch
+    // so the evaluation cache is invalidated and the render pipeline sees the change.
     toggleTrackMute: (trackId) => {
-      set((state) => ({
-        tracks: state.tracks.map((track) => (track.id === trackId ? { ...track, muted: !track.muted } : track)),
-      }));
+      set((state) => {
+        const next: Partial<TimelineStore> = {
+          tracks: state.tracks.map((track) => (track.id === trackId ? { ...track, muted: !track.muted } : track)),
+        };
+        if (state._batchDepth > 0) {
+          next._pendingEpochIncrement = true;
+        } else {
+          next.epoch = state.epoch + 1;
+        }
+        return next;
+      });
     },
 
     toggleTrackVisibility: (trackId) => {
-      set((state) => ({
-        tracks: state.tracks.map((track) => (track.id === trackId ? { ...track, visible: !track.visible } : track)),
-      }));
+      set((state) => {
+        const next: Partial<TimelineStore> = {
+          tracks: state.tracks.map((track) => (track.id === trackId ? { ...track, visible: !track.visible } : track)),
+        };
+        if (state._batchDepth > 0) {
+          next._pendingEpochIncrement = true;
+        } else {
+          next.epoch = state.epoch + 1;
+        }
+        return next;
+      });
     },
 
     addClip: (clip) => {
+      // console.log(`🎬 [TIMELINE] Adding clip: ${clip.id}, kind: ${clip.kind}, mediaId: ${clip.mediaId}, trackId: ${clip.trackId}`);
       timelineStart("addClip", { clipId: clip.id, trackId: clip.trackId });
       performanceMonitor.startMeasure("timeline-addClip", { clipId: clip.id, trackId: clip.trackId });
 
@@ -419,6 +451,11 @@ export const useTimelineStore = create<TimelineStore>(
 
         // If timeline was empty, switch to program preview and seek to first clip's start time
         if (wasEmpty) {
+          // console.log(`🎯 [TIMELINE] First clip added to empty timeline! Current clock time before seek:`, {
+          //   clipStartTime: safeClip.startTime,
+          //   clipDuration: clip.duration,
+          //   clipId: clip.id,
+          // });
           // 1) Update UI first so preview panel closes before transport switch
           try {
             useUIStore.getState().exitSourceMode();
@@ -434,17 +471,26 @@ export const useTimelineStore = create<TimelineStore>(
                 session.transportAuthority.setActiveContext("program");
                 // Seek to the new clip's start time for immediate visual feedback
                 const firstClipStartTime = safeClip.startTime;
+                // console.log(`⏩ [TIMELINE] Seeking playhead to first clip start: ${firstClipStartTime}`);
                 session.transportAuthority.seek(firstClipStartTime);
               }
             })
             .catch(() => {});
         }
 
-        return {
+        // TL-BUG-005 fix: Respect batch epoch gating (consistent with all other mutations)
+        const next: Partial<TimelineStore> = {
           clips: [...state.clips, safeClip],
-          epoch: state.epoch + 1,
         };
+        if (state._batchDepth > 0) {
+          next._pendingEpochIncrement = true;
+        } else {
+          next.epoch = state.epoch + 1;
+        }
+        return next;
       });
+
+      // console.log(`✅ [TIMELINE] Clip added successfully, epoch incremented to: ${get().epoch}`);
 
       performanceMonitor.endMeasure("timeline-addClip");
       timelineEnd("addClip");
@@ -489,6 +535,9 @@ export const useTimelineStore = create<TimelineStore>(
 
         // Check if the track this clip was on is now empty
         let tracksToKeep = state.tracks;
+        let gapsToKeep = state.gaps;
+        let mainVideoTrackId = state.mainVideoTrackId;
+        let removedTrackIdForCleanup: string | null = null;
         if (clipToRemove) {
           const trackId = clipToRemove.trackId;
           const hasOtherClips = remainingClips.some((c) => c.trackId === trackId);
@@ -496,12 +545,21 @@ export const useTimelineStore = create<TimelineStore>(
           // If no other clips on this track, remove the track
           if (!hasOtherClips) {
             tracksToKeep = state.tracks.filter((t) => t.id !== trackId);
+            // TL-BUG-006 fix: Also cascade-remove gaps for the auto-removed track
+            gapsToKeep = state.gaps.filter((g) => g.trackId !== trackId);
+            removedTrackIdForCleanup = trackId;
+            // TL-BUG-007 fix: Re-derive mainVideoTrackId if the removed track was the main video track
+            if (mainVideoTrackId === trackId) {
+              mainVideoTrackId = tracksToKeep.find((t) => t.type === "video")?.id ?? null;
+            }
           }
         }
 
         const next: Partial<TimelineStore> = {
           clips: remainingClips,
           tracks: tracksToKeep,
+          gaps: gapsToKeep,
+          mainVideoTrackId,
           transitions: state.transitions.filter((transition) => transition.fromItemId !== clipId && transition.toItemId !== clipId),
         };
         if (state._batchDepth > 0) {
@@ -509,6 +567,19 @@ export const useTimelineStore = create<TimelineStore>(
         } else {
           next.epoch = state.epoch + 1;
         }
+
+        // TL-BUG-007 fix: Clear selectedTrackId if the auto-removed track was selected
+        if (removedTrackIdForCleanup) {
+          try {
+            const uiState = useUIStore.getState();
+            if (uiState.selectedTrackId === removedTrackIdForCleanup) {
+              useUIStore.setState({ selectedTrackId: null });
+            }
+          } catch {
+            // Defensive — UIStore may not be initialized during tests
+          }
+        }
+
         return next;
       });
 
@@ -724,6 +795,20 @@ export const useTimelineStore = create<TimelineStore>(
       // Case: different tracks — simple position + track swap
       if (clipA.trackId !== clipB.trackId) {
         set((state) => {
+          // TL-BUG-004 fix: Update transition references when clips swap tracks
+          const updatedTransitions = state.transitions.map((t) => {
+            let updated = t;
+            // If transition references clipA, update its track to clipB's track
+            if (t.fromItemId === clipA.id || t.toItemId === clipA.id) {
+              updated = { ...updated, placement: { ...updated.placement, trackId: clipB.trackId } };
+            }
+            // If transition references clipB, update its track to clipA's track
+            if (t.fromItemId === clipB.id || t.toItemId === clipB.id) {
+              updated = { ...updated, placement: { ...updated.placement, trackId: clipA.trackId } };
+            }
+            return updated;
+          });
+
           const next: Partial<TimelineStore> = {
             clips: state.clips.map((c) => {
               if (c.id === clipA.id) {
@@ -734,6 +819,7 @@ export const useTimelineStore = create<TimelineStore>(
               }
               return c;
             }),
+            transitions: updatedTransitions,
           };
           if (state._batchDepth > 0) {
             next._pendingEpochIncrement = true;

@@ -25,6 +25,7 @@ interface TemplateState {
   startRender: () => Promise<RenderedFrameSequence>;
   cancelRender: () => void;
   preloadTemplatesAndFontsForClips: (clips: any[]) => Promise<void>;
+  reset: () => void;
 }
 
 let renderCancelToken = { cancelled: false };
@@ -300,5 +301,21 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     } catch (err) {
       console.warn("[Clypra:TemplateStore] Preload templates and fonts failed:", err);
     }
+  },
+
+  reset: () => {
+    get().cancelRender();
+    set({
+      selectedTemplate: null,
+      customization: {
+        primaryText: "Clypra",
+        secondaryText: "",
+        accentText: "",
+      },
+      isRendering: false,
+      renderProgress: 0,
+      activeCategory: "all",
+      searchQuery: "",
+    });
   },
 }));

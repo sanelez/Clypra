@@ -14,7 +14,7 @@ export class SourcePlaybackContext implements PlaybackContext {
   private _listeners = new Set<PlaybackContextListener>();
   private _cleanupMediaListeners: (() => void) | null = null;
   private _speed: number = 1;
-  private _checkInterval: ReturnType<typeof setInterval> | null = null;
+  private _outPointRafId: number | null = null;
   private _inPoint: number | null = null;
   private _outPoint: number | null = null;
 
@@ -109,8 +109,14 @@ export class SourcePlaybackContext implements PlaybackContext {
     return this._mediaElement?.duration ?? 0;
   }
 
+  /**
+   * PB-BUG-003 fix: Check element.ended before element.paused.
+   * When media ends naturally, element.paused is true AND element.ended is true.
+   * Reporting "stopped" instead of "paused" is the correct NLE behavior.
+   */
   getState(): PlaybackState {
     if (!this._mediaElement) return "stopped";
+    if (this._mediaElement.ended) return "stopped";
     return this._mediaElement.paused ? "paused" : "playing";
   }
 
@@ -171,21 +177,30 @@ export class SourcePlaybackContext implements PlaybackContext {
 
   // ─── Out-point guard ───────────────────────────────────────────────────
 
+  /**
+   * PB-BUG-004 fix: Use RAF-based out-point guard instead of setInterval(50ms).
+   * RAF is automatically throttled when tab is backgrounded, preventing
+   * overshoot caused by timer drift in background tabs.
+   */
   private _startOutPointCheck(): void {
     this._stopOutPointCheck();
     if (this._outPoint === null) return;
 
-    this._checkInterval = setInterval(() => {
+    const checkLoop = () => {
+      if (this._outPointRafId === null) return; // stopped
       if (this.getTime() >= this._outPoint!) {
         this.pause();
+        return;
       }
-    }, 50);
+      this._outPointRafId = requestAnimationFrame(checkLoop);
+    };
+    this._outPointRafId = requestAnimationFrame(checkLoop);
   }
 
   private _stopOutPointCheck(): void {
-    if (this._checkInterval) {
-      clearInterval(this._checkInterval);
-      this._checkInterval = null;
+    if (this._outPointRafId !== null) {
+      cancelAnimationFrame(this._outPointRafId);
+      this._outPointRafId = null;
     }
   }
 

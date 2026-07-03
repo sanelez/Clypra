@@ -28,6 +28,8 @@ import { performanceMonitor } from "../monitoring/PerformanceMonitor";
 interface PendingRequest {
   requestId: number;
   tileKey: string;
+  /** Optional: project ID at the time the request was made (RACE-005 guard) */
+  projectId?: string;
   resolve: (bitmap: ImageBitmap) => void;
   reject: (error: Error) => void;
   timeoutHandle: number;
@@ -141,8 +143,33 @@ export class ThumbnailWorkerPool {
       performanceMonitor.timing("thumbnail_worker.decode_duration", response.processingTimeMs);
       performanceMonitor.increment("thumbnail_worker.decode_success");
 
-      // Resolve promise
-      pending.resolve(response.bitmap);
+      // Resolve promise — but first validate the project hasn't switched (RACE-005)
+      if (pending.projectId !== undefined) {
+        // Lazy import to avoid circular dependency at module load time
+        import("@/store/projectStore")
+          .then(({ useProjectStore }) => {
+            const currentProjectId = useProjectStore.getState().project?.id;
+            if (currentProjectId !== pending.projectId) {
+              // Project switched — discard stale bitmap to prevent cache pollution
+              if (import.meta.env.DEV) {
+                console.debug(
+                  `[ThumbnailWorkerPool] Stale result for tileKey=${pending.tileKey}` +
+                  ` (expected project=${pending.projectId}, current=${currentProjectId}) — discarded`
+                );
+              }
+              pending.reject(new Error(`Stale thumbnail result — project switched`));
+              return;
+            }
+            pending.resolve(response.bitmap);
+          })
+          .catch(() => {
+            // If store import fails fall back to resolving — better than a stuck promise
+            pending.resolve(response.bitmap);
+          });
+      } else {
+        // No project ID guard requested — legacy behaviour
+        pending.resolve(response.bitmap);
+      }
     } else if (response.type === "error") {
       const pending = this.pendingRequests.get(response.requestId);
       if (!pending) {
@@ -171,9 +198,10 @@ export class ThumbnailWorkerPool {
    * @param width - Frame width
    * @param height - Frame height
    * @param tileKey - Tile cache key
+   * @param projectId - Optional: current project ID used to discard stale results on switch (RACE-005)
    * @returns Promise that resolves with ImageBitmap (transferred from worker)
    */
-  async decode(rawData: Uint8Array, width: number, height: number, tileKey: string): Promise<ImageBitmap> {
+  async decode(rawData: Uint8Array, width: number, height: number, tileKey: string, projectId?: string): Promise<ImageBitmap> {
     // Lazy initialization
     if (!this.initialized) {
       await this.initialize();
@@ -206,6 +234,7 @@ export class ThumbnailWorkerPool {
       this.pendingRequests.set(requestId, {
         requestId,
         tileKey,
+        projectId, // ✅ FIX (RACE-005): store for stale-result validation in handleWorkerMessage
         resolve,
         reject,
         timeoutHandle,

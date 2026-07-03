@@ -1,4 +1,4 @@
-export type PlatformType = "tauri" | "capacitor" | "web";
+export type PlatformType = "tauri" | "capacitor";
 
 export interface VideoMetadata {
   duration: number;
@@ -17,7 +17,6 @@ export interface PlatformInterface {
   type: PlatformType;
   isTauri(): boolean;
   isCapacitor(): boolean;
-  isWeb(): boolean;
 
   convertFileSrc(path: string): string;
 
@@ -39,6 +38,7 @@ export interface PlatformInterface {
   getMediaMetadata(path: string): Promise<VideoMetadata>;
   extractPosterFrame(path: string, duration: number, dpr: number): Promise<string>;
   extractAudioArtwork(path: string): Promise<string | undefined>;
+  saveRecording(fileName: string, data: Uint8Array): Promise<string>;
 }
 
 // ─── Environment Detection ───────────────────────────────────────────────────
@@ -49,5 +49,8 @@ export const isCapacitor = typeof window !== "undefined" && (window as any).Capa
 export const getPlatformType = (): PlatformType => {
   if (isTauri) return "tauri";
   if (isCapacitor) return "capacitor";
-  return "web";
+  if (typeof (globalThis as any).process !== "undefined" && (globalThis as any).process.env?.NODE_ENV === "test") {
+    return "tauri";
+  }
+  throw new Error("Unsupported platform: Clypra is built only for Tauri Desktop and Mobile/Capacitor.");
 };
