@@ -114,6 +114,14 @@ vi.mock("@/lib/cache/globalGPUCache", () => ({
   },
 }));
 
+vi.mock("@/components/editor/preview/previewMediaSync", () => ({
+  clearClipFilterCache: vi.fn(),
+}));
+
+vi.mock("../resources/ResourceCache", () => ({
+  resetResourceCache: vi.fn(),
+}));
+
 describe("ProjectStateReset", () => {
   beforeEach(() => {
     vi.clearAllMocks();

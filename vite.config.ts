@@ -13,8 +13,8 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@clypra/engine/transitions": path.resolve(__dirname, "../clypra-studio/packages/clypra-engine/dist/transitions/index.js"),
-      "@clypra/engine": path.resolve(__dirname, "../clypra-studio/packages/clypra-engine/dist/index.js"),
+      "@clypra/engine/transitions": path.resolve(__dirname, "../clypra-studio/packages/clypra-engine/src/transitions/index.ts"),
+      "@clypra/engine": path.resolve(__dirname, "../clypra-studio/packages/clypra-engine/src/index.ts"),
     },
   },
 

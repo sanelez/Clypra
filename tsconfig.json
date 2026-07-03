@@ -23,9 +23,7 @@
     /* Path aliases */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-      "@clypra/engine/transitions": ["../clypra-studio/packages/clypra-engine/dist/transitions/index.d.ts"],
-      "@clypra/engine": ["../clypra-studio/packages/clypra-engine/dist/index.d.ts"]
+      "@/*": ["./src/*"]
     },
 
     /* Test type declarations */
