@@ -102,6 +102,12 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
+      - name: Checkout clypra-studio
+        uses: actions/checkout@v4
+        with:
+          repository: AIEraDev/clypra-studio
+          path: ../clypra-studio
+
       - name: Checkout code
         uses: actions/checkout@v4
 

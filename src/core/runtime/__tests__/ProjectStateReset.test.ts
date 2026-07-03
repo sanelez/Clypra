@@ -94,6 +94,26 @@ vi.mock("@/lib/monitoring/PerformanceMonitor", () => ({
   },
 }));
 
+vi.mock("@/store/middleware/autoSaveMiddleware", () => ({
+  resumeAutoSave: vi.fn(),
+  suspendAutoSave: vi.fn(),
+  autoSaveMiddleware: (f: any) => f,
+}));
+
+vi.mock("../evaluation/evaluator", () => ({
+  clearEvaluationCache: vi.fn(),
+}));
+
+vi.mock("../render/rasterizer", () => ({
+  clearLottieRenderCache: vi.fn(),
+}));
+
+vi.mock("@/lib/cache/globalGPUCache", () => ({
+  globalGPUCache: {
+    clearAllTextures: vi.fn().mockReturnValue(0),
+  },
+}));
+
 describe("ProjectStateReset", () => {
   beforeEach(() => {
     vi.clearAllMocks();
