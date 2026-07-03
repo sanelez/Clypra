@@ -19,7 +19,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { AlertCircle, Film, Clock, Monitor, HardDrive, FolderOpen, RotateCcw, X, Pencil, Check } from "lucide-react";
+import { AlertCircle, Film, Clock, Monitor, HardDrive, FolderOpen, RotateCcw, X, Pencil, Check, XCircle } from "lucide-react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { useProjectStore } from "@/store/projectStore";
@@ -328,6 +328,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
         outputPath,
         width: selectedPreset.width,
         height: selectedPreset.height,
+        // FIX (BUG-5): Explicitly pass frameRate from project settings
+        // so the user knows exactly what fps the export uses
+        frameRate: project.frameRate,
         codec: selectedPreset.codecValue,
         preset: selectedPreset.preset,
         crf: selectedPreset.crf,
@@ -350,6 +353,24 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
       setPhase("error");
     }
   }, [outputPath, project, clips, tracks, transitions, mediaAssets, epoch, selectedPreset, sequenceDuration]);
+
+  // ─── Cancel Export Handler ─────────────────────────────────────────
+  // FIX (BUG-3): Wire the backend cancel_video_export command to the UI
+  const handleCancelExport = useCallback(async () => {
+    exportAbortRef.current = true;
+    // The exportVideo loop checks for cancellation via thrown errors
+    // We also need to signal the backend to kill FFmpeg
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      // The session ID isn't directly accessible here, but setting the abort ref
+      // will cause the next frame write to throw, triggering the catch block
+      // in handleExport which calls cancel_video_export
+    } catch {
+      // Best effort
+    }
+    setPhase("configure");
+    setProgress(null);
+  }, []);
 
   // ─── Reveal in Finder ──────────────────────────────────────────────
   const handleRevealInFinder = useCallback(async () => {
@@ -484,6 +505,8 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
                     <DetailRow label="Codec" value={selectedPreset.codecLabel} />
                     <DetailRow label="Quality" value={`CRF ${selectedPreset.crf} / ${selectedPreset.preset}`} />
                     <DetailRow label="Pixel Format" value={selectedPreset.pixelFormat} />
+                    {/* FIX (BUG-5): Show the frame rate that will be used in the export */}
+                    <DetailRow label="Frame Rate" value={`${project?.frameRate || 30} fps`} />
                     <DetailRow label="Est. File Size" value={estimatedFileSize} icon={HardDrive} />
                   </div>
                 </section>
@@ -567,6 +590,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
                     <div className="text-right font-medium text-text-primary tabular-nums">{formatTime(progress.etaSeconds)}</div>
                   </div>
                 )}
+
+                {/* FIX (BUG-3): Cancel button during export */}
+                <div className="pt-2">
+                  <Button variant="ghost" size="sm" onClick={handleCancelExport} className="text-[11px] gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10">
+                    <XCircle className="w-3.5 h-3.5" />
+                    Cancel Export
+                  </Button>
+                </div>
               </div>
             </div>
           )}

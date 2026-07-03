@@ -15,7 +15,7 @@
  */
 
 import { getFrameScheduler } from "../../core/scheduler/FrameScheduler";
-import type { Clip, Track, MediaAsset, Project } from "../../types";
+import type { Clip, Track, MediaAsset, Project, TransitionTimelineItem } from "../../types";
 
 /**
  * Image sequence export options.
@@ -26,6 +26,9 @@ export interface ExportSequenceOptions {
 
   /** Timeline tracks */
   tracks: Track[];
+
+  /** Timeline transitions */
+  transitions?: TransitionTimelineItem[];
 
   /** Media assets */
   assets: MediaAsset[];
@@ -94,7 +97,7 @@ export interface ExportSequenceResult {
  * @returns Export result
  */
 export async function exportSequence(options: ExportSequenceOptions): Promise<ExportSequenceResult> {
-  const { clips, tracks, assets, project, epoch, startTime, endTime, frameRate = project?.frameRate || 30, width = project?.canvasWidth || 1920, height = project?.canvasHeight || 1080, format = "png", quality = 0.92, onProgress, onFrame } = options;
+  const { clips, tracks, transitions = [], assets, project, epoch, startTime, endTime, frameRate = project?.frameRate || 30, width = project?.canvasWidth || 1920, height = project?.canvasHeight || 1080, format = "png", quality = 0.92, onProgress, onFrame } = options;
 
   const startTimeMs = Date.now();
 
@@ -120,7 +123,7 @@ export async function exportSequence(options: ExportSequenceOptions): Promise<Ex
 
   // Get scheduler and update timeline state
   const scheduler = getFrameScheduler();
-  scheduler.updateTimeline(clips, tracks, assets, project, epoch);
+  scheduler.updateTimeline(clips, tracks, assets, project, epoch, transitions);
 
   // Schedule all frames
   const jobIds: string[] = [];

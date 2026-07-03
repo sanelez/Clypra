@@ -267,7 +267,10 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
         const imageData = result.data;
 
         // Add frame to batch buffer
-        const frameBytes = new Uint8Array(imageData.data.buffer);
+        // CRITICAL: Must copy the data — imageData.data.buffer is shared with the
+        // canvas pool and will be overwritten when the canvas is reused for the next frame.
+        // Without this copy, up to BATCH_SIZE-1 frames get corrupted per flush cycle.
+        const frameBytes = new Uint8Array(imageData.data);
         frameBuffer.push(frameBytes);
 
         completedFrames++;

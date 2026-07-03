@@ -134,6 +134,9 @@ struct ExportSession {
     width: u32,
     height: u32,
     
+    /// Output file path (for cleanup on cancellation)
+    output_path: Option<String>,
+    
     /// Performance monitoring
     frame_write_times: Vec<f64>, // Last 60 frame write times (ms)
     last_perf_log_time: std::time::Instant,
@@ -283,8 +286,11 @@ pub async fn start_video_export(
         for idx in 0..valid_audio_clips.len() {
             filter_complex.push_str(&format!("[a{}]", idx + 1));
         }
+        // FIX (BUG-6): Use duration=shortest so audio doesn't outlast the video stream.
+        // With duration=longest, a background music track extending beyond the video
+        // creates trailing audio-only content in the output file.
         filter_complex.push_str(&format!(
-            "amix=inputs={}:duration=longest[a]",
+            "amix=inputs={}:duration=shortest[a]",
             valid_audio_clips.len()
         ));
         
@@ -316,6 +322,9 @@ pub async fn start_video_export(
             cmd.arg("-keyint_min").arg(gop_size.to_string());
             // Force IDR frames at every keyframe for maximum compatibility
             cmd.arg("-x264-params").arg("scenecut=0:open_gop=0");
+            // FIX (BUG-2): Guarantee a clean first keyframe for thumbnail extraction
+            // Desktop apps (Finder, Explorer) use the first keyframe as the thumbnail
+            cmd.arg("-force_key_frames").arg("expr:eq(n,0)");
         }
         "h265" => {
             cmd.arg("-c:v").arg("libx265");
@@ -327,6 +336,8 @@ pub async fn start_video_export(
             cmd.arg("-g").arg(gop_size.to_string());
             cmd.arg("-keyint_min").arg(gop_size.to_string());
             cmd.arg("-x265-params").arg("scenecut=0:open-gop=0");
+            // FIX (BUG-2): Guarantee a clean first keyframe for thumbnail extraction
+            cmd.arg("-force_key_frames").arg("expr:eq(n,0)");
         }
         "prores" => {
             cmd.arg("-c:v").arg("prores_ks");
@@ -371,6 +382,7 @@ pub async fn start_video_export(
         on_progress,
         width: config.width,
         height: config.height,
+        output_path: Some(config.output_path.clone()),
         frame_write_times: Vec::with_capacity(60),
         last_perf_log_time: std::time::Instant::now(),
     };
@@ -699,6 +711,8 @@ pub async fn finalize_video_export(session_id: String) -> Result<(), String> {
 /// Cancel an export session.
 ///
 /// Kills the FFmpeg process and cleans up resources.
+/// FIX (BUG-7): Also deletes the partial output file to avoid leaving
+/// a corrupt/unplayable file on disk (moov atom won't be written).
 #[tauri::command]
 pub async fn cancel_video_export(session_id: String) -> Result<(), String> {
     let mut sessions = EXPORT_SESSIONS.lock().await;
@@ -707,12 +721,28 @@ pub async fn cancel_video_export(session_id: String) -> Result<(), String> {
         .remove(&session_id)
         .ok_or_else(|| format!("Export session not found: {}", session_id))?;
     
+    // Capture output path before killing the process
+    let output_path = session.output_path.clone();
+    
     // Kill FFmpeg process
     session
         .process
         .kill()
         .await
         .map_err(|e| format!("Failed to kill FFmpeg: {}", e))?;
+    
+    // FIX (BUG-7): Delete partial output file — it will be corrupt
+    // (missing moov atom due to faststart not completing)
+    if let Some(ref path) = output_path {
+        if let Err(e) = tokio::fs::remove_file(path).await {
+            eprintln!(
+                "[cancel_video_export] Could not delete partial file {}: {}",
+                path, e
+            );
+        } else {
+            eprintln!("[cancel_video_export] Deleted partial output: {}", path);
+        }
+    }
     
     eprintln!(
         "[cancel_video_export] Session {} cancelled ({} frames written)",

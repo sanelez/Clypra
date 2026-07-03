@@ -77,6 +77,8 @@ export interface FrameJob {
   /** Resource handles acquired during preload (for release after rasterization) */
   acquiredResourceHandles: RenderResourceHandle[];
 
+  /** Cached scene from preload phase (avoids re-evaluation in later phases) */
+  cachedScene?: ReturnType<typeof evaluateTimelineSceneCached>;
   /** PREV-BUG-005 fix: Resource handle side-channel map (layerId → handle).
    *  Passed to rasterizer instead of mutating cached scene objects. */
   resourceHandleMap: Map<string, RenderResourceHandle>;
@@ -479,7 +481,8 @@ export class FrameScheduler {
       // performanceMonitor.startMeasure(`evaluation-${job.id}`);
       const evalStartTime = Date.now();
 
-      const scene = evaluateTimelineSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch, this.transitions);
+      // FIX (BUG-8): Reuse scene from preload phase instead of evaluating a third time
+      const scene = job.cachedScene ?? evaluateTimelineSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch, this.transitions);
 
       // ✅ Only construct trace payload if debug is enabled (prevents console spam in production)
       if (import.meta.env.DEV) {
@@ -708,10 +711,15 @@ export class FrameScheduler {
    * Pre-load resources for a frame.
    * Analyzes the scene and pre-loads all media resources.
    * Tracks acquired handles on the job for release after rasterization.
+   * FIX (BUG-8): Caches the evaluated scene on the job for reuse in later phases.
    */
   private async preloadResources(job: FrameJob): Promise<void> {
     // Evaluate scene to discover required resources
     const scene = evaluateTimelineSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch, this.transitions);
+
+    // FIX (BUG-8): Cache scene on the job so processJob and preloadFonts
+    // don't need to call evaluateTimelineSceneCached again
+    job.cachedScene = scene;
 
     const resourceCache = getResourceCache();
     const loadPromises: Promise<void>[] = [];
@@ -735,7 +743,7 @@ export class FrameScheduler {
 
             // If the video is currently seeking or hasn't loaded enough data yet, wait for it!
             if (video.seeking || video.readyState < 2) {
-              const waitPromise = new Promise<void>((resolve) => {
+              const waitPromise = new Promise<void>((resolve, reject) => {
                 let isResolved = false;
                 const onReady = () => {
                   if (isResolved) return;
@@ -766,11 +774,32 @@ export class FrameScheduler {
                 video.addEventListener("error", onReady, { once: true });
                 job.abortController.signal.addEventListener("abort", onReady, { once: true });
 
-                // Safety timeout: don't wait forever. If media events don't fire within 500ms,
-                // resolve so rasterizer can proceed with available frames (prevents blank frames).
+                // FIX (BUG-1): Extended timeout from 500ms to 3000ms and added
+                // readyState check. The old 500ms timeout silently resolved even when
+                // the video frame wasn't ready, causing the rasterizer to draw a dark
+                // placeholder (#0a0a0a) — the root cause of the blinking export.
+                // Now we wait longer and only resolve if readyState >= 2 (HAVE_CURRENT_DATA).
                 timeoutId = setTimeout(() => {
-                  onReady();
-                }, 500);
+                  if (isResolved) return;
+                  if (video.readyState >= 2) {
+                    // Frame data is available despite no event firing — safe to proceed
+                    onReady();
+                  } else {
+                    // Frame genuinely not ready after extended wait — reject so the
+                    // export pipeline can handle it (retry or abort) instead of
+                    // silently rendering a black frame
+                    isResolved = true;
+                    cleanup();
+                    console.error(
+                      `[FrameScheduler] Video frame not ready after 3s timeout. ` +
+                      `readyState=${video.readyState}, seeking=${video.seeking}, ` +
+                      `src=${video.src?.slice(-40)}`
+                    );
+                    reject(new Error(
+                      `Video frame not ready after timeout (readyState=${video.readyState})`
+                    ));
+                  }
+                }, 3000);
               });
               loadPromises.push(waitPromise);
             }
@@ -837,10 +866,11 @@ export class FrameScheduler {
   /**
    * Pre-load fonts for text layers.
    * Ensures deterministic font availability before rendering.
+   * FIX (BUG-8): Reuses cached scene from preloadResources instead of re-evaluating.
    */
   private async preloadFonts(job: FrameJob): Promise<void> {
-    // Evaluate scene to discover required fonts
-    const scene = evaluateTimelineSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch, this.transitions);
+    // FIX (BUG-8): Use cached scene from preloadResources instead of evaluating again
+    const scene = job.cachedScene ?? evaluateTimelineSceneCached(job.request.time, this.clips, this.tracks, this.assets, this.project, this.epoch, this.transitions);
 
     const fontLoader = getFontLoader();
     const fontDescriptors = [];
