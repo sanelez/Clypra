@@ -108,6 +108,7 @@ export interface RustClip {
   sourceAspectRatio?: number;
   style_definition?: any;
   fitMode?: "contain" | "cover" | "fill" | "stretch" | "original";
+  conform?: import("@clypra/engine").ClipConform;
   volume?: number;
   kind?: string;
 }
@@ -234,6 +235,25 @@ export function fromRustClip(rust: RustClip): Clip {
     }
   }
 
+  // Professional Conform System migration: construct default conform from legacy fitMode
+  let conform = rust.conform;
+  if (!conform && kind !== "audio" && kind !== "text" && kind !== "filter" && kind !== "video-effect" && kind !== "body-effect") {
+    let mode: "fit" | "fill" | "none" = "fit";
+    if (rust.fitMode === "cover") {
+      mode = "fill";
+    } else if (rust.fitMode === "original") {
+      mode = "none";
+    }
+    conform = {
+      mode,
+      sourceWidth: rust.width || 0,
+      sourceHeight: rust.height || 0,
+      userScale: 1,
+      userOffsetX: 0,
+      userOffsetY: 0,
+    };
+  }
+
   // Base clip properties
   const baseClip: Clip = {
     id: rust.id,
@@ -253,6 +273,7 @@ export function fromRustClip(rust: RustClip): Clip {
     aspectRatioLocked: rust.aspectRatioLocked,
     sourceAspectRatio: rust.sourceAspectRatio,
     fitMode: rust.fitMode,
+    conform,
     volume: rust.volume,
   };
 
