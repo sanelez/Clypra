@@ -38,6 +38,12 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+    fs: {
+      allow: [
+        path.resolve(__dirname, "."),
+        path.resolve(__dirname, "../clypra-studio/packages/clypra-engine"),
+      ],
+    },
   },
 
   // Vitest configuration
