@@ -63,14 +63,9 @@ export const TextSourcePreview: React.FC<TextSourcePreviewProps> = ({ preset }) 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mountedRef = useRef(true);
 
-  console.log("[TextSourcePreview] Component render", {
-    hasPreset: !!preset,
-    presetId: (preset as any)?.id,
-    presetName: (preset as any)?.name,
-  });
+
 
   const setCanvasRef = useCallback((node: HTMLCanvasElement | null) => {
-    console.log("[TextSourcePreview] Canvas ref callback", { hasNode: !!node });
     (canvasRef as { current: HTMLCanvasElement | null }).current = node;
     if (node) {
       // Get device pixel ratio for high-DPI displays
@@ -85,21 +80,13 @@ export const TextSourcePreview: React.FC<TextSourcePreviewProps> = ({ preset }) 
       node.width = PREVIEW_CANVAS_W;
       node.height = PREVIEW_CANVAS_H;
 
-      console.log("[TextSourcePreview] Canvas setup", {
-        logicalWidth: PREVIEW_CANVAS_W,
-        logicalHeight: PREVIEW_CANVAS_H,
-        bufferWidth: node.width,
-        bufferHeight: node.height,
-        dpr,
-      });
+
     }
   }, []);
 
   useEffect(() => {
-    console.log("[TextSourcePreview] Mount effect");
     mountedRef.current = true;
     return () => {
-      console.log("[TextSourcePreview] Unmount effect");
       mountedRef.current = false;
     };
   }, []);
@@ -107,56 +94,17 @@ export const TextSourcePreview: React.FC<TextSourcePreviewProps> = ({ preset }) 
   const isTemplate = preset?.presetType === "template" || !!(preset as any)?.templateData || !!(preset as any)?.lottieData;
   const isEffect = !isTemplate && (preset?.presetType === "effect" || !!(preset as any)?.fontFamily);
 
-  console.log("[TextSourcePreview] Type check", { isTemplate, isEffect });
+
 
   useEffect(() => {
-    console.log("[TextSourcePreview] Render effect", {
-      hasCanvas: !!canvasRef.current,
-      isEffect,
-      hasPreset: !!preset,
-    });
-
     const canvas = canvasRef.current;
     if (!canvas || !isEffect || !preset) {
-      console.log("[TextSourcePreview] Skipping render - requirements not met");
       return;
     }
 
-    console.log("[TextSourcePreview] Starting render process");
     let aborted = false;
 
     const effectConfig = resolveTextSourcePreviewConfig(preset);
-
-    console.log("[TextSourcePreview] 🎨 Rendering preview using config:", effectConfig);
-
-    console.log("[TextSourcePreview] Raw preset fontFamily:", (preset as any).fontFamily);
-    console.log("[TextSourcePreview] Full preset keys:", Object.keys(preset as any).slice(0, 15));
-    console.log("[TextSourcePreview] Canvas dimensions from preset:", {
-      canvasWidth: (preset as any).canvasWidth,
-      canvasHeight: (preset as any).canvasHeight,
-      fontSize: (preset as any).fontSize,
-    });
-    console.log(
-      "[TextSourcePreview] Glow layers:",
-      (preset as any).glowLayers?.map((g: any) => ({
-        enabled: g.enabled,
-        blur: g.blur,
-        spread: g.spread,
-        color: g.color,
-        type: g.type,
-      })),
-    );
-
-    console.log("[TextSourcePreview] Config check:", {
-      hasFontFamily: !!effectConfig.fontFamily,
-      hasEffectName: !!effectConfig.effectName,
-      hasGlowLayers: Array.isArray(effectConfig.glowLayers),
-      fontFamily: effectConfig.fontFamily,
-      fontWeight: effectConfig.fontWeight,
-      fontStyle: effectConfig.fontStyle,
-      letterSpacing: effectConfig.letterSpacing,
-      lineHeight: effectConfig.lineHeight,
-    });
 
     async function start() {
       if (effectConfig.fontFamily) {
@@ -191,7 +139,6 @@ export const TextSourcePreview: React.FC<TextSourcePreviewProps> = ({ preset }) 
 
       try {
         renderTextEffectCore(ctx, effectConfig);
-        console.log("[TextSourcePreview] ✅ Rendered:", (effectConfig as any).id);
       } catch (error) {
         console.error("[TextSourcePreview] ❌ Error:", error);
         ctx.fillStyle = "#ff0000";
