@@ -22,6 +22,7 @@ import type { EvaluatedScene, EvaluatedVisualLayer, EvaluatedMediaLayer, Evaluat
 import { toCompositorClips } from "../timeline/adapter";
 import { getClipEndTime } from "@/lib/timeline/timelineClip";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { resolveConform } from "@clypra/engine";
 
 const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
 import { getEvaluationCache, computeClipVersion, computeAssetsVersion } from "./cache";
@@ -117,10 +118,19 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
     const offset = evalTime - clip.startTime;
     const kf = (clip as any).keyframes || {};
 
-    const evalX = kf.x !== undefined ? evaluateProperty(kf.x, offset, clip.duration) : clip.x;
-    const evalY = kf.y !== undefined ? evaluateProperty(kf.y, offset, clip.duration) : clip.y;
-    const evalW = kf.width !== undefined ? evaluateProperty(kf.width, offset, clip.duration) : clip.width;
-    const evalH = kf.height !== undefined ? evaluateProperty(kf.height, offset, clip.duration) : clip.height;
+    let evalX = kf.x !== undefined ? evaluateProperty(kf.x, offset, clip.duration) : clip.x;
+    let evalY = kf.y !== undefined ? evaluateProperty(kf.y, offset, clip.duration) : clip.y;
+    let evalW = kf.width !== undefined ? evaluateProperty(kf.width, offset, clip.duration) : clip.width;
+    let evalH = kf.height !== undefined ? evaluateProperty(kf.height, offset, clip.duration) : clip.height;
+
+    if (clip.conform && clip.conform.sourceWidth && clip.conform.sourceHeight) {
+      const conformed = resolveConform(clip.conform, project?.canvasWidth ?? 1920, project?.canvasHeight ?? 1080);
+      evalX = conformed.x;
+      evalY = conformed.y;
+      evalW = conformed.width;
+      evalH = conformed.height;
+    }
+
     const evalRot = kf.rotation !== undefined ? evaluateProperty(kf.rotation, offset, clip.duration) : clip.rotation;
     const evalOpacity = kf.opacity !== undefined ? evaluateProperty(kf.opacity, offset, clip.duration) : clip.opacity;
 
@@ -247,6 +257,7 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
       posterFrame: asset.posterFrame,
       sourceTime,
       sourceRotation: asset.rotation,
+      conform: (clip as any).conform,
       x: evalX,
       y: evalY,
       width: evalW,
