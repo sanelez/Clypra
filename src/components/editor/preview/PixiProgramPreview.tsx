@@ -5,7 +5,6 @@ import { useProjectStore } from "@/store/projectStore";
 import { useTimelineStore } from "@/store/timelineStore";
 import { useUIStore } from "@/store/uiStore";
 import { useSettingsStore } from "@/store/settingsStore";
-import { isTauri as isTauriRuntime } from "@/core/platform/platform";
 import { getActiveSessionOrNull } from "@/core/runtime/ProjectSession";
 import { getTransformController } from "@/core/interactions";
 import { useViewportState } from "@/hooks/useViewportController";
@@ -20,9 +19,8 @@ import { AspectRatio } from "@/types";
 import { formatTime } from "@/lib/utils/timeFormatting";
 import { refitClipsForCanvasChange } from "@/lib/timeline/refitClips";
 import { getPreviewMediaSyncClips } from "./previewMediaSync";
-import { resolveClipSourceTime } from "@/core/timeline/sourceTime";
 
-import { TelemetryOverlay, type TelemetryStats } from "./TelemetryOverlay";
+import { type TelemetryStats } from "./TelemetryOverlay";
 import { AspectSelector } from "./AspectSelector";
 import { PlaybackSpeedSelector } from "./PlaybackSpeedSelector";
 import { PlaybackQualitySelector } from "./PlaybackQualitySelector";
@@ -39,6 +37,8 @@ const CANVAS_DIMENSIONS: Record<Exclude<AspectRatio, "original">, { width: numbe
 };
 
 export const PixiProgramPreview: React.FC = () => {
+  console.info("[PreviewLifecycle] PixiProgramPreview mounted");
+
   const project = useProjectStore((s) => s.project);
   const updateProject = useProjectStore((s) => s.updateProject);
   const mediaAssets = useProjectStore((s) => s.mediaAssets);
@@ -47,6 +47,13 @@ export const PixiProgramPreview: React.FC = () => {
   const transitions = useTimelineStore((s) => s.transitions);
   const epoch = useTimelineStore((s) => s.epoch);
   const clearSelection = useUIStore((s) => s.clearSelection);
+
+  // Unmount detection
+  useEffect(() => {
+    return () => {
+      console.info("[PreviewLifecycle] PixiProgramPreview unmounted");
+    };
+  }, []);
 
   const viewport = useViewportState();
 
@@ -69,6 +76,7 @@ export const PixiProgramPreview: React.FC = () => {
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [showSafeOverlay, setShowSafeOverlay] = useState(false);
   const [telemetryStats, setTelemetryStats] = useState<TelemetryStats | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
 
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
@@ -279,33 +287,94 @@ export const PixiProgramPreview: React.FC = () => {
   }, [project, canvasWidth, canvasHeight, displayWidth, displayHeight]);
 
   // ── Initialize PixiSceneCompositor ──────────────────────────────
+  // Check session readiness and trigger compositor init
   useEffect(() => {
-    if (!canvasEl || !project) return;
+    const session = getActiveSessionOrNull();
+    const mediaPool = session?.getPreviewMediaPool();
+    const isReady = !!(session && session.state === "active" && mediaPool);
 
-    const backingW = Math.round(displayWidth);
-    const backingH = Math.round(displayHeight);
+    if (isReady !== sessionReady) {
+      setSessionReady(isReady);
+      console.info("[PreviewLifecycle] session-ready changed", { isReady });
+    }
+  }, [project, sessionReady]);
+
+  // Compositor initialization (canvas/project identity changes only)
+  useEffect(() => {
+    console.info("[PreviewLifecycle] compositor-init effect running", {
+      canvasEl: !!canvasEl,
+      canvasConnected: canvasEl?.isConnected,
+      project: !!project,
+      projectId: project?.id,
+      compositorExists: !!compositorRef.current,
+      sessionReady,
+    });
+
+    if (!canvasEl || !project || !sessionReady) return;
+
+    // Skip if compositor already initialized
+    if (compositorRef.current) return;
 
     const session = getActiveSessionOrNull();
     const mediaPool = session?.getPreviewMediaPool();
 
+    console.info("[PreviewLifecycle] compositor-init checking session", {
+      sessionExists: !!session,
+      sessionState: session?.state,
+      mediaPoolExists: !!mediaPool,
+    });
+
     if (!mediaPool) {
-      console.error("[PixiProgramPreview] Cannot initialize compositor: PreviewMediaPool not available");
+      // Session/pool not ready yet - should not happen since sessionReady=true
+      console.warn("[PreviewLifecycle] compositor-init: sessionReady=true but mediaPool is null");
       return;
     }
 
+    const backingW = Math.round(displayWidth);
+    const backingH = Math.round(displayHeight);
+
     try {
       compositorRef.current = new PixiSceneCompositor(canvasEl, backingW, backingH, mediaPool);
+      console.info("[PreviewLifecycle] compositor:create", {
+        projectId: project.id,
+        projectName: project.name,
+        canvasConnected: canvasEl.isConnected,
+        dimensions: `${backingW}x${backingH}`,
+      });
     } catch (err) {
       console.error("[PixiProgramPreview] Failed to initialize WebGL Compositor:", err);
     }
 
     return () => {
       if (compositorRef.current) {
+        console.info("[PreviewLifecycle] compositor:destroy", {
+          projectId: project.id,
+          reason: "effect-cleanup",
+        });
         compositorRef.current.destroy();
         compositorRef.current = null;
       }
     };
-  }, [canvasEl, project?.id]);
+  }, [canvasEl, project?.id, sessionReady]);
+
+  // Compositor resize (dimensions change only)
+  useEffect(() => {
+    if (!compositorRef.current) return;
+
+    const backingW = Math.round(displayWidth);
+    const backingH = Math.round(displayHeight);
+
+    try {
+      compositorRef.current.resize(backingW, backingH);
+      console.info("[PreviewLifecycle] compositor:resize", {
+        width: backingW,
+        height: backingH,
+        dpr: window.devicePixelRatio,
+      });
+    } catch (err) {
+      console.error("[PixiProgramPreview] Failed to resize compositor:", err);
+    }
+  }, [displayWidth, displayHeight]);
 
   // ── Render loop ──────────────────────────────────────────────────
   useEffect(() => {
@@ -367,6 +436,7 @@ export const PixiProgramPreview: React.FC = () => {
           if (videoClips.length > 0) {
             let hasAnyVideoElement = false;
             let hasReadyVideo = false;
+            const videoStates = [];
 
             for (const clip of videoClips) {
               const key = `${clip.id}-${clip.mediaId}`;
@@ -374,6 +444,14 @@ export const PixiProgramPreview: React.FC = () => {
 
               if (element) {
                 hasAnyVideoElement = true;
+                videoStates.push({
+                  clipId: clip.id.slice(0, 8),
+                  readyState: element.readyState,
+                  currentTime: element.currentTime,
+                  paused: element.paused,
+                  seeking: element.seeking,
+                });
+
                 if (element.readyState > 2) {
                   hasReadyVideo = true;
                   break;
@@ -382,6 +460,13 @@ export const PixiProgramPreview: React.FC = () => {
             }
 
             waitingForVideoReady = hasAnyVideoElement && !hasReadyVideo;
+
+            if (waitingForVideoReady) {
+              console.warn("[PreviewLifecycle] first-frame:waiting", {
+                videoClips: videoClips.length,
+                videoStates,
+              });
+            }
           }
         }
       }
@@ -417,6 +502,14 @@ export const PixiProgramPreview: React.FC = () => {
           lastRenderedTime = timeToRenderRounded;
           lastRenderedEpoch = state.epoch;
           lastRenderedPlaybackState = playbackState;
+
+          if (isFirstFrame) {
+            console.info("[PreviewLifecycle] first-frame:rendered", {
+              time: timeToRenderRounded,
+              videoLayers: scene.visualLayers.filter((l: any) => l.kind === "video").length,
+              totalLayers: scene.visualLayers.length,
+            });
+          }
 
           if (state.clock.isSeeking) {
             state.clock.completeSeek();
