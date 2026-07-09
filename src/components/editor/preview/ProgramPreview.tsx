@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { SimpleProgramPreview } from "./SimpleProgramPreview.jsx";
 import { ComplexProgramPreview } from "./ComplexProgramPreview.jsx";
 import { PixiProgramPreview } from "./PixiProgramPreview.jsx";
 import { DEV_PREVIEW_MODE, PRODUCTION_PREVIEW_MODE, type PreviewMode } from "./previewMode.js";
@@ -33,13 +32,6 @@ export const ProgramPreview: React.FC<any> = (props) => {
   };
 
   switch (previewMode) {
-    case "simple":
-      return (
-        <PreviewErrorBoundary fallback={<ComplexProgramPreview {...props} />} onError={handleWebGLFailure}>
-          <SimpleProgramPreview {...props} />
-        </PreviewErrorBoundary>
-      );
-
     case "complex-pixi":
       return (
         <PreviewErrorBoundary fallback={<ComplexProgramPreview {...props} />} onError={handleWebGLFailure}>
