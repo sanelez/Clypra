@@ -56,7 +56,7 @@ export interface ResetOptions {
   resetTransform?: boolean;
   /** Reset performance monitors */
   resetMonitoring?: boolean;
-  /** Flush GPU texture cache (FINDING-009 / CONTAMINATION-004) */
+  /** Flush GPU texture cache */
   resetGPUCache?: boolean;
 }
 
@@ -96,8 +96,6 @@ export async function resetAllProjectState(options: ResetOptions = {}): Promise<
   const errors: Array<{ subsystem: string; error: Error }> = [];
   const resetSubsystems: string[] = [];
 
-  console.log("🔄 [PROJECT RESET] Starting complete state reset...");
-
   // ═══════════════════════════════════════════════════════════════════════════════
   // PHASE 1: Stop Active Operations
   // ═══════════════════════════════════════════════════════════════════════════════
@@ -108,7 +106,6 @@ export async function resetAllProjectState(options: ResetOptions = {}): Promise<
       resetPlaybackClock();
 
       resetSubsystems.push("PlaybackClock");
-      console.log("  ✅ PlaybackClock reset (fully recreated)");
     } catch (error) {
       errors.push({ subsystem: "PlaybackClock", error: error as Error });
       console.error("  ❌ PlaybackClock reset failed:", error);
@@ -121,7 +118,6 @@ export async function resetAllProjectState(options: ResetOptions = {}): Promise<
       resetFrameScheduler();
 
       resetSubsystems.push("FrameScheduler");
-      console.log("  ✅ FrameScheduler reset (fully recreated)");
     } catch (error) {
       errors.push({ subsystem: "FrameScheduler", error: error as Error });
       console.error("  ❌ FrameScheduler reset failed:", error);
@@ -140,25 +136,23 @@ export async function resetAllProjectState(options: ResetOptions = {}): Promise<
       useDragStateStore.getState().clearDragging();
 
       resetSubsystems.push("DragStateStore");
-      console.log("  ✅ DragStateStore reset");
     } catch (error) {
       errors.push({ subsystem: "DragStateStore", error: error as Error });
       console.error("  ❌ DragStateStore reset failed:", error);
     }
   }
 
-    // Reset auto-save middleware suspension (BUG-006 fix)
-    // If a project was closed mid-drag, _suspended may be permanently true
-    try {
-      const { resumeAutoSave } = await import("@/store/middleware/autoSaveMiddleware");
-      resumeAutoSave();
+  // Reset auto-save middleware suspension (BUG-006 fix)
+  // If a project was closed mid-drag, _suspended may be permanently true
+  try {
+    const { resumeAutoSave } = await import("@/store/middleware/autoSaveMiddleware");
+    resumeAutoSave();
 
-      resetSubsystems.push("AutoSaveMiddleware");
-      console.log("  ✅ AutoSaveMiddleware suspension reset");
-    } catch (error) {
-      errors.push({ subsystem: "AutoSaveMiddleware", error: error as Error });
-      console.error("  ❌ AutoSaveMiddleware reset failed:", error);
-    }
+    resetSubsystems.push("AutoSaveMiddleware");
+  } catch (error) {
+    errors.push({ subsystem: "AutoSaveMiddleware", error: error as Error });
+    console.error("  ❌ AutoSaveMiddleware reset failed:", error);
+  }
 
   if (opts.resetTransform) {
     try {
@@ -166,7 +160,6 @@ export async function resetAllProjectState(options: ResetOptions = {}): Promise<
       resetTransformController();
 
       resetSubsystems.push("TransformController");
-      console.log("  ✅ TransformController reset (fully recreated)");
     } catch (error) {
       errors.push({ subsystem: "TransformController", error: error as Error });
       console.error("  ❌ TransformController reset failed:", error);
@@ -199,7 +192,6 @@ export async function resetAllProjectState(options: ResetOptions = {}): Promise<
       });
 
       resetSubsystems.push("UIStore");
-      console.log("  ✅ UIStore reset");
     } catch (error) {
       errors.push({ subsystem: "UIStore", error: error as Error });
       console.error("  ❌ UIStore reset failed:", error);
@@ -212,7 +204,6 @@ export async function resetAllProjectState(options: ResetOptions = {}): Promise<
       resetViewportController();
 
       resetSubsystems.push("ViewportController");
-      console.log("  ✅ ViewportController reset (fully recreated)");
     } catch (error) {
       errors.push({ subsystem: "ViewportController", error: error as Error });
       console.error("  ❌ ViewportController reset failed:", error);
@@ -231,7 +222,6 @@ export async function resetAllProjectState(options: ResetOptions = {}): Promise<
       useHistoryStore.getState().clear();
 
       resetSubsystems.push("HistoryStore");
-      console.log("  ✅ HistoryStore reset (undo/redo cleared)");
     } catch (error) {
       errors.push({ subsystem: "HistoryStore", error: error as Error });
       console.error("  ❌ HistoryStore reset failed:", error);
@@ -247,88 +237,96 @@ export async function resetAllProjectState(options: ResetOptions = {}): Promise<
 
   await Promise.all([
     // TemplateStore (SC-BUG-002 fix)
-    import("@/features/text-templates/templateStore").then(({ useTemplateStore }) => {
-      useTemplateStore.getState().reset();
-      resetSubsystems.push("TemplateStore");
-      console.log("  ✅ TemplateStore reset");
-    }).catch((error) => {
-      errors.push({ subsystem: "TemplateStore", error: error as Error });
-      console.error("  ❌ TemplateStore reset failed:", error);
-    }),
+    import("@/features/text-templates/templateStore")
+      .then(({ useTemplateStore }) => {
+        useTemplateStore.getState().reset();
+        resetSubsystems.push("TemplateStore");
+      })
+      .catch((error) => {
+        errors.push({ subsystem: "TemplateStore", error: error as Error });
+        console.error("  ❌ TemplateStore reset failed:", error);
+      }),
 
     // FavoritesStore (SC-HIDDEN-002 / Q2 fix)
-    import("@/store/favoritesStore").then(({ useFavoritesStore }) => {
-      useFavoritesStore.setState({ downloadingIds: [] });
-      resetSubsystems.push("FavoritesStore");
-      console.log("  ✅ FavoritesStore active downloads reset");
-    }).catch((error) => {
-      errors.push({ subsystem: "FavoritesStore", error: error as Error });
-      console.error("  ❌ FavoritesStore reset failed:", error);
-    }),
+    import("@/store/favoritesStore")
+      .then(({ useFavoritesStore }) => {
+        useFavoritesStore.setState({ downloadingIds: [] });
+        resetSubsystems.push("FavoritesStore");
+      })
+      .catch((error) => {
+        errors.push({ subsystem: "FavoritesStore", error: error as Error });
+        console.error("  ❌ FavoritesStore reset failed:", error);
+      }),
 
     // PerformanceMonitor + previewMediaSync filter cache
     opts.resetMonitoring
-      ? import("@/components/editor/preview/previewMediaSync").then(({ clearClipFilterCache }) => {
-          performanceMonitor.reset();
-          clearClipFilterCache();
-          resetSubsystems.push("PerformanceMonitor");
-          console.log("  ✅ PerformanceMonitor reset");
-        }).catch((error) => {
-          errors.push({ subsystem: "PerformanceMonitor", error: error as Error });
-          console.error("  ❌ PerformanceMonitor reset failed:", error);
-        })
+      ? import("@/components/editor/preview/previewMediaSync")
+          .then(({ clearClipFilterCache }) => {
+            performanceMonitor.reset();
+            clearClipFilterCache();
+            resetSubsystems.push("PerformanceMonitor");
+          })
+          .catch((error) => {
+            errors.push({ subsystem: "PerformanceMonitor", error: error as Error });
+            console.error("  ❌ PerformanceMonitor reset failed:", error);
+          })
       : Promise.resolve(),
 
     // ResourceCache (BUG-003 fix)
-    import("../resources/ResourceCache").then(({ resetResourceCache }) => {
-      resetResourceCache();
-      resetSubsystems.push("ResourceCache");
-      console.log("  ✅ ResourceCache reset (ImageBitmaps released)");
-    }).catch((error) => {
-      errors.push({ subsystem: "ResourceCache", error: error as Error });
-      console.error("  ❌ ResourceCache reset failed:", error);
-    }),
+    import("../resources/ResourceCache")
+      .then(({ resetResourceCache }) => {
+        resetResourceCache();
+        resetSubsystems.push("ResourceCache");
+      })
+      .catch((error) => {
+        errors.push({ subsystem: "ResourceCache", error: error as Error });
+        console.error("  ❌ ResourceCache reset failed:", error);
+      }),
 
     // BodyMaskCache (SC-BUG-004 fix)
-    import("@/features/body-effects/segmentation/maskCache").then(({ bodyMaskCache }) => {
-      bodyMaskCache.clear();
-      resetSubsystems.push("BodyMaskCache");
-      console.log("  ✅ BodyMaskCache cleared");
-    }).catch((error) => {
-      errors.push({ subsystem: "BodyMaskCache", error: error as Error });
-      console.error("  ❌ BodyMaskCache clear failed:", error);
-    }),
+    import("@/features/body-effects/segmentation/maskCache")
+      .then(({ bodyMaskCache }) => {
+        bodyMaskCache.clear();
+        resetSubsystems.push("BodyMaskCache");
+      })
+      .catch((error) => {
+        errors.push({ subsystem: "BodyMaskCache", error: error as Error });
+        console.error("  ❌ BodyMaskCache clear failed:", error);
+      }),
 
     // EvaluationCache (PREV-BUG-002 fix) — prevents cross-project scene contamination
-    import("../evaluation/evaluator").then(({ clearEvaluationCache }) => {
-      clearEvaluationCache();
-      resetSubsystems.push("EvaluationCache");
-      console.log("  ✅ EvaluationCache cleared (prevents cross-project scene contamination)");
-    }).catch((error) => {
-      errors.push({ subsystem: "EvaluationCache", error: error as Error });
-      console.error("  ❌ EvaluationCache clear failed:", error);
-    }),
+    import("../evaluation/evaluator")
+      .then(({ clearEvaluationCache }) => {
+        clearEvaluationCache();
+        resetSubsystems.push("EvaluationCache");
+      })
+      .catch((error) => {
+        errors.push({ subsystem: "EvaluationCache", error: error as Error });
+        console.error("  ❌ EvaluationCache clear failed:", error);
+      }),
 
     // LottieRenderCache (PREV-BUG-003 fix) — hidden DOM containers leak across projects
-    import("../render/rasterizer").then(({ clearLottieRenderCache }) => {
-      clearLottieRenderCache();
-      resetSubsystems.push("LottieRenderCache");
-      console.log("  ✅ LottieRenderCache cleared (DOM nodes released)");
-    }).catch((error) => {
-      errors.push({ subsystem: "LottieRenderCache", error: error as Error });
-      console.error("  ❌ LottieRenderCache clear failed:", error);
-    }),
+    import("../render/rasterizer")
+      .then(({ clearLottieRenderCache }) => {
+        clearLottieRenderCache();
+        resetSubsystems.push("LottieRenderCache");
+      })
+      .catch((error) => {
+        errors.push({ subsystem: "LottieRenderCache", error: error as Error });
+        console.error("  ❌ LottieRenderCache clear failed:", error);
+      }),
 
-    // GlobalGPUCache (FINDING-009 / CONTAMINATION-004)
+    // GlobalGPUCache
     opts.resetGPUCache
-      ? import("@/lib/cache/globalGPUCache").then(({ globalGPUCache }) => {
-          const evicted = globalGPUCache.clearAllTextures();
-          resetSubsystems.push("GlobalGPUCache");
-          console.log(`  ✅ GlobalGPUCache flushed (${evicted} textures evicted)`);
-        }).catch((error) => {
-          errors.push({ subsystem: "GlobalGPUCache", error: error as Error });
-          console.error("  ❌ GlobalGPUCache flush failed:", error);
-        })
+      ? import("@/lib/cache/globalGPUCache")
+          .then(({ globalGPUCache }) => {
+            const evicted = globalGPUCache.clearAllTextures();
+            resetSubsystems.push("GlobalGPUCache");
+          })
+          .catch((error) => {
+            errors.push({ subsystem: "GlobalGPUCache", error: error as Error });
+            console.error("  ❌ GlobalGPUCache flush failed:", error);
+          })
       : Promise.resolve(),
   ]);
 
@@ -339,7 +337,6 @@ export async function resetAllProjectState(options: ResetOptions = {}): Promise<
   const success = errors.length === 0;
 
   if (success) {
-    console.log(`✅ [PROJECT RESET] Complete! Reset ${resetSubsystems.length} subsystems`);
   } else {
     console.warn(`⚠️ [PROJECT RESET] Completed with ${errors.length} errors. Reset ${resetSubsystems.length} subsystems`);
     errors.forEach(({ subsystem, error }) => {

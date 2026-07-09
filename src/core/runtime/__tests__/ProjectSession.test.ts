@@ -7,11 +7,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 // Since ProjectSession has complex dependencies (stores, scheduler, etc.),
-// we'll create a minimal mock to test the state lifecycle which is what FINDING-025 is about
 
 /**
  * Mock ProjectSession for testing state transitions and disposal race conditions.
- * This focuses on the critical state property that FINDING-025 depends on.
  */
 class MockProjectSession {
   private _state: SessionState = "initializing";
@@ -74,7 +72,7 @@ class MockProjectSession {
   }
 }
 
-describe("ProjectSession — FINDING-025: Session State Guard", () => {
+describe("ProjectSession : Session State Guard", () => {
   let session: MockProjectSession;
 
   beforeEach(async () => {
@@ -137,7 +135,6 @@ describe("ProjectSession — FINDING-025: Session State Guard", () => {
   });
 
   it("should prevent 'Pool is disposed!' error by checking state before sync", async () => {
-    // This simulates the FINDING-025 race condition:
     // RAF loop calls syncPreviewMedia() while session is disposing
 
     const disposePromise = session.dispose();
@@ -308,7 +305,6 @@ describe("ProjectSession — FINDING-025: Session State Guard", () => {
       while (isRunning) {
         rafTicks++;
 
-        // With guard (FINDING-025 fix)
         if (session.state === "active") {
           try {
             session.syncPreviewMedia();
