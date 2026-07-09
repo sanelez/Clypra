@@ -492,6 +492,7 @@ export const ComplexProgramPreview: React.FC = () => {
       // Sync media elements first (before readiness check)
       if (needsSync) {
         if (session && session.state === "active") {
+          console.log(`[ComplexProgramPreview] Syncing preview media at time = ${timeToRenderRounded.toFixed(3)}s. Reason: epochChanged=${epochChanged}, playbackStateChanged=${playbackStateChanged}, isFirstFrame=${isFirstFrame}, isPlaying=${isPlaying}`);
           try {
             session.syncPreviewMedia(getPreviewMediaSyncClips(state.clips, timeToRenderRounded), state.mediaAssets, state.tracks, {
               time: timeToRenderRounded,
