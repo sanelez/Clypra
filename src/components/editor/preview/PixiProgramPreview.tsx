@@ -101,7 +101,7 @@ export const PixiProgramPreview: React.FC = () => {
   const showTelemetryRef = useRef(showTelemetry);
   const droppedFramesRef = useRef(0);
   const maxDriftRef = useRef(0);
-  const originalCanvasDimsRef = useRef<{ width: number; height: number } | null>(null);
+  const originalCanvasDimsRef = useRef<{ projectId: string; width: number; height: number } | null>(null);
   const prevDurationRef = useRef<number>(0);
   const prevFrameRateRef = useRef<number>(0);
   const isMutedRef = useRef(isMuted);
@@ -124,6 +124,11 @@ export const PixiProgramPreview: React.FC = () => {
     canvasHeight: project?.canvasHeight ?? 1080,
     displayWidth: 0,
     displayHeight: 0,
+    // Bug 3 fix: viewport transform values live in the ref so the render loop
+    // can read fresh values without these triggering an effect restart on pan/zoom.
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
     dpr: window.devicePixelRatio || 1,
     previewQuality,
   });
@@ -157,6 +162,11 @@ export const PixiProgramPreview: React.FC = () => {
   renderStateRef.current.displayHeight = displayHeight;
   renderStateRef.current.canvasWidth = canvasWidth;
   renderStateRef.current.canvasHeight = canvasHeight;
+  // Bug 3 fix: keep viewport transform values in sync so the render loop reads
+  // them from the ref instead of from its closure (avoids stale values and loop restarts).
+  renderStateRef.current.scale = scale;
+  renderStateRef.current.offsetX = offsetX;
+  renderStateRef.current.offsetY = offsetY;
 
   const handlePreviewPointerDownCapture = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -200,9 +210,13 @@ export const PixiProgramPreview: React.FC = () => {
     [project, updateProject],
   );
 
+  // Bug 1 fix: guard on projectId instead of truthiness so the ref is always
+  // refreshed when the user switches to a different project without unmounting.
   useEffect(() => {
-    if (project && !originalCanvasDimsRef.current) {
+    if (!project) return;
+    if (originalCanvasDimsRef.current?.projectId !== project.id) {
       originalCanvasDimsRef.current = {
+        projectId: project.id,
         width: project.canvasWidth,
         height: project.canvasHeight,
       };
@@ -212,12 +226,14 @@ export const PixiProgramPreview: React.FC = () => {
   useEffect(() => {
     if (!project || !originalCanvasDimsRef.current) return;
     if (project.aspectRatio === "original") {
+      // Bug 1 fix: include projectId so the stored value is always project-scoped.
       originalCanvasDimsRef.current = {
+        projectId: project.id,
         width: project.canvasWidth,
         height: project.canvasHeight,
       };
     }
-  }, [project?.canvasWidth, project?.canvasHeight, project?.aspectRatio]);
+  }, [project?.canvasWidth, project?.canvasHeight, project?.aspectRatio, project?.id]);
 
   useEffect(() => {
     if (project?.aspectRatio) {
@@ -241,7 +257,9 @@ export const PixiProgramPreview: React.FC = () => {
       setFrameRate(newFrameRate);
       prevFrameRateRef.current = newFrameRate;
     }
-  }, [project, clips, setDuration, setFrameRate]);
+  // Bug 6 fix: narrow from the full `project` object (unstable reference) to only the
+  // specific fields this effect actually reads, preventing spurious re-runs every render.
+  }, [project?.id, project?.frameRate, clips, setDuration, setFrameRate]);
 
   // Sync aspect / size ResizeObserver
   useEffect(() => {
@@ -284,7 +302,9 @@ export const PixiProgramPreview: React.FC = () => {
     } else {
       qualityManagerRef.current.updateViewport(Math.floor(displayWidth), Math.floor(displayHeight), dprVal);
     }
-  }, [project, canvasWidth, canvasHeight, displayWidth, displayHeight]);
+  // Bug 6 fix: `canvasWidth`/`canvasHeight` already encode the project canvas dimensions;
+  // `project?.id` covers project-switch; no need for the full unstable `project` object.
+  }, [project?.id, canvasWidth, canvasHeight, displayWidth, displayHeight]);
 
   // ── Initialize PixiSceneCompositor ──────────────────────────────
   // Check session readiness and trigger compositor init
@@ -386,6 +406,11 @@ export const PixiProgramPreview: React.FC = () => {
     let lastRenderedTime = -1;
     let lastRenderedEpoch = -1;
     let lastRenderedPlaybackState: "playing" | "paused" | "stopped" = "stopped";
+    // Tracks clip keys (id-mediaId) that have ever reported readyState > 2.
+    // Resets when this effect restarts (project switch, canvas remount).
+    // Used by the Bug 4 refinement to distinguish initial slow-load from mid-seek dips.
+    const everReadyClipKeys = new Set<string>();
+
 
     const renderLoop = async () => {
       if (!isActive) return;
@@ -427,65 +452,53 @@ export const PixiProgramPreview: React.FC = () => {
         }
       }
 
-      let waitingForVideoReady = false;
-      if (isFirstFrame) {
-        if (session) {
-          const videoElements = session.getPreviewVideoElements();
-          const videoClips = state.clips.filter((c) => c.kind === "video");
+      // Bug 4 refinement: distinguish "never been ready" (initial slow-load) from
+      // "temporarily not ready" (seeking after previous successful renders).
+      // We only force re-renders for clips that have NEVER reported readyState > 2.
+      // Clips that are merely seeking don't need forced re-renders — the compositor
+      // handles absent/seeking frames gracefully. Forcing on every seek with multiple
+      // stacked clips hammers composeFrame every RAF tick → GPU overload → hang.
+      if (session) {
+        const videoElements = session.getPreviewVideoElements();
+        const videoClips = state.clips.filter((c) => c.kind === "video");
 
-          if (videoClips.length > 0) {
-            let hasAnyVideoElement = false;
-            let hasReadyVideo = false;
-            const videoStates = [];
-
-            for (const clip of videoClips) {
-              const key = `${clip.id}-${clip.mediaId}`;
-              const element = videoElements.get(key);
-
-              if (element) {
-                hasAnyVideoElement = true;
-                videoStates.push({
-                  clipId: clip.id.slice(0, 8),
-                  readyState: element.readyState,
-                  currentTime: element.currentTime,
-                  paused: element.paused,
-                  seeking: element.seeking,
-                });
-
-                if (element.readyState > 2) {
-                  hasReadyVideo = true;
-                  break;
-                }
-              }
+        if (videoClips.length > 0) {
+          let hasNeverReadyClip = false;
+          for (const clip of videoClips) {
+            const key = `${clip.id}-${clip.mediaId}`;
+            const el = videoElements.get(key);
+            if (el && el.readyState > 2) {
+              // Clip has decoded data — record it and stop forcing re-renders for it
+              everReadyClipKeys.add(key);
+            } else if (!everReadyClipKeys.has(key)) {
+              // Clip has never been ready — keep scheduling re-renders until it is
+              hasNeverReadyClip = true;
             }
-
-            waitingForVideoReady = hasAnyVideoElement && !hasReadyVideo;
-
-            if (waitingForVideoReady) {
-              console.warn("[PreviewLifecycle] first-frame:waiting", {
-                videoClips: videoClips.length,
-                videoStates,
-              });
-            }
+            // else: clip has been ready before but is temporarily seeking — no action
           }
+          if (hasNeverReadyClip) forceRenderNeeded = true;
         }
       }
 
       const transformController = getTransformController();
       const hasActiveTransform = transformController.getActiveTransform() !== null;
 
-      const needsRender = (isPlaying || timeChanged || epochChanged || isFirstFrame || forceRenderNeeded || hasActiveTransform) && !waitingForVideoReady;
+      const needsRender = isPlaying || timeChanged || epochChanged || isFirstFrame || forceRenderNeeded || hasActiveTransform;
       if (needsRender && forceRenderNeeded) forceRenderNeeded = false;
 
       if (needsRender && compositorRef.current) {
         const canvasDpr = window.devicePixelRatio || 1;
+        // Bug 3 fix: read viewport transform values from renderStateRef rather than
+        // from the effect's closure. This lets scale/offsetX/offsetY/canvasWidth/
+        // canvasHeight change freely (pan, zoom, canvas resize) without causing the
+        // render loop effect to tear down and restart.
         const viewportParams = {
-          scale,
-          offsetX,
-          offsetY,
+          scale: state.scale,
+          offsetX: state.offsetX,
+          offsetY: state.offsetY,
           pixelRatio: canvasDpr,
-          projectWidth: canvasWidth,
-          projectHeight: canvasHeight,
+          projectWidth: state.canvasWidth,
+          projectHeight: state.canvasHeight,
         };
 
         const activeVideoElements = session?.getPreviewVideoElements() ?? new Map();
@@ -498,6 +511,11 @@ export const PixiProgramPreview: React.FC = () => {
             undefined, // resourceHandleMap (can be left undefined during preview)
             new Map(), // bodyMasks map (we call segmentBodyMask directly in compositor)
           );
+
+          // Bug 5 fix: guard against the compositor being destroyed while composeFrame
+          // was in-flight (e.g. rapid project switch, React Strict Mode remount).
+          // Without this, post-await code would write into a torn-down WebGL context.
+          if (!isActive) return;
 
           lastRenderedTime = timeToRenderRounded;
           lastRenderedEpoch = state.epoch;
@@ -532,7 +550,16 @@ export const PixiProgramPreview: React.FC = () => {
       unsubscribeClock();
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, [canvasEl, project, scale, offsetX, offsetY, canvasWidth, canvasHeight]);
+  // Bug 3 fix: viewport values (scale, offsetX, offsetY, canvasWidth, canvasHeight) are
+  // now read from renderStateRef inside the loop, so they are NOT listed as deps here.
+  // Bug 6 fix: project?.id instead of full project object (updateProject always creates
+  // a new reference, so `project` as a dep would restart the loop on every store write).
+  // sessionReady is required: the loop's early-return guard checks compositorRef.current,
+  // which is only set by the compositor-init effect (which also deps on sessionReady).
+  // Without sessionReady here the loop would return early on first run (no compositor yet)
+  // and never re-trigger after the compositor is created. React runs effects in source
+  // order so the compositor-init effect always fires before this one on the same dep change.
+  }, [canvasEl, project?.id, sessionReady]);
 
   useEffect(() => {
     setActiveContext("program");
