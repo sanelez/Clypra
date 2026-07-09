@@ -461,6 +461,7 @@ export interface TransformState {
     width: number;
     height: number;
     rotation: number;
+    conform?: any;
   };
   startMousePos: {
     x: number;
