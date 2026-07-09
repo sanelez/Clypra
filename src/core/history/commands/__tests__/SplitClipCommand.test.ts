@@ -42,7 +42,7 @@ describe("SplitClipCommand", () => {
       expect(newState.clips).toHaveLength(2);
       expect(newState.epoch).toBe(1);
 
-      // FINDING-012 FIX: Both splits should have NEW IDs (not original)
+      // Both splits should have NEW IDs (not original)
       const leftClipId = command.getLeftClipId();
       const rightClipId = command.getRightClipId();
       expect(leftClipId).not.toBeNull();
@@ -66,7 +66,7 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 5.0, 30, clip);
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
-      // FINDING-012 FIX: Left clip has new ID
+      // Left clip has new ID
       const leftClipId = command.getLeftClipId();
       const leftClip = newState.clips.find((c) => c.id === leftClipId);
 
@@ -86,7 +86,7 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 5.0, 30, clip);
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
-      // FINDING-012 FIX: Right clip has new ID
+      // Right clip has new ID
       const rightClipId = command.getRightClipId();
       const rightClip = newState.clips.find((c) => c.id === rightClipId);
 
@@ -111,7 +111,7 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 5.467, 30, clip);
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
-      // FINDING-012 FIX: Use getRightClipId() to find right clip
+      // Use getRightClipId() to find right clip
       const rightClipId = command.getRightClipId();
       const rightClip = newState.clips.find((c) => c.id === rightClipId);
 
@@ -131,7 +131,7 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 5.467, 30, clip);
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
-      // FINDING-012 FIX: Use getLeftClipId() and getRightClipId()
+      // Use getLeftClipId() and getRightClipId()
       const leftClipId = command.getLeftClipId();
       const rightClipId = command.getRightClipId();
       const leftClip = newState.clips.find((c) => c.id === leftClipId);
@@ -154,7 +154,7 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 3.0, 30, clip);
       const newState = command.apply({ clips: [clip], epoch: 0 });
 
-      // FINDING-012 FIX: Use getLeftClipId() and getRightClipId()
+      // Use getLeftClipId() and getRightClipId()
       const leftClipId = command.getLeftClipId();
       const rightClipId = command.getRightClipId();
       const leftClip = newState.clips.find((c) => c.id === leftClipId);
@@ -181,7 +181,7 @@ describe("SplitClipCommand", () => {
       const command = new SplitClipCommand("clip-1", 37.5, 30, middleClip);
       const newState = command.apply({ clips: [middleClip], epoch: 0 });
 
-      // FINDING-012 FIX: Use getLeftClipId() and getRightClipId()
+      // Use getLeftClipId() and getRightClipId()
       const leftClipId = command.getLeftClipId();
       const rightClipId = command.getRightClipId();
       const leftClip = newState.clips.find((c) => c.id === leftClipId);
@@ -323,7 +323,7 @@ describe("SplitClipCommand", () => {
     });
   });
 
-  describe("FINDING-012: Both splits get new IDs", () => {
+  describe("Both splits get new IDs", () => {
     it("generates new IDs for both left and right splits", () => {
       const clip = createTestClip({
         id: "original-clip",

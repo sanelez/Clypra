@@ -21,7 +21,7 @@ export class SplitClipCommand implements Command {
   readonly timestamp: number;
   readonly undoable: boolean = true;
 
-  // FINDING-012 FIX: Generate new IDs for BOTH splits (not just right)
+  // Generate new IDs for BOTH splits (not just right)
   private leftClipId: string | null = null;
   private rightClipId: string | null = null;
 
@@ -63,7 +63,7 @@ export class SplitClipCommand implements Command {
     // ✅ ASSERT: verify coherence (can remove in production)
     console.assert(Math.abs(rightTrimIn - leftTrimOut) < 0.001, `Split coherence violated: leftTrimOut=${leftTrimOut} rightTrimIn=${rightTrimIn}`);
 
-    // FINDING-012 FIX: Generate new IDs for BOTH splits
+    // Generate new IDs for BOTH splits
     // This prevents property confusion where effects/volume applied to wrong clip
     if (!this.leftClipId) {
       this.leftClipId = generateId("clip");
@@ -92,13 +92,13 @@ export class SplitClipCommand implements Command {
 
     return {
       ...state,
-      // FINDING-012 FIX: Remove original clip, add both new splits
+      // Remove original clip, add both new splits
       clips: [...state.clips.filter((c) => c.id !== this.clipId), leftClip, rightClip],
       epoch: state.epoch + 1, // ✅ Epoch increment inside command
     };
   }
 
-  // FINDING-012 FIX: Expose both new clip IDs
+  // Expose both new clip IDs
   getLeftClipId(): string | null {
     return this.leftClipId;
   }
@@ -114,7 +114,7 @@ export class SplitClipCommand implements Command {
   }
 
   invert(): Command {
-    // FINDING-012 FIX: Pass both clip IDs and the original splitTime to merge command
+    // Pass both clip IDs and the original splitTime to merge command
     return new MergeSplitClipsCommand(this.leftClipId!, this.rightClipId!, this.originalClip, this.frameRate, this.splitTime);
   }
 
@@ -125,7 +125,7 @@ export class SplitClipCommand implements Command {
       splitTime: this.splitTime,
       frameRate: this.frameRate,
       originalClip: this.originalClip,
-      // FINDING-012 FIX: Serialize both new IDs
+      // Serialize both new IDs
       leftClipId: this.leftClipId,
       rightClipId: this.rightClipId,
       // Keep newClipId for backward compatibility with old saved projects
@@ -136,7 +136,7 @@ export class SplitClipCommand implements Command {
   static fromJSON(data: Record<string, any>): SplitClipCommand {
     const cmd = new SplitClipCommand(data.clipId, data.splitTime, data.frameRate || 30, data.originalClip);
 
-    // FINDING-012 FIX: Migration for old format
+    // Migration for old format
     // Old format: only newClipId exists (left kept original ID)
     // New format: both leftClipId and rightClipId exist
     if (data.leftClipId && data.rightClipId) {
@@ -178,7 +178,7 @@ class MergeSplitClipsCommand implements Command {
   }
 
   apply(state: TimelineState): TimelineState {
-    // FINDING-012 FIX: Remove BOTH split clips and restore original
+    // Remove BOTH split clips and restore original
     return {
       ...state,
       clips: [...state.clips.filter((c) => c.id !== this.leftClipId && c.id !== this.rightClipId), this.originalClip],
@@ -188,7 +188,7 @@ class MergeSplitClipsCommand implements Command {
 
   invert(): Command {
     // TL-BUG-002 fix: Use the stored splitTime (exact) instead of duration / 2 (approximate)
-    const exactSplitTime = this.splitTime ?? (this.originalClip.startTime + this.originalClip.duration / 2);
+    const exactSplitTime = this.splitTime ?? this.originalClip.startTime + this.originalClip.duration / 2;
     const cmd = new SplitClipCommand(this.originalClip.id, exactSplitTime, this.frameRate, this.originalClip);
     // Preserve the same clip IDs so redo produces identical clips
     (cmd as any).leftClipId = this.leftClipId;

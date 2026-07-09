@@ -1,7 +1,7 @@
 /**
  * SplitClipCommand Integration Tests
  *
- * Tests FINDING-012 fix: both splits get new IDs to prevent property confusion.
+ * Tests both splits get new IDs to prevent property confusion.
  * These tests verify the fix works in realistic scenarios with volume, effects, and overlays.
  */
 
@@ -47,7 +47,7 @@ describe("SplitClipCommand Integration Tests", () => {
       // Simulate user changing right clip volume
       const rightClipUpdated = { ...rightClip, volume: 1.0 };
 
-      // FINDING-012 FIX: IDs are different, so no confusion
+      // IDs are different, so no confusion
       expect(leftClipId).not.toBe(rightClipId);
       expect(leftClipId).not.toBe("original-clip");
       expect(rightClipId).not.toBe("original-clip");
@@ -355,7 +355,7 @@ describe("SplitClipCommand Integration Tests", () => {
   });
 
   describe("Real-World Scenario: The Bug Case", () => {
-    it("reproduces and fixes the original FINDING-012 bug scenario", () => {
+    it("reproduces and fixes the original bug scenario", () => {
       // User has a clip with specific volume
       const clip = createTestClip({
         id: "my-clip",
