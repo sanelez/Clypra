@@ -22,7 +22,8 @@
  * - Rate limiting (prevents excessive seeks)
  */
 
-import type { Clip, MediaAsset } from "@/types";
+import type { Clip, MediaAsset, TransitionTimelineItem } from "@/types";
+import { resolveClipSourceTime } from "../timeline/sourceTime";
 import type { PreviewSyncState } from "../resources/PreviewMediaPool";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -126,7 +127,7 @@ export class PreviewPlaybackScheduler {
    * @param activeVideoClipCount - Number of active video clips
    * @returns Array of actions to execute
    */
-  reconcile(syncState: PreviewSyncState, mediaStates: Map<string, MediaElementState>, clips: Clip[], assets: MediaAsset[], activeVideoClipCount: number): MediaAction[] {
+  reconcile(syncState: PreviewSyncState, mediaStates: Map<string, MediaElementState>, clips: Clip[], assets: MediaAsset[], activeVideoClipCount: number, transitions: TransitionTimelineItem[] = []): MediaAction[] {
     const actions: MediaAction[] = [];
     const now = performance.now();
 
@@ -139,8 +140,8 @@ export class PreviewPlaybackScheduler {
       const clip = clips.find((c) => c.id === clipId);
       if (!clip) continue;
 
-      // Calculate target time for this clip
-      const targetTime = this.calculateTargetTime(clip, syncState);
+      // Calculate target time for this clip (transition-aware)
+      const targetTime = this.calculateTargetTime(clip, syncState, transitions);
 
       if (import.meta.env.DEV) {
         console.log(`[Scheduler] Clip ${clipId.slice(0, 8)}: targetTime=${targetTime?.toFixed(3) ?? "null"}, currentTime=${state.currentTime.toFixed(3)}, readyState=${state.readyState}, isActive=${state.isActive}, paused=${state.paused}`);
@@ -334,19 +335,30 @@ export class PreviewPlaybackScheduler {
   /**
    * Calculate target source time for a clip at current playhead position.
    */
-  private calculateTargetTime(clip: Clip, syncState: PreviewSyncState): number | null {
+  private calculateTargetTime(clip: Clip, syncState: PreviewSyncState, transitions: TransitionTimelineItem[] = []): number | null {
     const clipLocalTime = syncState.time - clip.startTime;
 
     // Frame-rate-aware boundary tolerance
     const BOUNDARY_TOLERANCE = 1.5 / syncState.frameRate;
 
-    if (clipLocalTime < -BOUNDARY_TOLERANCE || clipLocalTime > clip.duration + BOUNDARY_TOLERANCE) {
-      return null; // Clip not active
+    const isInTransition = transitions.some((t) => {
+      const start = t.placement.startTime;
+      const duration = t.placement.duration;
+      const isActive = syncState.time >= start && syncState.time < start + duration;
+      return isActive && (t.fromItemId === clip.id || t.toItemId === clip.id);
+    });
+
+    if (!isInTransition) {
+      if (clipLocalTime < -BOUNDARY_TOLERANCE || clipLocalTime > clip.duration + BOUNDARY_TOLERANCE) {
+        return null; // Clip not active
+      }
     }
 
-    // Calculate source time
-    const trimIn = clip.trimIn || 0;
-    const sourceTime = trimIn + Math.max(0, Math.min(clipLocalTime, clip.duration));
+    // Calculate source time using resolveClipSourceTime utility to match evaluators
+    const { sourceTime } = resolveClipSourceTime(clip, syncState.time, {
+      clampToRange: true,
+      frameRate: syncState.frameRate,
+    });
 
     return sourceTime;
   }

@@ -627,7 +627,14 @@ export class PreviewMediaPool {
       const mediaStates = this.buildMediaStates(clips, syncState, tracks, assets, activeTransitions);
 
       // Get actions from scheduler
-      const actions = this.scheduler.reconcile(syncState, mediaStates, clips, assets, Array.from(desiredVideoBindings.values()).filter((v) => v.isActive).length);
+      const actions = this.scheduler.reconcile(
+        syncState,
+        mediaStates,
+        clips,
+        assets,
+        Array.from(desiredVideoBindings.values()).filter((v) => v.isActive).length,
+        activeTransitions
+      );
 
       // 🐛 DEBUG: Log scheduler activity
       if (import.meta.env.DEV) {
