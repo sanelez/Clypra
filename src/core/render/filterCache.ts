@@ -1,8 +1,7 @@
 import { Filter, BlurFilter } from "pixi.js";
 import { AdjustmentFilter } from "pixi-filters";
-import { resolveFilterToIR } from "./filterIR.js";
 import { createGPUPixelateFilter, createGPUScanlinesFilter, createGPURGBSplitFilter, createGPUFilmGrainFilter, createGPUVignetteFilter } from "./gpuFilters.js";
-import { applyBodyEffectMask, createGPUBodyOutlineFilter, createGPUBodyGlowFilter, createGPUBodyParticlesFilter, ColorAdjustmentsEffect } from "@clypra/engine";
+import { applyBodyEffectMask, createGPUBodyOutlineFilter, createGPUBodyGlowFilter, createGPUBodyParticlesFilter, ColorAdjustmentsEffect } from "@clypra-studio/engine";
 import type { EvaluatedMediaLayer } from "../evaluation/types.js";
 import { filterCacheManager } from "../../features/filters/cache/filterCache.js";
 
@@ -215,7 +214,7 @@ function applyLiveParams(entry: FilterCacheEntry, mediaLayer: EvaluatedMediaLaye
       const params: Record<string, number> = {};
 
       if (asset?.gradingParams) {
-        const gp = asset.gradingParams;
+        const gp = asset.gradingParams as any; // Type has all advanced grading params
         const intensity = mediaLayer.filter.intensity;
 
         // Standard color adjustments
