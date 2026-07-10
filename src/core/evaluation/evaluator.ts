@@ -166,6 +166,7 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
         role: clip.role,
         clipKind: clip.kind,
         zIndex: i,
+        trackIndex: clip.trackIndex,
         layerType: "text",
         time: evalTime,
         clipStartTime: clip.startTime,

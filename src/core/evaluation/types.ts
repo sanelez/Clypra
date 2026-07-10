@@ -35,6 +35,9 @@ interface BaseVisualLayer {
   /** Z-order (0 = background, higher = foreground) */
   readonly zIndex: number;
 
+  /** Track index of the clip */
+  readonly trackIndex?: number;
+
   /** Layer type discriminator */
   readonly layerType: "media" | "text";
 
