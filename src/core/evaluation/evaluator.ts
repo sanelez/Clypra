@@ -206,7 +206,20 @@ export function evaluateTimelineScene(time: number, clips: Clip[], tracks: Track
     }
 
     // ── Media layers ──────────────────────────────────────────────────────────
-    const asset = assetMap.get(clip.mediaId);
+    let asset = assetMap.get(clip.mediaId);
+    if (!asset && (clip.kind === "sticker" || clip.mediaId.startsWith("sticker-"))) {
+      asset = {
+        id: clip.mediaId,
+        name: clip.name || "Sticker",
+        path: (clip as any).stickerImagePath || clip.stickerAnimationPath || "",
+        type: "image",
+        duration: clip.duration,
+        size: 0,
+        stickerFormat: clip.stickerFormat,
+        stickerAnimationPath: clip.stickerAnimationPath,
+        stickerSourceId: clip.stickerSourceId,
+      };
+    }
     if (!asset || (asset.type !== "video" && asset.type !== "image")) continue;
 
     const sourceTime = resolveClipSourceTime(clip, evalTime, {

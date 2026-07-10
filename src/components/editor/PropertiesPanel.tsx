@@ -116,7 +116,20 @@ export const PropertiesPanel: React.FC = () => {
 
   const selectedClipId = selectedClipIds[0] ?? null;
   const selectedClip = clips.find((c) => c.id === selectedClipId);
-  const selectedAsset = mediaAssets.find((a) => a.id === selectedClip?.mediaId);
+  let selectedAsset = mediaAssets.find((a) => a.id === selectedClip?.mediaId);
+  if (!selectedAsset && selectedClip && (selectedClip.kind === "sticker" || selectedClip.mediaId.startsWith("sticker-"))) {
+    selectedAsset = {
+      id: selectedClip.mediaId,
+      name: selectedClip.name || "Sticker",
+      path: (selectedClip as any).stickerImagePath || selectedClip.stickerAnimationPath || "",
+      type: "image",
+      duration: selectedClip.duration,
+      size: 0,
+      stickerFormat: selectedClip.stickerFormat,
+      stickerAnimationPath: selectedClip.stickerAnimationPath,
+      stickerSourceId: selectedClip.stickerSourceId,
+    };
+  }
   const isVisualClip = selectedAsset?.type === "video" || selectedAsset?.type === "image";
   // Audio library clips have kind="audio" and audioPath on the clip but no matching mediaAsset entry
   const isAudioClip = selectedAsset?.type === "audio" || selectedClip?.kind === "audio" || !!(selectedClip as any)?.audioPath;
