@@ -216,17 +216,6 @@ const FilterCard: React.FC<FilterCardProps> = ({ filter, isFavorite, onFavorite,
     if (isDownloading) return;
 
     try {
-      console.log(`[FilterCard] Adding filter "${filter.name}" to timeline`);
-      console.log(`[FilterCard] Filter object from listing:`, {
-        id: filter.id,
-        name: filter.name,
-        category: filter.category,
-        url: filter.url,
-        pipeline: filter.pipeline,
-        hasGradingParams: !!filter.gradingParams,
-        gradingParams: filter.gradingParams,
-        allKeys: Object.keys(filter),
-      });
       setIsDownloading(true);
 
       // Download filter JSON with minimum delay for visual feedback
@@ -234,19 +223,10 @@ const FilterCard: React.FC<FilterCardProps> = ({ filter, isFavorite, onFavorite,
       const delayPromise = new Promise((resolve) => setTimeout(resolve, 300));
 
       const [cachedFilter] = await Promise.all([downloadPromise, delayPromise]);
-      console.log(`[FilterCard] Filter "${filter.name}" downloaded successfully`);
-      console.log(`[FilterCard] Cached filter data:`, {
-        id: cachedFilter.id,
-        fileName: cachedFilter.fileName,
-        hasGradingParams: !!cachedFilter.filter.gradingParams,
-        gradingParams: cachedFilter.filter.gradingParams,
-        allKeys: Object.keys(cachedFilter.filter),
-      });
       setIsDownloaded(true);
 
       // Add to timeline
       onAddToTimeline(e);
-      console.log(`[FilterCard] Filter "${filter.name}" added to timeline`);
 
       // Show success feedback
       useProjectStore.getState().showToast(`Added ${filter.name} filter`);

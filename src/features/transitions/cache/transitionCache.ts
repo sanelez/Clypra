@@ -139,10 +139,7 @@ class TransitionCacheManager {
    * Download and cache a transition definition JSON.
    * If already cached (and fresh), returns the cached entry immediately.
    */
-  async downloadTransition(
-    transition: TransitionAsset,
-    onProgress?: (progress: TransitionDownloadProgress) => void,
-  ): Promise<CachedTransition> {
+  async downloadTransition(transition: TransitionAsset, onProgress?: (progress: TransitionDownloadProgress) => void): Promise<CachedTransition> {
     await this.initialize();
 
     if (!this.cacheDir) {
@@ -156,7 +153,6 @@ class TransitionCacheManager {
         return cached;
       }
       // Stale — evict and re-download
-      console.log(`[TransitionCache] Entry for "${transition.name}" is stale (>7d). Re-downloading.`);
       this.cacheIndex.delete(transition.id);
     }
 
@@ -200,23 +196,17 @@ class TransitionCacheManager {
       this.cacheIndex.set(transition.id, cachedFile);
       await this.saveIndex();
 
-      console.log(`[TransitionCache] Cached transition: ${transition.name} → ${relativePath}`);
       return cachedFile;
     } catch (error) {
       console.error("[TransitionCache] Download failed:", error);
-      throw new Error(
-        `Failed to cache transition: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      throw new Error(`Failed to cache transition: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
   }
 
   /**
    * Ensure a transition is cached (download if not already cached or if stale).
    */
-  async ensureDownloaded(
-    transition: TransitionAsset,
-    onProgress?: (progress: TransitionDownloadProgress) => void,
-  ): Promise<CachedTransition> {
+  async ensureDownloaded(transition: TransitionAsset, onProgress?: (progress: TransitionDownloadProgress) => void): Promise<CachedTransition> {
     await this.initialize();
 
     if (this.isCached(transition.id)) {
@@ -320,9 +310,7 @@ class TransitionCacheManager {
     }
 
     for (const id of staleIds) {
-      await this.clearCache(id).catch((err) =>
-        console.warn(`[TransitionCache] Failed to evict stale entry ${id}:`, err),
-      );
+      await this.clearCache(id).catch((err) => console.warn(`[TransitionCache] Failed to evict stale entry ${id}:`, err));
     }
 
     return staleIds.length;

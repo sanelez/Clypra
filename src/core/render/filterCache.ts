@@ -60,29 +60,12 @@ function buildStructuralKey(mediaLayer: EvaluatedMediaLayer, bodyMasks: Map<stri
 export function getOrUpdateFilters(mediaLayer: EvaluatedMediaLayer, width: number, height: number, bodyMasks: Map<string, any>): Filter[] {
   const clipId = mediaLayer.clipId;
 
-  console.log("[FilterCache] getOrUpdateFilters called:", {
-    clipId,
-    layerId: mediaLayer.layerId,
-    hasFilter: !!mediaLayer.filter,
-    filter: mediaLayer.filter,
-    effectsCount: mediaLayer.effects?.length || 0,
-    effects: mediaLayer.effects,
-  });
-
   const structuralKey = buildStructuralKey(mediaLayer, bodyMasks);
-  console.log("[FilterCache] structuralKey:", structuralKey);
 
   let entry = filterCache.get(clipId);
 
   if (!entry || entry.structuralKey !== structuralKey) {
     rebuildCounter++;
-    console.log("[Filters] rebuild count this session:", rebuildCounter);
-    console.log("[Filters] REBUILDING filter for clip:", clipId, {
-      oldKey: entry?.structuralKey,
-      newKey: structuralKey,
-      mediaLayerFilter: mediaLayer.filter,
-      mediaLayerEffects: mediaLayer.effects,
-    });
 
     // Structural change — full rebuild, but ONLY when the effect set actually changed
     if (entry) {

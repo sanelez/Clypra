@@ -385,15 +385,6 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({ onRequestClose }) =>
       // Filter must be downloaded first
       const cachedFilter = filterCacheManager.getCached(item.id);
 
-      console.log("[EditorLayout] handleAddToTimeline - filters:", {
-        itemId: item.id,
-        itemName: item.name,
-        hasCachedFilter: !!cachedFilter,
-        cachedFilterKeys: cachedFilter ? Object.keys(cachedFilter.filter) : [],
-        hasGradingParams: cachedFilter?.filter?.gradingParams ? true : false,
-        gradingParams: cachedFilter?.filter?.gradingParams,
-      });
-
       if (!cachedFilter) {
         useProjectStore.getState().showToast("Filter not downloaded yet", "warning");
         return;
