@@ -29,8 +29,9 @@ import { MAX_PROJECT_NAME_LENGTH } from "@/types";
 // Import extracted components
 import { ProgressRing } from "./ProgressRing";
 import { SuccessCheck } from "./SuccessCheck";
-import { ExportPresetCard, ExportPreset, PresetConfig } from "./ExportPresetCard";
+import { ExportPresetCard, type ExportPreset, type PresetConfig } from "./ExportPresetCard";
 import { QUALITY_TIERS, resolveExportDimensions } from "@/lib/export/exportDimensions";
+import { PRESET_CONFIGS, PRESET_ORDER } from "@/lib/export/exportPresets";
 
 // Lazy load video export functionality (code splitting)
 const exportVideoModule = () => import("@/lib/export/videoExport");
@@ -55,93 +56,6 @@ interface ExportResult {
   totalTimeMs: number;
   avgTimePerFrameMs: number;
 }
-
-// ─── Preset Configuration ────────────────────────────────────────────────
-
-const PRESET_CONFIGS: Record<ExportPreset, PresetConfig> = {
-  "720p-fast": {
-    label: "720p Fast",
-    shortLabel: "720p",
-    resolution: "1280×720",
-    codec: "H.264",
-    codecLabel: "H.264",
-    tier: "fast",
-    tierLabel: "Fast",
-    width: 1280,
-    height: 720,
-    codecValue: "h264",
-    preset: "fast",
-    crf: 23,
-    pixelFormat: "yuv420p",
-    estimatedBitrateMbps: 4,
-  },
-  "1080p-fast": {
-    label: "1080p Fast",
-    shortLabel: "1080p",
-    resolution: "1920×1080",
-    codec: "H.264",
-    codecLabel: "H.264",
-    tier: "fast",
-    tierLabel: "Fast",
-    width: 1920,
-    height: 1080,
-    codecValue: "h264",
-    preset: "fast",
-    crf: 23,
-    pixelFormat: "yuv420p",
-    estimatedBitrateMbps: 8,
-  },
-  "1080p-quality": {
-    label: "1080p Quality",
-    shortLabel: "1080p",
-    resolution: "1920×1080",
-    codec: "H.264",
-    codecLabel: "H.264",
-    tier: "quality",
-    tierLabel: "Quality",
-    width: 1920,
-    height: 1080,
-    codecValue: "h264",
-    preset: "slow",
-    crf: 18,
-    pixelFormat: "yuv420p",
-    estimatedBitrateMbps: 15,
-  },
-  "4k-quality": {
-    label: "4K Quality",
-    shortLabel: "4K",
-    resolution: "3840×2160",
-    codec: "H.265",
-    codecLabel: "H.265 / HEVC",
-    tier: "quality",
-    tierLabel: "Quality",
-    width: 3840,
-    height: 2160,
-    codecValue: "h265",
-    preset: "medium",
-    crf: 20,
-    pixelFormat: "yuv420p",
-    estimatedBitrateMbps: 30,
-  },
-  "prores-422hq": {
-    label: "ProRes 422 HQ",
-    shortLabel: "ProRes",
-    resolution: "1920×1080",
-    codec: "ProRes",
-    codecLabel: "ProRes 422 HQ",
-    tier: "pro",
-    tierLabel: "Professional",
-    width: 1920,
-    height: 1080,
-    codecValue: "prores",
-    preset: "medium",
-    crf: 0,
-    pixelFormat: "yuv422p10le",
-    estimatedBitrateMbps: 220,
-  },
-};
-
-const PRESET_ORDER: ExportPreset[] = ["720p-fast", "1080p-fast", "1080p-quality", "4k-quality", "prores-422hq"];
 
 function getQualityTierForPreset(presetKey: ExportPreset) {
   if (presetKey.startsWith("720p")) {
@@ -195,6 +109,11 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
   const [isRenaming, setIsRenaming] = useState(false);
 
   const exportAbortRef = useRef(false);
+
+  // FIX (BUG-C2): Stores the live cancel function provided by exportVideo() once the
+  // FFmpeg session is started. Calling it kills the backend process and stops the
+  // frame loop — previously the cancel button only reset the UI without stopping FFmpeg.
+  const cancelExportFnRef = useRef<(() => Promise<void>) | null>(null);
 
   const selectedPreset = PRESET_CONFIGS[preset];
 
@@ -329,6 +248,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
     setResult(null);
     setProgress(null);
     exportAbortRef.current = false;
+    cancelExportFnRef.current = null; // clear any stale cancel fn from previous export
 
     try {
       const { exportVideo } = await exportVideoModule();
@@ -353,6 +273,11 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
         crf: selectedPreset.crf,
         pixelFormat: selectedPreset.pixelFormat,
         onProgress: (p) => setProgress(p),
+        // FIX (BUG-C2): Receive the live cancel function as soon as FFmpeg starts.
+        // Storing it in a ref lets handleCancelExport call it at any time.
+        onSessionReady: (cancel) => {
+          cancelExportFnRef.current = cancel;
+        },
       });
 
       if (!exportResult.cancelled) {
@@ -371,19 +296,13 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
     }
   }, [outputPath, project, clips, tracks, transitions, mediaAssets, epoch, selectedPreset, sequenceDuration]);
 
-  // ─── Cancel Export Handler ─────────────────────────────────────────
-  // FIX (BUG-3): Wire the backend cancel_video_export command to the UI
+  // FIX (BUG-C2): Actually cancel the backend FFmpeg session and stop the frame loop.
+  // Previously this only reset the UI; FFmpeg kept running and writing output.
   const handleCancelExport = useCallback(async () => {
     exportAbortRef.current = true;
-    // The exportVideo loop checks for cancellation via thrown errors
-    // We also need to signal the backend to kill FFmpeg
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      // The session ID isn't directly accessible here, but setting the abort ref
-      // will cause the next frame write to throw, triggering the catch block
-      // in handleExport which calls cancel_video_export
-    } catch {
-      // Best effort
+    if (cancelExportFnRef.current) {
+      await cancelExportFnRef.current();
+      cancelExportFnRef.current = null;
     }
     setPhase("configure");
     setProgress(null);

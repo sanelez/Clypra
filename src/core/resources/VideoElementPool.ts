@@ -213,18 +213,29 @@ export class VideoElementPool {
         await new Promise<void>((resolve, reject) => {
           let resolved = false;
 
+          // Seek event fallback: if the browser doesn't fire the 'seeked' event
+          // within 1000ms (e.g. due to WebKit background throttling/suspension),
+          // manually trigger the seeked handler to prevent the export from hanging/failing.
+          const seekedFallbackTimeout = setTimeout(() => {
+            if (!resolved) {
+              console.warn(`[VideoElementPool] Seek event fallback triggered for ${sourceUrl} @ ${seekTime}s`);
+              onSeeked();
+            }
+          }, 1000);
+
           const timeout = setTimeout(() => {
             if (!resolved) {
               resolved = true;
               cleanup();
               reject(new Error(`Video seek timeout: ${sourceUrl} @ ${seekTime}s`));
             }
-          }, 5000);
+          }, 15000); // Increased from 5s to 15s to allow for heavy 4K/H.265 seeks under full load
 
           const settle = () => {
             if (resolved) return;
             resolved = true;
             clearTimeout(timeout);
+            clearTimeout(seekedFallbackTimeout);
             cleanup();
             pooledVideo.lastSeekTime = seekTime;
             resolve();
@@ -264,6 +275,7 @@ export class VideoElementPool {
             if (!resolved) {
               resolved = true;
               clearTimeout(timeout);
+              clearTimeout(seekedFallbackTimeout);
               cleanup();
               reject(new Error(`Video seek error: ${sourceUrl} @ ${seekTime}s`));
             }

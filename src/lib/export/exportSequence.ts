@@ -61,6 +61,15 @@ export interface ExportSequenceOptions {
 
   /** Frame callback (receives each frame as it's rendered) */
   onFrame?: (frameNumber: number, blob: Blob) => Promise<void>;
+
+  /**
+   * Called as soon as the AbortController is created, providing a scoped cancel()
+   * function tied to this specific export session.
+   *
+   * FIX (BUG-C3): Replaces the old module-level cancelExport() which could
+   * cross-cancel sessions when called during a concurrent or rapid retry.
+   */
+  onCancelReady?: (cancel: () => void) => void;
 }
 
 /**
@@ -80,7 +89,6 @@ export interface ExportSequenceResult {
   cancelled: boolean;
 }
 
-let activeAbortController: AbortController | null = null;
 
 /**
  * Export an image sequence.
@@ -107,6 +115,7 @@ export async function exportSequence(options: ExportSequenceOptions): Promise<Ex
     quality = 0.92,
     onProgress,
     onFrame,
+    onCancelReady,
   } = options;
 
   const startTimeMs = Date.now();
@@ -129,11 +138,22 @@ export async function exportSequence(options: ExportSequenceOptions): Promise<Ex
     };
   }
 
+  // FIX (BUG-C3): AbortController is now scoped to this function call, not module-level.
+  // The old module-level singleton caused cross-session contamination: if exportSequence
+  // was called a second time before the first finished, the second controller overwrote
+  // the first, and cancelExport() would cancel the wrong session.
   const abortController = new AbortController();
-  activeAbortController = abortController;
   const signal = abortController.signal;
 
+  // Provide a typed cancel function to the caller for session-scoped cancellation.
+  onCancelReady?.(() => abortController.abort());
+
   const pixiHandle = createPixiExportCompositor(width, height);
+
+  // FIX (BUG-C1): Wait for WebGL context to be fully initialized before rendering.
+  // Without this, composeFrame() returns early (isReady=false) producing blank frames.
+  await pixiHandle.compositor.waitForReady();
+
   const videoPool = new VideoElementPool({
     maxConcurrent: 10,
     debug: false,
@@ -218,9 +238,6 @@ export async function exportSequence(options: ExportSequenceOptions): Promise<Ex
       throw error;
     }
   } finally {
-    if (activeAbortController === abortController) {
-      activeAbortController = null;
-    }
     videoPool.clear();
     destroyPixiExportCompositor(pixiHandle);
   }
@@ -237,10 +254,16 @@ export async function exportSequence(options: ExportSequenceOptions): Promise<Ex
 }
 
 /**
- * Cancel an ongoing export.
+ * @deprecated Use the onCancelReady callback in exportSequence options instead.
+ * This function is kept for backwards compatibility but has no effect if no
+ * session is currently active via the onCancelReady pattern.
  */
 export function cancelExport(): void {
-  activeAbortController?.abort();
+  // This is a no-op in the new API. Pass onCancelReady to exportSequence instead.
+  console.warn(
+    "[ExportSequence] cancelExport() is deprecated. Use the cancel() function provided " +
+    "via the onCancelReady callback in exportSequence options.",
+  );
 }
 
 /**

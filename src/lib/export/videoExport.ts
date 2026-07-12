@@ -16,6 +16,7 @@ import { VideoElementPool } from "../../core/resources/VideoElementPool";
 import { getResourceCache } from "../../core/resources/ResourceCache";
 import { resolveClipSourceTime } from "../../core/timeline/sourceTime";
 import { getActiveAudioClips } from "../../core/timeline/audioClips";
+import { PRESET_CONFIGS } from "./exportPresets";
 import type { Clip, Track, MediaAsset, Project, TransitionTimelineItem } from "../../types";
 import type { ExportAudioClip, ExportProgress } from "../../types/export";
 
@@ -78,6 +79,13 @@ export interface VideoExportConfig {
 
   /** Progress callback */
   onProgress?: (progress: VideoExportProgress) => void;
+
+  /**
+   * Called as soon as the FFmpeg session is live, providing a cancel() function
+   * that kills the backend process and stops the frame loop cleanly.
+   * The ExportDialog stores this reference so the Cancel button works correctly.
+   */
+  onSessionReady?: (cancel: () => Promise<void>) => void;
 }
 
 /**
@@ -109,7 +117,7 @@ export interface VideoExportResult {
  * @returns Export result
  */
 export async function exportVideo(config: VideoExportConfig): Promise<VideoExportResult> {
-  const { clips, tracks, transitions = [], assets, project, epoch, startTime, endTime, outputPath, frameRate = project?.frameRate || 30, width = project?.canvasWidth || 1920, height = project?.canvasHeight || 1080, codec = "h264", preset = "medium", crf = 23, pixelFormat = "yuv420p", onProgress } = config;
+  const { clips, tracks, transitions = [], assets, project, epoch, startTime, endTime, outputPath, frameRate = project?.frameRate || 30, width = project?.canvasWidth || 1920, height = project?.canvasHeight || 1080, codec = "h264", preset = "medium", crf = 23, pixelFormat = "yuv420p", onProgress, onSessionReady } = config;
 
   const startTimeMs = Date.now();
 
@@ -174,6 +182,19 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
   let cancelled = false;
   let completedFrames = 0;
 
+  // FIX (BUG-C2): Provide a cancel function to the caller immediately after the session
+  // starts so the UI can kill FFmpeg when the user presses Cancel. Setting isCancelled
+  // causes the frame loop to break cleanly on the next iteration.
+  let isCancelled = false;
+  if (onSessionReady) {
+    onSessionReady(async () => {
+      isCancelled = true;
+      await invoke("cancel_video_export", { sessionId }).catch(() => {
+        // Ignore — process may have already exited
+      });
+    });
+  }
+
   // PERFORMANCE OPTIMIZATION: Batch frame writes to reduce IPC overhead
   // Batch size of 30-60 frames balances latency with throughput
   const BATCH_SIZE = 45; // 1.5 seconds at 30fps, 0.75s at 60fps
@@ -210,6 +231,14 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
   try {
     // Render and write frames
     for (let i = 0; i < frameTimes.length; i++) {
+      // FIX (BUG-C2): Check cancellation before each frame. When the user clicks
+      // Cancel, isCancelled is set to true and the session is killed asynchronously.
+      // This ensures the loop stops without waiting for another potentially-slow frame.
+      if (isCancelled) {
+        cancelled = true;
+        break;
+      }
+
       const time = frameTimes[i];
 
       // Track ALL acquired video elements for this frame (released in finally)
@@ -282,11 +311,10 @@ export async function exportVideo(config: VideoExportConfig): Promise<VideoExpor
       }
     }
 
-    // Flush any remaining frames in buffer
-    await flushFrameBatch();
-
-    // Finalize export
-    await invoke("finalize_video_export", { sessionId });
+    if (!cancelled) {
+      // Finalize export
+      await invoke("finalize_video_export", { sessionId });
+    }
   } catch (error) {
     // Check if cancelled
     if (error instanceof Error && error.message.includes("cancelled")) {
@@ -352,47 +380,36 @@ export async function getFFmpegVersion(): Promise<string> {
 /**
  * Get recommended export presets.
  */
+/**
+ * Returns the export presets keyed by preset ID.
+ *
+ * FIX (BUG-L4): Now derived from the shared PRESET_CONFIGS in exportPresets.ts
+ * instead of a manually-maintained local copy. Both the UI (ExportDialog) and
+ * this programmatic API are guaranteed to be in sync.
+ */
 export function getExportPresets() {
-  return {
-    "1080p-fast": {
-      width: 1920,
-      height: 1080,
-      codec: "h264" as const,
-      preset: "fast" as const,
-      crf: 23,
-      pixelFormat: "yuv420p" as const,
-    },
-    "1080p-quality": {
-      width: 1920,
-      height: 1080,
-      codec: "h264" as const,
-      preset: "slow" as const,
-      crf: 18,
-      pixelFormat: "yuv420p" as const,
-    },
-    "720p-fast": {
-      width: 1280,
-      height: 720,
-      codec: "h264" as const,
-      preset: "fast" as const,
-      crf: 23,
-      pixelFormat: "yuv420p" as const,
-    },
-    "4k-quality": {
-      width: 3840,
-      height: 2160,
-      codec: "h265" as const,
-      preset: "medium" as const,
-      crf: 20,
-      pixelFormat: "yuv420p" as const,
-    },
-    "prores-422hq": {
-      width: 1920,
-      height: 1080,
-      codec: "prores" as const,
-      preset: "medium" as const,
-      crf: 0,
-      pixelFormat: "yuv422p10le" as const,
-    },
-  };
+  const result: Record<
+    string,
+    {
+      width: number;
+      height: number;
+      codec: string;
+      preset: string;
+      crf: number;
+      pixelFormat: string;
+    }
+  > = {};
+
+  for (const [key, cfg] of Object.entries(PRESET_CONFIGS) as [string, any][]) {
+    result[key] = {
+      width: cfg.width,
+      height: cfg.height,
+      codec: cfg.codecValue,
+      preset: cfg.preset,
+      crf: cfg.crf,
+      pixelFormat: cfg.pixelFormat,
+    };
+  }
+
+  return result;
 }

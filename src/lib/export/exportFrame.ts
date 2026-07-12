@@ -70,6 +70,10 @@ export async function exportFrame(options: ExportFrameOptions): Promise<Blob> {
   // Create headless Pixi compositor for single frame
   const pixiHandle = createPixiExportCompositor(width, height);
 
+  // FIX (BUG-C1): Wait for WebGL context to be fully initialized before rendering.
+  // Without this, composeFrame() returns early (isReady=false) producing a blank PNG.
+  await pixiHandle.compositor.waitForReady();
+
   const videoPool = new VideoElementPool({
     maxConcurrent: 10,
     debug: false,
@@ -104,7 +108,7 @@ export async function exportFrame(options: ExportFrameOptions): Promise<Blob> {
     await renderFrameWithPixi(pixiHandle, scene, videoElements);
 
     // Convert canvas to Blob
-    const blob = await new Promise<Blob>((resolve, reject) => {
+    return await new Promise<Blob>((resolve, reject) => {
       pixiHandle.readbackCanvas.toBlob(
         (b) => {
           if (b) resolve(b);
@@ -114,18 +118,12 @@ export async function exportFrame(options: ExportFrameOptions): Promise<Blob> {
         quality,
       );
     });
-
-    for (const vid of frameVideoElements) {
-      videoPool.releaseElement(vid);
-    }
-
-    return blob;
-  } catch (error) {
-    for (const vid of frameVideoElements) {
-      videoPool.releaseElement(vid);
-    }
-    throw error;
   } finally {
+    // FIX (BUG-H5): Release all video elements in finally only — prevents double-release
+    // that occurred when release was duplicated in try (success path) and catch (error path).
+    for (const vid of frameVideoElements) {
+      videoPool.releaseElement(vid);
+    }
     videoPool.clear();
     destroyPixiExportCompositor(pixiHandle);
   }
@@ -164,16 +162,18 @@ export async function exportFrameAndDownload(options: ExportFrameOptions, filena
 export async function exportFrameToFile(options: ExportFrameOptions, savePath: string): Promise<void> {
   const blob = await exportFrame(options);
 
-  // Convert blob to array buffer
+  // FIX (BUG-M3): Convert blob to Uint8Array and write via Tauri's binary IPC.
+  // The previous Array.from(uint8Array) pattern serialized the entire buffer as a
+  // JSON number array over IPC — catastrophically slow and OOM-prone for large frames
+  // (a 4K PNG can be 50–80 MB). Passing the ArrayBuffer directly uses binary IPC,
+  // avoiding any intermediate JSON allocation.
   const arrayBuffer = await blob.arrayBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
 
-  // Save via Tauri
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("write_file", {
       path: savePath,
-      contents: Array.from(uint8Array),
+      contents: new Uint8Array(arrayBuffer),
     });
   } catch (err) {
     console.error("[ExportFrame] Failed to write file:", err);

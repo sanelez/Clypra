@@ -19,7 +19,7 @@
  * - FFmpeg error logging
  */
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
 use std::sync::Arc;
 use tauri::ipc::{Channel, Request, InvokeBody};
@@ -137,7 +137,7 @@ struct ExportSession {
     output_path: Option<String>,
     
     /// Performance monitoring
-    frame_write_times: Vec<f64>, // Last 60 frame write times (ms)
+    frame_write_times: VecDeque<f64>, // Last 60 frame write times (ms) — VecDeque for O(1) front removal
     last_perf_log_time: std::time::Instant,
 }
 
@@ -159,10 +159,16 @@ fn augmented_path() -> String {
     }
 }
 
-fn has_audio_stream(path: &str) -> bool {
+/// Probe whether a media file has an audio stream.
+///
+/// FIX (BUG-H4): This is now async using tokio::process::Command.
+/// Previously it used std::process::Command (blocking), which stalled the
+/// Tokio async runtime for the entire duration of each ffprobe call —
+/// starving other concurrent async tasks (progress updates, IPC responses).
+async fn has_audio_stream(path: &str) -> bool {
     let path_env = augmented_path();
 
-    let output = std::process::Command::new("ffprobe")
+    let output = Command::new("ffprobe")
         .env("PATH", &path_env)
         .args([
             "-v", "error",
@@ -171,7 +177,8 @@ fn has_audio_stream(path: &str) -> bool {
             "-of", "csv=p=0",
             path,
         ])
-        .output();
+        .output()
+        .await;
 
     match output {
         Ok(out) => {
@@ -235,7 +242,7 @@ pub async fn start_video_export(
     let mut valid_audio_clips = Vec::new();
     if let Some(clips) = &config.audio_clips {
         for clip in clips {
-            if has_audio_stream(&clip.path) {
+            if has_audio_stream(&clip.path).await {
                 valid_audio_clips.push(clip.clone());
             } else {
                 eprintln!(
@@ -333,8 +340,8 @@ pub async fn start_video_export(
             cmd.arg("-keyint_min").arg(gop_size.to_string());
             // Force IDR frames at every keyframe for maximum compatibility
             cmd.arg("-x264-params").arg("scenecut=0:open_gop=0");
-            // FIX (BUG-2): Guarantee a clean first keyframe for thumbnail extraction
-            // Desktop apps (Finder, Explorer) use the first keyframe as the thumbnail
+            // Guarantee a clean first keyframe for thumbnail extraction.
+            // Desktop apps (Finder, Explorer) use the first keyframe as the thumbnail.
             cmd.arg("-force_key_frames").arg("expr:eq(n,0)");
         }
         "h265" => {
@@ -347,14 +354,27 @@ pub async fn start_video_export(
             let gop_size = (config.frame_rate * 2.0).round() as i32;
             cmd.arg("-g").arg(gop_size.to_string());
             cmd.arg("-keyint_min").arg(gop_size.to_string());
-            cmd.arg("-x265-params").arg("scenecut=0:open-gop=0");
-            // FIX (BUG-2): Guarantee a clean first keyframe for thumbnail extraction
-            cmd.arg("-force_key_frames").arg("expr:eq(n,0)");
+            // FIX (BUG-H3): Combine scenecut/open-gop settings with force-idr in a
+            // single -x265-params string. Using -force_key_frames expr:eq(n,0) alongside
+            // -x265-params can conflict on some FFmpeg builds because libavcodec and
+            // libx265 have competing frame-type control. force-idr=1 is the canonical
+            // x265 mechanism and is processed after open-gop/scenecut, guaranteeing
+            // an IDR at frame 0 for thumbnail extraction.
+            cmd.arg("-x265-params").arg("scenecut=0:open-gop=0:force-idr=1");
         }
         "prores" => {
             cmd.arg("-c:v").arg("prores_ks");
-            cmd.arg("-profile:v").arg("3"); // ProRes 422 HQ
-            cmd.arg("-pix_fmt").arg("yuv422p10le");
+            // FIX (BUG-H1): Map pixel_format from config to the correct prores_ks profile.
+            // Previously hardcoded to profile 3 / yuv422p10le, making ProRes 4444,
+            // LT, and Proxy unreachable even when requested via config.pixel_format.
+            let (prores_profile, prores_pix_fmt) = match config.pixel_format.as_str() {
+                "yuv422p10le" => ("3", "yuv422p10le"), // ProRes 422 HQ (profile 3)
+                "yuva444p10le" => ("4", "yuva444p10le"), // ProRes 4444
+                "yuv422p"     => ("1", "yuv422p"),      // ProRes 422 LT (profile 1)
+                _ => ("3", "yuv422p10le"),               // Default: ProRes 422 HQ
+            };
+            cmd.arg("-profile:v").arg(prores_profile);
+            cmd.arg("-pix_fmt").arg(prores_pix_fmt);
             // ProRes is all-intra (every frame is a keyframe), no GOP setting needed
         }
         _ => {
@@ -395,7 +415,7 @@ pub async fn start_video_export(
         width: config.width,
         height: config.height,
         output_path: Some(config.output_path.clone()),
-        frame_write_times: Vec::with_capacity(60),
+        frame_write_times: VecDeque::with_capacity(60), // FIX (BUG-M7): VecDeque for O(1) front removal
         last_perf_log_time: std::time::Instant::now(),
     };
     
@@ -468,11 +488,11 @@ pub async fn write_export_frame(
     
     // MONITORING: Record write time
     let write_duration = write_start.elapsed().as_secs_f64() * 1000.0; // ms
-    session.frame_write_times.push(write_duration);
+    session.frame_write_times.push_back(write_duration); // push_back on VecDeque
     
-    // Keep only last 60 frames for rolling statistics
+    // Keep only last 60 frames for rolling statistics — O(1) pop_front on VecDeque
     if session.frame_write_times.len() > 60 {
-        session.frame_write_times.remove(0);
+        session.frame_write_times.pop_front(); // FIX (BUG-M7): was remove(0) — O(n) Vec shift
     }
     
     session.current_frame += 1;
@@ -480,8 +500,8 @@ pub async fn write_export_frame(
     // Calculate progress
     let progress = session.current_frame as f64 / session.total_frames as f64;
     let elapsed = session.start_time.elapsed().as_secs_f64();
-    let fps = session.current_frame as f64 / elapsed;
-    let remaining_frames = session.total_frames - session.current_frame;
+    let fps = if elapsed > 0.0 { session.current_frame as f64 / elapsed } else { 0.0 };
+    let remaining_frames = session.total_frames.saturating_sub(session.current_frame);
     let eta_seconds = if fps > 0.0 {
         remaining_frames as f64 / fps
     } else {
@@ -492,7 +512,7 @@ pub async fn write_export_frame(
     let progress_update = ExportProgress {
         current_frame: session.current_frame,
         total_frames: session.total_frames,
-        progress,
+        progress: progress.min(1.0), // clamp: prevents >100% if frame count overshoots
         eta_seconds,
         fps,
     };
@@ -628,9 +648,9 @@ pub async fn write_export_frames_batch(
     
     // Record per-frame time for statistics
     for _ in 0..frame_count {
-        session.frame_write_times.push(per_frame_ms);
+        session.frame_write_times.push_back(per_frame_ms); // push_back on VecDeque
         if session.frame_write_times.len() > 60 {
-            session.frame_write_times.remove(0);
+            session.frame_write_times.pop_front(); // O(1) — FIX (BUG-M7)
         }
     }
     
@@ -639,8 +659,8 @@ pub async fn write_export_frames_batch(
     // Calculate progress
     let progress = session.current_frame as f64 / session.total_frames as f64;
     let elapsed = session.start_time.elapsed().as_secs_f64();
-    let fps = session.current_frame as f64 / elapsed;
-    let remaining_frames = session.total_frames - session.current_frame;
+    let fps = if elapsed > 0.0 { session.current_frame as f64 / elapsed } else { 0.0 };
+    let remaining_frames = session.total_frames.saturating_sub(session.current_frame); // FIX (BUG-H2): no underflow
     let eta_seconds = if fps > 0.0 {
         remaining_frames as f64 / fps
     } else {
@@ -651,7 +671,7 @@ pub async fn write_export_frames_batch(
     let progress_update = ExportProgress {
         current_frame: session.current_frame,
         total_frames: session.total_frames,
-        progress,
+        progress: progress.min(1.0), // FIX (BUG-H2): clamp in case frame count overshoots
         eta_seconds,
         fps,
     };
@@ -736,15 +756,20 @@ pub async fn cancel_video_export(session_id: String) -> Result<(), String> {
     // Capture output path before killing the process
     let output_path = session.output_path.clone();
     
-    // Kill FFmpeg process
-    session
-        .process
-        .kill()
-        .await
-        .map_err(|e| format!("Failed to kill FFmpeg: {}", e))?;
-    
-    // FIX (BUG-7): Delete partial output file — it will be corrupt
-    // (missing moov atom due to faststart not completing)
+    // Kill FFmpeg process.
+    // FIX (BUG-L6): treat kill errors as non-fatal — the process may have already
+    // exited (e.g. it crashed, or finalize raced with cancel). Either way we still
+    // need to clean up the partial output file below.
+    if let Err(e) = session.process.kill().await {
+        eprintln!(
+            "[cancel_video_export] Could not kill FFmpeg (already exited?): {}",
+            e
+        );
+    }
+
+    // FIX (BUG-7 + BUG-L6): Always attempt partial output file deletion.
+    // The file will be corrupt (missing moov atom due to -movflags +faststart
+    // not completing). This now runs even when kill() fails.
     if let Some(ref path) = output_path {
         if let Err(e) = tokio::fs::remove_file(path).await {
             eprintln!(
@@ -755,12 +780,12 @@ pub async fn cancel_video_export(session_id: String) -> Result<(), String> {
             eprintln!("[cancel_video_export] Deleted partial output: {}", path);
         }
     }
-    
+
     eprintln!(
         "[cancel_video_export] Session {} cancelled ({} frames written)",
         session_id, session.current_frame
     );
-    
+
     Ok(())
 }
 
