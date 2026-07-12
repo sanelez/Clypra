@@ -338,12 +338,15 @@ export const PixiProgramPreview: React.FC = () => {
     const backingH = Math.round(displayHeight);
 
     try {
-      compositorRef.current = new PixiSceneCompositor(canvasEl, backingW, backingH, mediaPool);
+      const compositor = new PixiSceneCompositor(canvasEl, backingW, backingH, mediaPool);
+      compositorRef.current = compositor;
+      mediaPool.setCompositor(compositor);
     } catch (err) {
       console.error("[PixiProgramPreview] Failed to initialize WebGL Compositor:", err);
     }
 
     return () => {
+      mediaPool.setCompositor(null);
       if (compositorRef.current) {
         compositorRef.current.destroy();
         compositorRef.current = null;
