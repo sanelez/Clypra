@@ -15,7 +15,7 @@
  * - Easy to maintain when schema changes
  */
 
-import type { Project, MediaAsset, Track, Clip, AspectRatio, TransitionTimelineItem } from "./index";
+import type { Project, MediaAsset, Track, Clip, AspectRatio, TransitionTimelineItem, TimelineMarker } from "./index";
 import type { Gap } from "./gap";
 
 // ============================================================================
@@ -44,6 +44,7 @@ export interface RustProject {
   clips?: RustClip[];
   transitions?: TransitionTimelineItem[];
   gaps?: RustGap[];
+  markers?: TimelineMarker[];
   timeline_schema_version?: number | null;
 }
 
@@ -110,6 +111,8 @@ export interface RustClip {
   fitMode?: "contain" | "cover" | "fill" | "stretch" | "original";
   conform?: import("@clypra-studio/engine").ClipConform;
   volume?: number;
+  fade_in?: number;
+  fade_out?: number;
   kind?: string;
 }
 
@@ -332,6 +335,7 @@ export function toRustProject(
     mediaAssets?: MediaAsset[];
     transitions?: TransitionTimelineItem[];
     gaps?: Gap[];
+    markers?: TimelineMarker[];
     /** Update modification timestamp to current time (default: true, set false for round-trip serialization) */
     updateModifiedTime?: boolean;
   },
@@ -352,6 +356,7 @@ export function toRustProject(
     clips: options?.clips?.map(toRustClip) ?? [],
     transitions: options?.transitions ?? [],
     gaps: options?.gaps?.map(toRustGap) ?? [],
+    markers: options?.markers ?? [],
     timeline_schema_version: frontend.timelineSchemaVersion ?? 1,
   };
 }
