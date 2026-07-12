@@ -58,6 +58,12 @@ export interface CommandJournalState {
 
   /** Active transaction (if any) */
   activeTransaction: Transaction | null;
+
+  /** Label for undo action (e.g., "Undo Move Clip") */
+  undoLabel: string | null;
+
+  /** Label for redo action (e.g., "Redo Move Clip") */
+  redoLabel: string | null;
 }
 
 /**
@@ -287,12 +293,17 @@ export class CommandJournal {
    * Get current history state.
    */
   getState(): CommandJournalState {
+    const undoCommand = this._position >= 0 ? this._history[this._position] : null;
+    const redoCommand = this._position < this._history.length - 1 ? this._history[this._position + 1] : null;
+
     return {
       canUndo: this.canUndo(),
       canRedo: this.canRedo(),
       position: this._position,
       size: this._history.length,
       activeTransaction: this._activeTransaction,
+      undoLabel: undoCommand?.label ?? null,
+      redoLabel: redoCommand?.label ?? null,
     };
   }
 
