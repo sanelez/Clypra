@@ -234,6 +234,12 @@ const DEFAULT_SHORTCUTS: Omit<ShortcutAction, "binding">[] = [
     category: "Timeline",
     defaultBinding: { key: "r" },
   },
+  {
+    id: "add-marker",
+    label: "Add Timeline Marker",
+    category: "Timeline",
+    defaultBinding: { key: "m" },
+  },
   // Track Operations
   {
     id: "toggle-track-lock",
