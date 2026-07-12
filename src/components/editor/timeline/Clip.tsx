@@ -6,6 +6,7 @@ import { getPlaybackClock, useTransportControls } from "@/hooks/usePlaybackClock
 import type { Clip as ClipType, MediaAsset } from "@/types";
 import { ClipFilmstrip } from "./ClipFilmstrip";
 import { TimelineWaveform } from "./TimelineWaveform";
+import { AudioEnvelopeEditor } from "./AudioEnvelopeEditor";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
@@ -736,6 +737,9 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
         </div>
       )}
 
+      {/* Audio Envelope Editor - overlay for clips with audio */}
+      {(isClipAudio || isClipVideo) && <AudioEnvelopeEditor clip={clip} clipWidthPx={width} pixelsPerSecond={pixelsPerSecond} />}
+
       {/* Right trim handle */}
       <div
         data-testid={`clip-${clip.id}-resize-right`}
@@ -769,6 +773,11 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
 const arePropsEqual = (prevProps: ClipProps, nextProps: ClipProps) => {
   // Check if critical clip properties changed
   if (prevProps.clip.id !== nextProps.clip.id || prevProps.clip.startTime !== nextProps.clip.startTime || prevProps.clip.duration !== nextProps.clip.duration || prevProps.clip.trimIn !== nextProps.clip.trimIn || prevProps.clip.trimOut !== nextProps.clip.trimOut || prevProps.clip.trackId !== nextProps.clip.trackId) {
+    return false;
+  }
+
+  // Check audio envelope properties
+  if (prevProps.clip.volume !== nextProps.clip.volume || prevProps.clip.fadeIn !== nextProps.clip.fadeIn || prevProps.clip.fadeOut !== nextProps.clip.fadeOut) {
     return false;
   }
 
