@@ -13,64 +13,147 @@ export class FiltersApi {
    * Get filters manifest with category counts
    */
   static async getManifest(): Promise<{ categories: Array<{ id: string; name: string; count: number }>; totalFilters: number }> {
-    const response = await fetch(`${API_BASE_URL}/filters/manifest`, {
-      headers: getApiHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch filters manifest: ${response.statusText}`);
+    try {
+      const response = await fetch(`${API_BASE_URL}/filters/manifest`, {
+        headers: getApiHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        console.error(`[FiltersApi] Failed to fetch manifest:`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      console.error(`[FiltersApi] Exception fetching manifest:`, error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Network error: ${String(error)}`);
     }
-    return response.json();
   }
 
   /**
    * Get all filter categories
    */
   static async getCategories(): Promise<FilterCategory[]> {
-    const response = await fetch(`${API_BASE_URL}/filters/categories`, {
-      headers: getApiHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch filter categories: ${response.statusText}`);
+    try {
+      const response = await fetch(`${API_BASE_URL}/filters/categories`, {
+        headers: getApiHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        console.error(`[FiltersApi] Failed to fetch categories:`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      console.error(`[FiltersApi] Exception fetching categories:`, error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Network error: ${String(error)}`);
     }
-    return response.json();
   }
 
   /**
    * Get filters by category
    */
   static async getByCategory(category: string): Promise<FilterAsset[]> {
-    const response = await fetch(`${API_BASE_URL}/filters/${category}`, {
-      headers: getApiHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch filters for category ${category}: ${response.statusText}`);
+    try {
+      const response = await fetch(`${API_BASE_URL}/filters/${category}`, {
+        headers: getApiHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        console.error(`[FiltersApi] Failed to fetch category ${category}:`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log(`[FiltersApi] Successfully loaded ${data.length} filters for category: ${category}`);
+      return data;
+    } catch (error) {
+      console.error(`[FiltersApi] Exception fetching category ${category}:`, error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Network error: ${String(error)}`);
     }
-    return response.json();
   }
 
   /**
    * Get a specific filter by category and ID
    */
   static async getById(category: string, id: string): Promise<FilterAsset> {
-    const response = await fetch(`${API_BASE_URL}/filters/${category}/${id}`, {
-      headers: getApiHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch filter ${id}: ${response.statusText}`);
+    try {
+      const response = await fetch(`${API_BASE_URL}/filters/${category}/${id}`, {
+        headers: getApiHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        console.error(`[FiltersApi] Failed to fetch filter ${id}:`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      console.error(`[FiltersApi] Exception fetching filter ${id}:`, error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Network error: ${String(error)}`);
     }
-    return response.json();
   }
 
   /**
    * Search filters
    */
   static async search(query: string): Promise<FilterAsset[]> {
-    const response = await fetch(`${API_BASE_URL}/filters/search?q=${encodeURIComponent(query)}`, {
-      headers: getApiHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to search filters: ${response.statusText}`);
+    try {
+      const response = await fetch(`${API_BASE_URL}/filters/search?q=${encodeURIComponent(query)}`, {
+        headers: getApiHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        console.error(`[FiltersApi] Failed to search filters:`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+          query,
+        });
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      console.error(`[FiltersApi] Exception searching filters:`, error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Network error: ${String(error)}`);
     }
-    return response.json();
   }
 }

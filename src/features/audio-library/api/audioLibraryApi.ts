@@ -39,30 +39,57 @@ const BASE = getApiBaseUrl();
 export const AUDIO_LIBRARY_CATEGORIES: AudioLibraryCategory[] = ["music", "cinematic", "upbeat", "lo-fi", "hip-hop", "ambient", "sfx"];
 
 export const AudioLibraryApi = {
-  // async getAudioIndex(): Promise<AudioLibraryItem[]> {
-  //   const res = await fetch(`${BASE}/audio`, {
-  //     cache: "reload",
-  //     headers: getApiHeaders(),
-  //   });
-  //   if (!res.ok) throw new Error("Failed to load audio library");
-  //   return res.json();
-  // },
-
   async getAudioByCategory(category: AudioLibraryCategory): Promise<AudioLibraryItem[]> {
-    const res = await fetch(`${BASE}/audio/${category}`, {
-      cache: "reload",
-      headers: getApiHeaders(),
-    });
-    if (!res.ok) throw new Error(`Failed to load audio category: ${category}`);
-    return res.json();
+    try {
+      const res = await fetch(`${BASE}/audio/${category}`, {
+        headers: getApiHeaders(),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => res.statusText);
+        console.error(`[AudioLibraryApi] Failed to load audio category ${category}:`, {
+          status: res.status,
+          statusText: res.statusText,
+          error: errorText,
+        });
+        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
+      }
+
+      const data = await res.json();
+      console.log(`[AudioLibraryApi] Successfully loaded ${data.length} audio items for category: ${category}`);
+      return data;
+    } catch (error) {
+      console.error(`[AudioLibraryApi] Exception loading audio category ${category}:`, error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Network error: ${String(error)}`);
+    }
   },
 
   async getAudioAsset(category: string, id: string): Promise<AudioLibraryItem> {
-    const res = await fetch(`${BASE}/audio/${category}/${id}`, {
-      cache: "reload",
-      headers: getApiHeaders(),
-    });
-    if (!res.ok) throw new Error(`Failed to load audio asset: ${id}`);
-    return res.json();
+    try {
+      const res = await fetch(`${BASE}/audio/${category}/${id}`, {
+        headers: getApiHeaders(),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => res.statusText);
+        console.error(`[AudioLibraryApi] Failed to load audio asset ${id}:`, {
+          status: res.status,
+          statusText: res.statusText,
+          error: errorText,
+        });
+        throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`);
+      }
+
+      return res.json();
+    } catch (error) {
+      console.error(`[AudioLibraryApi] Exception loading audio asset ${id}:`, error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Network error: ${String(error)}`);
+    }
   },
 };
