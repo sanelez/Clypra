@@ -42,7 +42,6 @@ export const AudioLibraryApi = {
   async getAudioByCategory(category: AudioLibraryCategory): Promise<AudioLibraryItem[]> {
     try {
       const res = await fetch(`${BASE}/audio/${category}`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
 
@@ -71,7 +70,6 @@ export const AudioLibraryApi = {
   async getAudioAsset(category: string, id: string): Promise<AudioLibraryItem> {
     try {
       const res = await fetch(`${BASE}/audio/${category}/${id}`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
 

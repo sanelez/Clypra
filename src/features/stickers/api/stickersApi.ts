@@ -21,7 +21,6 @@ export const StickersApi = {
   async getStickersIndex(): Promise<StickerItem[]> {
     try {
       const res = await fetch(`${BASE}/stickers`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
 
@@ -48,7 +47,6 @@ export const StickersApi = {
   async getStickersByCategory(category: StickerCategory): Promise<StickerItem[]> {
     try {
       const res = await fetch(`${BASE}/stickers/${category}`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
 
@@ -77,7 +75,6 @@ export const StickersApi = {
   async getSticker(category: string, id: string): Promise<StickerItem> {
     try {
       const res = await fetch(`${BASE}/stickers/${category}/${id}`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
 

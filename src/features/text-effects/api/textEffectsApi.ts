@@ -46,7 +46,6 @@ export const TextEffectsApi = {
   async getEffectsIndex(): Promise<TextEffectSummary[]> {
     try {
       const res = await fetch(`${BASE}/text-effects`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
 
@@ -73,7 +72,6 @@ export const TextEffectsApi = {
   async getEffectsByCategory(category: string): Promise<TextEffectSummary[]> {
     try {
       const res = await fetch(`${BASE}/text-effects/${category}`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
 
@@ -108,7 +106,6 @@ export const TextEffectsApi = {
       data = this._effectsCache.get(cacheKey)!;
     } else {
       const res = await fetch(`${BASE}/text-effects/${category}/${id}`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
       if (!res.ok) throw new Error(`Failed to load heavy configuration for effect: ${id}`);
@@ -133,7 +130,6 @@ export const TextEffectsApi = {
   // 3. Fetch summaries for template category tab picker UI
   async getTemplatesIndex(): Promise<TemplateDefinition[]> {
     const res = await fetch(`${BASE}/text-templates`, {
-      cache: "reload",
       headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error("Failed to load templates index");
@@ -142,7 +138,6 @@ export const TextEffectsApi = {
 
   async getTemplatesByCategory(category: string): Promise<TemplateDefinition[]> {
     const res = await fetch(`${BASE}/text-templates/${category}`, {
-      cache: "reload",
       headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load templates for category: ${category}`);
@@ -157,7 +152,6 @@ export const TextEffectsApi = {
     }
 
     const res = await fetch(`${BASE}/text-templates/${category}/${id}`, {
-      cache: "reload",
       headers: getApiHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to load template payload for: ${id}`);

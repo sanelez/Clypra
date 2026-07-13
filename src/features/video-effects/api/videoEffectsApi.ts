@@ -28,7 +28,6 @@ export class VideoEffectsApi {
   static async getVideoEffectsManifest(): Promise<any> {
     try {
       const res = await fetch(`${BASE}/video-effects/manifest`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
 
@@ -58,7 +57,6 @@ export class VideoEffectsApi {
   static async getBodyEffectsManifest(): Promise<any> {
     try {
       const res = await fetch(`${BASE}/body-effects/manifest`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
 
@@ -87,7 +85,6 @@ export class VideoEffectsApi {
    */
   static async getRendererEffects(): Promise<EffectPreset[]> {
     const res = await fetch(`${BASE}/body-effects/video`, {
-      cache: "reload",
       headers: getApiHeaders(),
     });
 
@@ -104,7 +101,6 @@ export class VideoEffectsApi {
   static async getRendererEffectsByCategory(category: string): Promise<EffectPreset[]> {
     try {
       const res = await fetch(`${BASE}/video-effects/${category}`, {
-        cache: "reload",
         headers: getApiHeaders(),
       });
 
@@ -133,7 +129,6 @@ export class VideoEffectsApi {
    */
   static async getRendererEffectById(id: string): Promise<EffectPreset> {
     const res = await fetch(`${BASE}/body-effects/${id}`, {
-      cache: "reload",
       headers: getApiHeaders(),
     });
 
@@ -193,7 +188,6 @@ export class VideoEffectsApi {
    */
   static async getBodyEffects(): Promise<EffectPreset[]> {
     const res = await fetch(`${BASE}/body-effects/body`, {
-      cache: "reload",
       headers: getApiHeaders(),
     });
 
@@ -209,7 +203,6 @@ export class VideoEffectsApi {
    */
   static async getEffectById(id: string): Promise<EffectPreset> {
     const res = await fetch(`${BASE}/body-effects/${id}`, {
-      cache: "reload",
       headers: getApiHeaders(),
     });
 
