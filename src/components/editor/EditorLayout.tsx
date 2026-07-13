@@ -13,6 +13,7 @@ import { autoAdaptSequenceForFirstVisualClip } from "@/lib/sequence/sequenceAuto
 import { DEFAULT_PLACEMENT_POLICY, resolveAddToTimelinePlacement, resolveDefaultFitModeForAsset } from "@/lib/timeline/placementPolicy";
 import { getPlaybackClock } from "@/hooks/usePlaybackClock";
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { platform } from "@/core/platform";
 import { MobileEditorLayout } from "./MobileEditorLayout";
 import type { MediaAsset, TrackType } from "@/types";
 import { useUIStore } from "@/store/uiStore";
@@ -198,10 +199,8 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({ onRequestClose }) =>
       // Convert relative cache path to absolute path
       // cachedFile.localPath is relative to AppCache (e.g., "audio-library/filename.wav")
       (async () => {
-        const { appCacheDir } = await import("@tauri-apps/api/path");
-        const { join } = await import("@tauri-apps/api/path");
-        const appCache = await appCacheDir();
-        const absolutePath = await join(appCache, cachedFile.localPath);
+        const appCache = await platform.appCacheDir();
+        const absolutePath = await platform.joinPaths(appCache, cachedFile.localPath);
 
         // Use local cached file path
         const mediaAsset: MediaAsset = {
@@ -256,8 +255,7 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({ onRequestClose }) =>
       }
 
       (async () => {
-        const { appCacheDir, join } = await import("@tauri-apps/api/path");
-        const appCache = await appCacheDir();
+        const appCache = await platform.appCacheDir();
 
         // Stickers are Lottie-only now
         const relativePath = cachedSticker.localImagePath || "";
@@ -265,8 +263,8 @@ export const EditorLayout: React.FC<EditorLayoutProps> = ({ onRequestClose }) =>
           return;
         }
 
-        const absolutePath = await join(appCache, relativePath);
-        const absoluteAnimationPath = cachedSticker.localAnimationPath ? await join(appCache, cachedSticker.localAnimationPath) : undefined;
+        const absolutePath = await platform.joinPaths(appCache, relativePath);
+        const absoluteAnimationPath = cachedSticker.localAnimationPath ? await platform.joinPaths(appCache, cachedSticker.localAnimationPath) : undefined;
 
         const mediaAsset: MediaAsset = {
           id: `sticker-${item.id}`,
