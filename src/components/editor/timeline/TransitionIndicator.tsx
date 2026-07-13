@@ -35,7 +35,7 @@ export const TransitionIndicator: React.FC<TransitionIndicatorProps> = ({ transi
   const cutPoint = fromClip.startTime + fromClip.duration;
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 && e.pointerType === "mouse") return;
     e.stopPropagation();
 
     selectTransition(transition.id);

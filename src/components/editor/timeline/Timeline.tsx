@@ -301,7 +301,7 @@ export const Timeline: React.FC = () => {
 
   const handleTimelinePointerDownCapture = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 && event.pointerType === "mouse") return;
       if (dragState?.draggingClipId) return;
       const target = event.target as HTMLElement | null;
       if (!target) return;

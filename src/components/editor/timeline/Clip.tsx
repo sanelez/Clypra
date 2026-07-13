@@ -100,7 +100,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
   // Handle pointer-based drag
   const handlePointerDown = (e: React.PointerEvent) => {
     // Ignore if locked, resizing, or not left button
-    if (locked || isResizing || e.button !== 0) return;
+    if (locked || isResizing || (e.button !== 0 && e.pointerType === "mouse")) return;
 
     // Check if clicking resize handle
     if (isPointerOnResizeHandle(e.target)) {
@@ -191,7 +191,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
   const handleResizeStart = (e: React.PointerEvent, side: "left" | "right") => {
     e.stopPropagation();
     e.preventDefault();
-    if (e.button !== 0) {
+    if (e.button !== 0 && e.pointerType === "mouse") {
       traceResize("❌ handleResizeStart BLOCKED - not left button", { button: e.button });
       return;
     }
