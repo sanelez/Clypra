@@ -17,6 +17,38 @@ export class CapacitorPlatformAdapter implements PlatformInterface {
     return path;
   }
 
+  async saveAndShareVideo(blob: Blob, filename: string): Promise<string> {
+    const { Filesystem, Directory } = await import("@capacitor/filesystem");
+    const { Share } = await import("@capacitor/share");
+
+    const blobToBase64 = (b: Blob): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = reject;
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const base64 = dataUrl.split(",")[1];
+          resolve(base64);
+        };
+        reader.readAsDataURL(b);
+      });
+    };
+
+    const base64 = await blobToBase64(blob);
+    const writeResult = await Filesystem.writeFile({
+      path: filename,
+      data: base64,
+      directory: Directory.Cache,
+    });
+
+    await Share.share({
+      url: writeResult.uri,
+      title: "Export Video",
+    });
+
+    return writeResult.uri;
+  }
+
   async appDataDir(): Promise<string> {
     return "projects";
   }

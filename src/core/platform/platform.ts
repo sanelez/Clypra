@@ -21,6 +21,8 @@ export interface PlatformInterface {
 
   convertFileSrc(path: string): string;
 
+  saveAndShareVideo(blob: Blob, filename: string): Promise<string>;
+
   // File System & Paths
   appDataDir(): Promise<string>;
   appCacheDir(): Promise<string>;

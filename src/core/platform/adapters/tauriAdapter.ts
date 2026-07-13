@@ -19,6 +19,10 @@ export class TauriPlatformAdapter implements PlatformInterface {
     return convertFileSrc(path);
   }
 
+  async saveAndShareVideo(blob: Blob, filename: string): Promise<string> {
+    throw new Error("Sharing is only supported on mobile devices.");
+  }
+
   async appDataDir(): Promise<string> {
     const { appDataDir } = await import("@tauri-apps/api/path");
     return appDataDir();
