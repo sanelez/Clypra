@@ -145,7 +145,6 @@ const App = () => {
       setTimeout(async () => {
         try {
           const { generateId } = await import("@/lib/utils/id");
-          const { convertFileSrc } = await import("@tauri-apps/api/core");
 
           for (const path of initialClipPaths) {
             try {
@@ -155,7 +154,7 @@ const App = () => {
               // video element can actually load the file in the Tauri WKWebView sandbox.
               let displayPath = path;
               try {
-                displayPath = convertFileSrc(path);
+                displayPath = platform.convertFileSrc(path);
               } catch {
                 // Not running inside Tauri — keep the raw path (dev/web fallback)
               }
